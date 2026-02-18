@@ -1,0 +1,113 @@
+version: "3.9"
+
+services:
+  # ── Orchestrator (NestJS Backend) ──────────────────────────
+  orchestrator:
+    build:
+      context: ./orchestrator
+      dockerfile: Dockerfile
+    container_name: rail_orchestrator
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - MOTIS_HOST=motis
+      - REDIS_URL=redis://redis:6379
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=stations
+      - DB_USER=railrouter
+      - DB_PASSWORD=${DB_PASSWORD:-changeme_in_production}
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ── MOTIS Routing Engine ───────────────────────────────────
+  motis:
+    image: ghcr.io/motis-project/motis:latest
+    container_name: motis_backbone
+    restart: unless-stopped
+    shm_size: "8gb"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data/gtfs_filtered:/input/gtfs:ro
+      - ./data/osm:/input/osm:ro
+      - ./config/motis-config.ini:/motis/config.ini:ro
+    command:
+      - --config=/motis/config.ini
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ── Redis (Caching + Rate Limiting) ────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: rail_redis
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning --maxmemory 512mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ── PostgreSQL + PostGIS (Station Resolution) ──────────────
+  db:
+    image: postgis/postgis:16-3.4-alpine
+    container_name: rail_db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=stations
+      - POSTGRES_USER=railrouter
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-changeme_in_production}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./config/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U railrouter -d stations"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ── Frontend (Vite + React — Dev Mode) ─────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: rail_frontend
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+    environment:
+      - VITE_API_URL=http://localhost:3000
+    depends_on:
+      orchestrator:
+        condition: service_healthy
+
+volumes:
+  pg_data:
+  redis_data:
