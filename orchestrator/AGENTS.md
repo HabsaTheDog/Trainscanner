@@ -51,8 +51,8 @@ Error contract:
 ## State machine contract
 
 - Valid states: `idle|switching|importing|restarting|ready|failed`.
-- Persist every transition to `state/gtfs-switch-status.json`.
-- Persist active profile marker to `state/active-gtfs.json` (legacy config path auto-migrates).
+- Persist every transition to `state/gtfs-switch-status.json` (Note: Planned migration to Postgres `system_state` table; see `docs/state_migration_prompt.md`).
+- Persist active profile marker to `state/active-gtfs.json` (legacy config path auto-migrates) (Note: Planned migration to Postgres `system_state` table).
 - Prevent concurrent switches with lock file and clear stale locks when safe.
 - Switch requests are idempotent for same in-flight/active profile (`reused`/`noop`, `runId`).
 - Keep static profile activation behavior backward-compatible while supporting runtime descriptor profiles (`runtime.mode=canonical-export`).
@@ -75,5 +75,5 @@ Error contract:
 - Per-`job_type` running limits come from `PIPELINE_JOB_MAX_CONCURRENT` and must be enforced atomically in DB claim logic.
 - Running-slot races while claiming `status=running` must be surfaced as `JOB_BACKPRESSURE`.
 - Do not couple DACH retrieval/ingest/canonical build into `/api/routes` or GTFS switch flow in this MVP slice.
-- Do not couple curation workflow, OJP feeder probing, or stitching prototype into `/api/routes` or GTFS switch flow in this MVP slice.
+- Do not couple curation workflow, OJP feeder probing, or stitching prototype into `/api/routes` or GTFS switch flow in this MVP slice. (Note: A new Frontend Curation Tool is planned; see `docs/curation_tool_prompt.md`).
 - Canonical -> GTFS runtime export is script-driven in `scripts/qa/`; orchestrator consumes produced artifacts only.

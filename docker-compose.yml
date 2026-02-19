@@ -12,7 +12,7 @@ services:
     volumes:
       - postgis_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      test: [ "CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB" ]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -54,6 +54,12 @@ services:
       MOTIS_CONTAINER_NAME: motis
       MOTIS_READY_TIMEOUT_MS: 180000
       MOTIS_HEALTH_POLL_INTERVAL_MS: 2000
+      CANONICAL_DB_MODE: direct
+      CANONICAL_DB_HOST: trainscanner-postgis
+      CANONICAL_DB_PORT: 5432
+      CANONICAL_DB_USER: ${CANONICAL_DB_USER:-trainscanner}
+      CANONICAL_DB_PASSWORD: ${CANONICAL_DB_PASSWORD:-trainscanner}
+      CANONICAL_DB_NAME: ${CANONICAL_DB_NAME:-trainscanner}
     volumes:
       - ./frontend:/app/frontend:ro
       - ./config:/app/config

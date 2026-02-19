@@ -1,6 +1,6 @@
 FROM node:20-alpine
 
-RUN apk add --no-cache unzip
+RUN apk add --no-cache unzip postgresql16-client
 
 WORKDIR /app
 COPY package.json ./

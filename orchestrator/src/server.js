@@ -442,6 +442,21 @@ async function handleApi(req, res, url, requestLogger) {
     return;
   }
 
+  if (req.method === 'GET' && url.pathname === '/api/qa/queue') {
+    const { getReviewQueue } = require('./domains/qa/api');
+    const data = await getReviewQueue(url);
+    sendJson(res, 200, data);
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/qa/overrides') {
+    const body = await parseJsonBody(req);
+    const { postOverride } = require('./domains/qa/api');
+    const result = await postOverride(body);
+    sendJson(res, 200, result);
+    return;
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/gtfs/profiles') {
     const payload = await switcher.getProfilesWithMeta();
     sendJson(res, 200, payload);
@@ -497,11 +512,11 @@ async function handleApi(req, res, url, requestLogger) {
 
     const filtered = qFold
       ? bucketRows.filter(
-          (station) =>
-            station.nameFold.includes(qFold) ||
-            station.valueFold.includes(qFold) ||
-            station.id.includes(query)
-        )
+        (station) =>
+          station.nameFold.includes(qFold) ||
+          station.valueFold.includes(qFold) ||
+          station.id.includes(query)
+      )
       : index.stations;
 
     sendJson(res, 200, {
@@ -531,12 +546,12 @@ async function handleApi(req, res, url, requestLogger) {
     try {
       const configStat = await fs.stat(path.join(motisDataDir, 'config.yml'));
       motisData.configExists = configStat.isFile();
-    } catch {}
+    } catch { }
 
     try {
       const gtfsStat = await fs.stat(config.motisActiveGtfsPath);
       motisData.activeGtfsExists = gtfsStat.isFile();
-    } catch {}
+    } catch { }
 
     sendJson(res, 200, {
       status: 'ok',
@@ -706,28 +721,6 @@ const server = http.createServer(async (req, res) => {
 async function ensureBootstrapFiles() {
   await fs.mkdir(config.stateDir, { recursive: true });
   await fs.mkdir(config.configDir, { recursive: true });
-
-  try {
-    await fs.access(config.switchStatusPath);
-  } catch {
-    await fs.writeFile(
-      config.switchStatusPath,
-      JSON.stringify(
-        {
-          state: 'idle',
-          activeProfile: null,
-          requestedProfile: null,
-          runId: null,
-          message: 'No switch executed yet',
-          updatedAt: new Date().toISOString(),
-          error: null
-        },
-        null,
-        2
-      ) + '\n',
-      'utf8'
-    );
-  }
 
   const motisDataDir = path.dirname(config.motisActiveGtfsPath);
   const startupChecks = [

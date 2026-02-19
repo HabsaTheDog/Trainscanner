@@ -71,10 +71,10 @@ Active profile runtime state is tracked in `state/active-gtfs.json`.
 
 ## Runtime files
 
-- `state/gtfs-switch-status.json`: switch status (`idle|switching|importing|restarting|ready|failed`) with `runId` + `requestedProfile`
+- `state/gtfs-switch-status.json`: switch status (`idle|switching|importing|restarting|ready|failed`) with `runId` + `requestedProfile` (Note: Planned migration to Postgres `system_state` table; see `docs/state_migration_prompt.md`)
 - `state/gtfs-switch.lock`: concurrency lock
 - `state/gtfs-switch.log`: step logs and failures
-- `state/active-gtfs.json`: active GTFS profile marker used by orchestrator/scripts
+- `state/active-gtfs.json`: active GTFS profile marker used by orchestrator/scripts (Note: Planned migration to Postgres `system_state` table)
 - `data/motis/`: generated MOTIS runtime data
 
 ## API
@@ -505,6 +505,7 @@ This workflow is separate from runtime `/api/routes`.
 
 - Queue table: `canonical_review_queue`
 - Override table: `canonical_station_overrides`
+- **Planned Curation Tool**: A Frontend Curation Tool is planned to replace manual CSV curation (see `docs/curation_tool_prompt.md`).
 
 Build review queue items from canonical data:
 

@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DACH Station Curation Tool</title>
+    <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.2.0/dist/maplibre-gl.css" />
+    <link rel="stylesheet" href="/styles.css" />
+</head>
+
+<body>
+    <div class="curation-container">
+        <aside class="issue-list">
+            <div class="row">
+                <h2>Review Queue</h2>
+                <a href="/" style="text-decoration:none; color:var(--accent);">Back to Home</a>
+            </div>
+            <p class="muted">Review duplicate and overlapping stations.</p>
+
+            <div class="row">
+                <label for="countryFilter">Country</label>
+                <select id="countryFilter">
+                    <option value="">All</option>
+                    <option value="DE">DE</option>
+                    <option value="AT">AT</option>
+                    <option value="CH">CH</option>
+                </select>
+                <button id="refreshBtn" type="button">Refresh</button>
+            </div>
+
+            <div id="queueList">Loading...</div>
+        </aside>
+
+        <main class="map-pane">
+            <div id="curationMapStatus" class="muted map-status" style="padding: 10px;">Select an issue to view
+                locations.</div>
+            <div id="curationMap" class="curation-map" aria-label="Curation map"></div>
+        </main>
+    </div>
+
+    <dialog id="renameDialog" style="border: 1px solid var(--line); border-radius: 8px; padding: 20px;">
+        <form id="renameForm" method="dialog">
+            <h3 style="margin-top:0">Rename Canonical Station</h3>
+            <p class="muted">Enter a new name for the station.</p>
+            <div style="margin-bottom: 12px;">
+                <input type="text" id="newNameInput" required style="width:100%" />
+            </div>
+            <div style="display: flex; gap: 8px; justify-content: flex-end;">
+                <button type="button" class="btn-secondary" id="cancelRenameBtn">Cancel</button>
+                <button type="submit">Rename</button>
+            </div>
+        </form>
+    </dialog>
+
+    <script src="https://unpkg.com/maplibre-gl@5.2.0/dist/maplibre-gl.js"></script>
+    <script src="/config.js"></script>
+    <script src="/curation.js"></script>
+</body>
+
+</html>

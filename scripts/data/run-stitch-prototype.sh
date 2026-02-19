@@ -176,6 +176,18 @@ FROM (
   report_json="$(node "${node_args[@]}")"
 
   log "Wrote report: $OUTPUT_JSON"
+
+  if [[ -f "$OUTPUT_JSON" ]]; then
+    local escaped_report
+    escaped_report="$(jq -c . "$OUTPUT_JSON" | sed -e "s/'/''/g")"
+    db_psql -c "
+      INSERT INTO system_state (key, value)
+      VALUES ('stitch_prototype_report', '${escaped_report}'::jsonb)
+      ON CONFLICT (key) DO UPDATE
+      SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP;
+    " >/dev/null 2>&1 || log "Warning: Failed to persist report to system_state DB"
+  fi
+
   printf '%s\n' "$report_json" | jq '{generatedAt, inputSummary, rankedCount: (.rankedItineraries | length), topFlags: [.rankedItineraries[]?.flags]}'
 }
 

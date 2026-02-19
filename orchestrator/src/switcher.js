@@ -7,6 +7,7 @@ const { normalizeProfiles, resolveProfileArtifact } = require('./profile-resolve
 const { AppError, toAppError } = require('./core/errors');
 const { generateId } = require('./core/ids');
 const { VALID_SWITCH_STATES, isInFlightState } = require('./domains/switch-runtime/status');
+const { getSystemState, setSystemState } = require('./data/postgis/system-state');
 
 async function readJson(filePath, fallback) {
   try {
@@ -87,19 +88,26 @@ class GtfsSwitcher {
   }
 
   async getStatus() {
-    return readJson(this.config.switchStatusPath, {
-      state: 'idle',
-      activeProfile: null,
-      requestedProfile: null,
-      runId: null,
-      message: 'No switch executed yet',
-      updatedAt: nowIso(),
-      error: null
-    });
+    let state = await getSystemState('gtfs_switch_status', null);
+    if (!state) {
+      state = await readJson(this.config.switchStatusPath, {
+        state: 'idle',
+        activeProfile: null,
+        requestedProfile: null,
+        runId: null,
+        message: 'No switch executed yet',
+        updatedAt: nowIso(),
+        error: null
+      });
+    }
+    return state;
   }
 
   async readActiveProfile() {
-    const next = await readJson(this.config.activeProfilePath, null);
+    let next = await getSystemState('active_gtfs', null);
+    if (!next) {
+      next = await readJson(this.config.activeProfilePath, null);
+    }
     if (next && typeof next === 'object') {
       return next;
     }
@@ -111,12 +119,21 @@ class GtfsSwitcher {
 
     const legacy = await readJson(legacyPath, { activeProfile: null });
     if (legacy && typeof legacy === 'object' && legacy.activeProfile) {
-      await writeJsonAtomic(this.config.activeProfilePath, legacy);
-      this.logger.info('Migrated legacy active profile state into state directory', {
-        step: 'active_profile_migration',
-        from: legacyPath,
-        to: this.config.activeProfilePath
-      });
+      try {
+        await setSystemState('active_gtfs', legacy);
+        this.logger.info('Migrated legacy active profile state into system_state', {
+          step: 'active_profile_migration',
+          from: legacyPath
+        });
+      } catch (err) {
+        this.logger.warn('Failed to migrate legacy active profile state to DB, falling back to FS', { error: err.message });
+        await writeJsonAtomic(this.config.activeProfilePath, legacy);
+        this.logger.info('Migrated legacy active profile state into state directory', {
+          step: 'active_profile_migration',
+          from: legacyPath,
+          to: this.config.activeProfilePath
+        });
+      }
     }
     return legacy;
   }
@@ -135,7 +152,14 @@ class GtfsSwitcher {
       ...next,
       updatedAt: nowIso()
     };
-    await writeJsonAtomic(this.config.switchStatusPath, payload);
+
+    try {
+      await setSystemState('gtfs_switch_status', payload);
+    } catch (err) {
+      this.logger.warn('Failed to persist switch status to system_state, falling back to FS', { error: err.message });
+      await writeJsonAtomic(this.config.switchStatusPath, payload);
+    }
+
     this.logger.info('GTFS switch status updated', {
       step: 'status',
       state: payload.state,
@@ -297,14 +321,21 @@ class GtfsSwitcher {
       await fs.mkdir(path.dirname(this.config.motisActiveGtfsPath), { recursive: true });
       await fs.copyFile(sourceZipPath, this.config.motisActiveGtfsPath);
 
-      await writeJsonAtomic(this.config.activeProfilePath, {
+      const payload = {
         activeProfile: profileName,
         zipPath: resolved.zipPath,
         sourceType: resolved.sourceType,
         runtime: resolved.runtime || null,
         activatedAt: nowIso(),
         runId
-      });
+      };
+
+      try {
+        await setSystemState('active_gtfs', payload);
+      } catch (err) {
+        this.logger.warn('Failed to persist active_gtfs down to DB, falling back to FS', { error: err.message });
+        await writeJsonAtomic(this.config.activeProfilePath, payload);
+      }
 
       await this.setStatus({
         state: 'restarting',

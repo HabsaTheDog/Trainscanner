@@ -1,83 +1,73 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MOTIS GTFS Debug MVP</title>
-    <link
-      rel="stylesheet"
-      href="https://unpkg.com/maplibre-gl@5.2.0/dist/maplibre-gl.css"
-    />
-    <link rel="stylesheet" href="/styles.css" />
-  </head>
-  <body>
-    <main class="page">
-      <section class="card">
-        <h1>MOTIS GTFS Profile Switcher</h1>
-        <p class="muted">Switch GTFS runtime profiles without taking down the frontend.</p>
 
-        <div class="row">
-          <label for="profileSelect">Profile</label>
-          <select id="profileSelect"></select>
-          <button id="activateBtn" type="button">Activate</button>
-        </div>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MOTIS GTFS Debug MVP</title>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.2.0/dist/maplibre-gl.css" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
 
-        <div class="status-row">
-          <span>System status</span>
-          <span id="statusBadge" class="badge idle">idle</span>
-        </div>
-        <pre id="statusMessage" class="status-msg">Loading...</pre>
+<body>
+  <main class="page">
+    <section class="card">
+      <h1>MOTIS GTFS Profile Switcher</h1>
+      <p class="muted">Switch GTFS runtime profiles without taking down the frontend.</p>
+      <div style="margin-bottom: 24px;">
+        <a href="/curation.html" style="font-weight: 600; color: var(--accent); text-decoration: none;">&rarr; Open QA
+          Curation Dashboard</a>
+      </div>
+
+      <div class="row">
+        <label for="profileSelect">Profile</label>
+        <select id="profileSelect"></select>
+        <button id="activateBtn" type="button">Activate</button>
+      </div>
+
+      <div class="status-row">
+        <span>System status</span>
+        <span id="statusBadge" class="badge idle">idle</span>
+      </div>
+      <pre id="statusMessage" class="status-msg">Loading...</pre>
+    </section>
+
+    <section class="card">
+      <h2>Route Query</h2>
+      <form id="routeForm" class="route-form">
+        <label for="origin">Origin</label>
+        <input id="origin" name="origin" type="text" list="stationSuggestions" placeholder="e.g. Berlin Hbf [300099]"
+          required />
+
+        <label for="destination">Destination</label>
+        <input id="destination" name="destination" type="text" list="stationSuggestions"
+          placeholder="e.g. München Hbf [609678]" required />
+
+        <datalist id="stationSuggestions"></datalist>
+
+        <label for="datetime">Datetime</label>
+        <input id="datetime" name="datetime" type="datetime-local" required />
+
+        <button id="routeBtn" type="submit">Search Route</button>
+      </form>
+
+      <section id="routeSummary" class="route-summary">
+        <p class="muted">No query executed yet.</p>
       </section>
 
-      <section class="card">
-        <h2>Route Query</h2>
-        <form id="routeForm" class="route-form">
-          <label for="origin">Origin</label>
-          <input
-            id="origin"
-            name="origin"
-            type="text"
-            list="stationSuggestions"
-            placeholder="e.g. Berlin Hbf [300099]"
-            required
-          />
+      <div id="routeMapStatus" class="muted map-status">Map loading...</div>
+      <div id="routeMap" class="route-map" aria-label="Route map"></div>
 
-          <label for="destination">Destination</label>
-          <input
-            id="destination"
-            name="destination"
-            type="text"
-            list="stationSuggestions"
-            placeholder="e.g. München Hbf [609678]"
-            required
-          />
+      <details class="raw-section">
+        <summary>Raw response</summary>
+        <pre id="routeResult" class="result">No query executed yet.</pre>
+      </details>
+    </section>
+  </main>
 
-          <datalist id="stationSuggestions"></datalist>
+  <script src="https://unpkg.com/maplibre-gl@5.2.0/dist/maplibre-gl.js"></script>
+  <script src="/config.js"></script>
+  <script src="/app.js"></script>
+</body>
 
-          <label for="datetime">Datetime</label>
-          <input id="datetime" name="datetime" type="datetime-local" required />
-
-          <button id="routeBtn" type="submit">Search Route</button>
-        </form>
-
-        <section id="routeSummary" class="route-summary">
-          <p class="muted">No query executed yet.</p>
-        </section>
-
-        <div id="routeMapStatus" class="muted map-status">Map loading...</div>
-        <div id="routeMap" class="route-map" aria-label="Route map"></div>
-
-        <details class="raw-section">
-          <summary>Raw response</summary>
-          <pre id="routeResult" class="result">No query executed yet.</pre>
-        </details>
-      </section>
-    </main>
-
-    <script
-      src="https://unpkg.com/maplibre-gl@5.2.0/dist/maplibre-gl.js"
-    ></script>
-    <script src="/config.js"></script>
-    <script src="/app.js"></script>
-  </body>
 </html>

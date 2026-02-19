@@ -174,7 +174,7 @@ button:disabled {
   margin-top: 12px;
 }
 
-.raw-section > summary {
+.raw-section>summary {
   cursor: pointer;
   color: var(--muted);
   margin-bottom: 8px;
@@ -194,4 +194,82 @@ button:disabled {
   .route-map {
     height: 280px;
   }
+}
+
+/* Curation Dashboard */
+.curation-container {
+  max-width: 1400px;
+  margin: 24px auto;
+  padding: 0 16px;
+  display: grid;
+  grid-template-columns: 400px 1fr;
+  gap: 16px;
+  height: calc(100vh - 48px);
+}
+
+.issue-list {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px;
+  overflow-y: auto;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
+}
+
+.issue-item {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.issue-item:hover,
+.issue-item.active {
+  border-color: var(--accent);
+}
+
+.issue-item h3 {
+  margin: 0 0 8px 0;
+  font-size: 1rem;
+}
+
+.issue-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.issue-actions button {
+  flex: 1;
+  padding: 6px 12px;
+  font-size: 0.9rem;
+}
+
+.btn-secondary {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  color: var(--text);
+}
+
+.btn-danger {
+  background: var(--danger);
+  color: white;
+}
+
+.map-pane {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
+  display: flex;
+  flex-direction: column;
+}
+
+.curation-map {
+  flex: 1;
+  width: 100%;
 }

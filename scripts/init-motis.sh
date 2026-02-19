@@ -74,9 +74,9 @@ PROFILE_ARTIFACT_INFO="$(node "${ROOT_DIR}/orchestrator/src/cli/profile-runtime.
   exit 1
 }
 
-PROFILE_ZIP_RELATIVE="$(node -e 'const obj = JSON.parse(process.argv[1]); process.stdout.write(obj.zipPath || \"\");' "$PROFILE_ARTIFACT_INFO")"
-PROFILE_ZIP_ABSOLUTE="$(node -e 'const obj = JSON.parse(process.argv[1]); process.stdout.write(obj.absolutePath || \"\");' "$PROFILE_ARTIFACT_INFO")"
-PROFILE_SOURCE_TYPE="$(node -e 'const obj = JSON.parse(process.argv[1]); process.stdout.write(obj.sourceType || \"static\");' "$PROFILE_ARTIFACT_INFO")"
+PROFILE_ZIP_RELATIVE="$(node -e "const obj = JSON.parse(process.argv[1]); process.stdout.write(obj.zipPath || '');" "$PROFILE_ARTIFACT_INFO")"
+PROFILE_ZIP_ABSOLUTE="$(node -e "const obj = JSON.parse(process.argv[1]); process.stdout.write(obj.absolutePath || '');" "$PROFILE_ARTIFACT_INFO")"
+PROFILE_SOURCE_TYPE="$(node -e "const obj = JSON.parse(process.argv[1]); process.stdout.write(obj.sourceType || 'static');" "$PROFILE_ARTIFACT_INFO")"
 
 if [[ ! -f "$PROFILE_ZIP_ABSOLUTE" ]]; then
   echo "GTFS zip for profile '$PROFILE' not found: $PROFILE_ZIP_ABSOLUTE" >&2

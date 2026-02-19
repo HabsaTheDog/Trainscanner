@@ -25,10 +25,12 @@ Maintain and extend the MOTIS GTFS-switch MVP for fast dataset testing/debugging
 - `.github/workflows/ci-pr.yml`: fast PR quality gates (lint/contracts/unit+integration)
 - `.github/workflows/ci-nightly.yml`: full/nightly integration + e2e + report artifacts
 - `docker-compose.yml`: optional `postgis` service (`dach-data` profile) with named volume persistence
-- `state/`: switch lock, status, and logs
+- `state/`: switch lock, status, and logs (Note: Planned migration to Postgres `system_state` table; see `docs/state_migration_prompt.md`)
 - `data/motis/`: generated MOTIS runtime data
 - `data/gtfs/runtime/`: generated deterministic GTFS runtime artifacts
 - `reports/qa/`: generated QA/regression reports
+- `docs/curation_tool_prompt.md`: planned frontend Curation Tool prompt
+- `docs/state_migration_prompt.md`: planned Postgres state migration prompt
 
 ## Core behavior that must remain true
 
@@ -68,6 +70,7 @@ Maintain and extend the MOTIS GTFS-switch MVP for fast dataset testing/debugging
 - Review queue generation must be deterministic per scope (`latest` or explicit `--as-of`).
 - Manual overrides must be auditable in DB (`canonical_station_overrides`) and applied explicitly.
 - Queue/report/override tooling must remain script-driven and reversible.
+- A Frontend Curation Tool is planned to replace manual CSV curation (see `docs/curation_tool_prompt.md`).
 
 ## OJP + stitching boundary
 
