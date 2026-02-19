@@ -36,3 +36,4 @@
 - Preserve status vocabulary exactly.
 - Preserve route payload contract: `origin`, `destination`, `datetime`.
 - Treat active profile as API-owned runtime state (stored server-side in `state/active-gtfs.json`).
+- Keep DACH PostGIS/NeTEx canonical pipeline concerns out of frontend runtime unless explicitly requested.

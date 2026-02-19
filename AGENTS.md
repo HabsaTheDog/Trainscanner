@@ -11,8 +11,10 @@ Maintain and extend the MOTIS GTFS-switch MVP for fast dataset testing/debugging
 - `orchestrator/`: plain Node.js API server and switch workflow
 - `frontend/`: static UI (no framework) with route summary + MapLibre map
 - `config/`: GTFS profile definitions
-- `config/dach-data-sources.json`: official DACH source registry (raw retrieval only)
-- `scripts/data/`: DACH source fetch/verify scripts
+- `config/dach-data-sources.json`: official DACH source registry
+- `scripts/data/`: DACH source fetch/verify + NeTEx ingest/canonical scripts
+- `db/migrations/`: PostGIS schema migrations for canonical station layer
+- `docker-compose.yml`: optional `postgis` service (`dach-data` profile) with named volume persistence
 - `state/`: switch lock, status, and logs
 - `data/motis/`: generated MOTIS runtime data
 
@@ -26,13 +28,19 @@ Maintain and extend the MOTIS GTFS-switch MVP for fast dataset testing/debugging
 - Station autocomplete comes from active GTFS profile.
 - Route station inputs are normalized before MOTIS call.
 
-## DACH source layer contract
+## DACH data pipeline contract
 
-- Scope is discovery + retrieval of official raw sources only (no canonical ETL yet).
+- Scope includes:
+- discovery/retrieval of official raw DACH sources
+- NeTEx ingest into PostGIS staging
+- canonical station build with provenance mapping
 - Prefer NeTEx; GTFS requires explicit `fallbackReason` per source.
 - No runtime auto-fallback from NeTEx to GTFS for the same source.
 - Raw snapshots must stay local under `data/raw/<country>/<provider>/<format>/<YYYY-MM-DD>/`.
 - Each fetch run must write a `manifest.json` with retrieval metadata + hash.
+- PostGIS is mandatory for canonical layer (`canonical_stations`, `canonical_station_sources`).
+- Selected `format=netex` ingest must fail hard on parse/source errors (non-zero exit).
+- DACH scope remains `DE|AT|CH`.
 
 ## MOTIS routing contract in this MVP
 
@@ -58,6 +66,10 @@ Maintain and extend the MOTIS GTFS-switch MVP for fast dataset testing/debugging
 - `scripts/find-working-route.sh --max-attempts <n>`
 - `scripts/data/verify-dach-sources.sh`
 - `scripts/data/fetch-dach-sources.sh --as-of <YYYY-MM-DD>`
+- `scripts/data/db-migrate.sh`
+- `scripts/data/ingest-netex.sh --country <DE|AT|CH> --as-of <YYYY-MM-DD>`
+- `scripts/data/build-canonical-stations.sh --as-of <YYYY-MM-DD>`
+- `scripts/data/report-canonical.sh`
 
 ## Documentation policy (required)
 

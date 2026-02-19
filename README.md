@@ -281,6 +281,48 @@ Note:
 - For automatic runs, prefer username/password env vars (for example `DE_DELFI_SOLLFAHRPLANDATEN_NETEX_USERNAME` and `DE_DELFI_SOLLFAHRPLANDATEN_NETEX_PASSWORD`) so scripts can refresh the session.
 - DE DELFI currently publishes a ZIP filename that does not contain `netex` in the name (`...fahrplaene_gesamtdeutschland.zip`); this can appear as a warning in verify output and is expected.
 
+### DACH NeTEx -> PostGIS canonical stations (MVP slice)
+
+This repo now includes a PostGIS-backed NeTEx ingest and canonical station layer for DACH (`DE`, `AT`, `CH`).
+This slice is local-first and does not rewire MOTIS GTFS switch runtime.
+
+- Migrations: `db/migrations/`
+- DB helper scripts: `scripts/data/`
+- Optional compose service profile for PostGIS: `dach-data`
+- PostGIS persistence in compose uses a Docker named volume: `postgis_data` (avoids root-owned host bind artifacts in `data/postgis/`)
+
+Run migrations (creates PostGIS extension + required tables):
+
+```bash
+scripts/data/db-migrate.sh
+```
+
+Ingest one snapshot (hard-fails on NeTEx parse/source errors, no GTFS fallback):
+
+```bash
+scripts/data/ingest-netex.sh --country CH --as-of 2026-02-19
+scripts/data/ingest-netex.sh --country AT --as-of 2026-02-19
+```
+
+Build canonical stations from staging:
+
+```bash
+scripts/data/build-canonical-stations.sh --as-of 2026-02-19
+```
+
+Report and checks:
+
+```bash
+scripts/data/report-canonical.sh
+scripts/data/check-canonical-pipeline.sh --min-canonical 1
+```
+
+Low-memory run mode (recommended for large CH NeTEx snapshots):
+
+```bash
+nice -n 15 ionice -c3 scripts/data/ingest-netex.sh --country CH --as-of 2026-02-19
+```
+
 ## Environment variables (orchestrator)
 
 Configured in `docker-compose.yml` by default:
@@ -297,6 +339,21 @@ Configured in `docker-compose.yml` by default:
 - `MOTIS_READY_TIMEOUT_MS`
 - `MOTIS_HEALTH_POLL_INTERVAL_MS`
 - `GTFS_SWITCH_LOCK_STALE_MS` (default `1800000`, 30 minutes)
+
+## Environment variables (canonical PostGIS slice)
+
+- `CANONICAL_DB_MODE` (`auto|direct|docker-compose`, default `auto`)
+- `CANONICAL_DB_MODE=auto` probes direct `psql` connectivity first; if no explicit direct target is configured and direct probe fails, it falls back to compose service `postgis`
+- If explicit direct settings are provided (`CANONICAL_DB_URL`/`DATABASE_URL`/`CANONICAL_DB_HOST`/`PGHOST` etc.) and direct probe fails in `auto`, scripts fail fast instead of silently switching DB targets
+- `CANONICAL_DB_URL` (optional full connection URL)
+- `CANONICAL_DB_HOST` (default `localhost`)
+- `CANONICAL_DB_PORT` (default `5432`)
+- `CANONICAL_DB_USER` (default `trainscanner`)
+- `CANONICAL_DB_PASSWORD` (default `trainscanner`)
+- `CANONICAL_DB_NAME` (default `trainscanner`)
+- `CANONICAL_DB_DOCKER_PROFILE` (default `dach-data`)
+- `CANONICAL_DB_DOCKER_SERVICE` (default `postgis`)
+- `CANONICAL_DB_READY_TIMEOUT_SEC` (default `90`)
 
 ## Troubleshooting
 

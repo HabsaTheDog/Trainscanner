@@ -1,0 +1,304 @@
+#!/usr/bin/env python3
+"""Extract StopPlace-level station rows from zipped NeTEx into CSV."""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import sys
+import zipfile
+from dataclasses import dataclass
+from pathlib import Path
+
+from lxml import etree
+
+
+def local_name(tag: str) -> str:
+    if "}" in tag:
+        return tag.split("}", 1)[1]
+    return tag
+
+
+def clean_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped if stripped else None
+
+
+def first_direct_child_text(elem: etree._Element, names: set[str]) -> str | None:
+    for child in elem:
+        if local_name(child.tag) in names:
+            text = clean_text(child.text)
+            if text:
+                return text
+    return None
+
+
+def first_descriptor_name(elem: etree._Element) -> str | None:
+    for child in elem:
+        if local_name(child.tag) != "Descriptor":
+            continue
+        for descriptor_child in child:
+            if local_name(descriptor_child.tag) == "Name":
+                text = clean_text(descriptor_child.text)
+                if text:
+                    return text
+    return None
+
+
+def first_location_coords(elem: etree._Element) -> tuple[float | None, float | None]:
+    for location in elem.iterfind(".//{*}Location"):
+        lat: float | None = None
+        lon: float | None = None
+        for child in location:
+            tag = local_name(child.tag)
+            if tag == "Latitude":
+                val = clean_text(child.text)
+                if val:
+                    try:
+                        lat = float(val)
+                    except ValueError:
+                        lat = None
+            elif tag == "Longitude":
+                val = clean_text(child.text)
+                if val:
+                    try:
+                        lon = float(val)
+                    except ValueError:
+                        lon = None
+        if lat is not None and lon is not None and -90 <= lat <= 90 and -180 <= lon <= 180:
+            return lat, lon
+    return None, None
+
+
+def parent_site_ref(elem: etree._Element) -> str | None:
+    for child in elem:
+        if local_name(child.tag) == "ParentSiteRef":
+            ref = clean_text(child.attrib.get("ref"))
+            if ref:
+                return ref
+    return None
+
+
+def key_values(elem: etree._Element) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for kv in elem.iterfind(".//{*}KeyValue"):
+        key_text: str | None = None
+        value_text: str | None = None
+        for child in kv:
+            tag = local_name(child.tag)
+            if tag == "Key":
+                key_text = clean_text(child.text)
+            elif tag == "Value":
+                value_text = clean_text(child.text)
+        if key_text and value_text:
+            result[key_text.strip().lower()] = value_text
+    return result
+
+
+@dataclass
+class Summary:
+    xml_entries_scanned: int = 0
+    stop_places_found: int = 0
+    stop_places_written: int = 0
+    duplicates_skipped: int = 0
+    missing_id_skipped: int = 0
+    missing_name_skipped: int = 0
+    with_coordinates: int = 0
+    without_coordinates: int = 0
+
+    def as_dict(self) -> dict[str, int]:
+        return {
+            "xmlEntriesScanned": self.xml_entries_scanned,
+            "stopPlacesFound": self.stop_places_found,
+            "stopPlacesWritten": self.stop_places_written,
+            "duplicatesSkipped": self.duplicates_skipped,
+            "missingIdSkipped": self.missing_id_skipped,
+            "missingNameSkipped": self.missing_name_skipped,
+            "withCoordinates": self.with_coordinates,
+            "withoutCoordinates": self.without_coordinates,
+        }
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Extract NeTEx stops from ZIP")
+    parser.add_argument("--zip-path", required=True)
+    parser.add_argument("--output-csv", required=True)
+    parser.add_argument("--summary-json", required=True)
+    parser.add_argument("--source-id", required=True)
+    parser.add_argument("--country", required=True)
+    parser.add_argument("--provider-slug", required=True)
+    parser.add_argument("--snapshot-date", required=True)
+    parser.add_argument("--manifest-sha256", default="")
+    parser.add_argument("--import-run-id", required=True)
+    return parser.parse_args()
+
+
+def extract(zip_path: Path, writer: csv.DictWriter, args: argparse.Namespace) -> Summary:
+    summary = Summary()
+    seen_stop_ids: set[str] = set()
+
+    with zipfile.ZipFile(zip_path) as archive:
+        xml_entries = sorted(name for name in archive.namelist() if name.lower().endswith(".xml"))
+        if not xml_entries:
+            raise RuntimeError(f"No XML entries found in archive: {zip_path}")
+
+        # NeTEx stops are typically in Site/SiteFrame XMLs.
+        # Restricting to these entries avoids parsing massive timetable files.
+        preferred_entries = [
+            name
+            for name in xml_entries
+            if any(token in Path(name).name.lower() for token in ("site", "stop", "station"))
+        ]
+        entries_to_scan = preferred_entries if preferred_entries else xml_entries
+
+        if not preferred_entries:
+            print(
+                f"[netex-extract] WARN: No site-like XML entry name detected in {zip_path.name}; "
+                "falling back to all XML entries.",
+                file=sys.stderr,
+            )
+
+        for entry in entries_to_scan:
+            summary.xml_entries_scanned += 1
+            try:
+                with archive.open(entry) as handle:
+                    context = etree.iterparse(handle, events=("end",), tag="{*}StopPlace", recover=False, huge_tree=True)
+                    for _, elem in context:
+                        summary.stop_places_found += 1
+                        source_stop_id = clean_text(elem.attrib.get("id"))
+                        if not source_stop_id:
+                            summary.missing_id_skipped += 1
+                            elem.clear()
+                            while elem.getprevious() is not None:
+                                del elem.getparent()[0]
+                            continue
+
+                        if source_stop_id in seen_stop_ids:
+                            summary.duplicates_skipped += 1
+                            elem.clear()
+                            while elem.getprevious() is not None:
+                                del elem.getparent()[0]
+                            continue
+
+                        stop_name = first_direct_child_text(elem, {"Name"}) or first_descriptor_name(elem)
+                        if not stop_name:
+                            summary.missing_name_skipped += 1
+                            elem.clear()
+                            while elem.getprevious() is not None:
+                                del elem.getparent()[0]
+                            continue
+
+                        lat, lon = first_location_coords(elem)
+                        if lat is None or lon is None:
+                            summary.without_coordinates += 1
+                        else:
+                            summary.with_coordinates += 1
+
+                        public_code = first_direct_child_text(elem, {"PublicCode"})
+                        private_code = first_direct_child_text(elem, {"PrivateCode"})
+                        kv = key_values(elem)
+
+                        hard_id = public_code or private_code
+                        if not hard_id:
+                            for key in ("uic", "ifopt", "eva", "stopplaceref", "globalid"):
+                                if key in kv:
+                                    hard_id = kv[key]
+                                    break
+
+                        payload = {
+                            "xmlEntry": entry,
+                            "stopPlaceType": first_direct_child_text(elem, {"StopPlaceType"}),
+                            "transportMode": first_direct_child_text(elem, {"TransportMode"}),
+                        }
+
+                        writer.writerow(
+                            {
+                                "import_run_id": args.import_run_id,
+                                "source_id": args.source_id,
+                                "country": args.country,
+                                "provider_slug": args.provider_slug,
+                                "snapshot_date": args.snapshot_date,
+                                "manifest_sha256": args.manifest_sha256,
+                                "source_stop_id": source_stop_id,
+                                "source_parent_stop_id": parent_site_ref(elem) or "",
+                                "stop_name": stop_name,
+                                "latitude": "" if lat is None else f"{lat:.8f}",
+                                "longitude": "" if lon is None else f"{lon:.8f}",
+                                "public_code": public_code or "",
+                                "private_code": private_code or "",
+                                "hard_id": hard_id or "",
+                                "source_file": entry,
+                                "raw_payload": json.dumps(payload, ensure_ascii=True, separators=(",", ":")),
+                            }
+                        )
+                        seen_stop_ids.add(source_stop_id)
+                        summary.stop_places_written += 1
+
+                        elem.clear()
+                        while elem.getprevious() is not None:
+                            del elem.getparent()[0]
+            except etree.XMLSyntaxError as exc:
+                raise RuntimeError(f"NeTEx XML parse error in entry '{entry}': {exc}") from exc
+
+    return summary
+
+
+def main() -> int:
+    args = parse_args()
+
+    zip_path = Path(args.zip_path)
+    output_csv = Path(args.output_csv)
+    summary_json = Path(args.summary_json)
+
+    if not zip_path.is_file():
+        raise RuntimeError(f"ZIP not found: {zip_path}")
+
+    output_csv.parent.mkdir(parents=True, exist_ok=True)
+    summary_json.parent.mkdir(parents=True, exist_ok=True)
+
+    with output_csv.open("w", newline="", encoding="utf-8") as out:
+        writer = csv.DictWriter(
+            out,
+            fieldnames=[
+                "import_run_id",
+                "source_id",
+                "country",
+                "provider_slug",
+                "snapshot_date",
+                "manifest_sha256",
+                "source_stop_id",
+                "source_parent_stop_id",
+                "stop_name",
+                "latitude",
+                "longitude",
+                "public_code",
+                "private_code",
+                "hard_id",
+                "source_file",
+                "raw_payload",
+            ],
+        )
+        writer.writeheader()
+        summary = extract(zip_path, writer, args)
+
+    summary_payload = summary.as_dict()
+    summary_json.write_text(json.dumps(summary_payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+
+    if summary.stop_places_written == 0:
+        raise RuntimeError(
+            "No StopPlace rows extracted from NeTEx archive; failing hard per policy"
+        )
+
+    print(json.dumps(summary_payload, ensure_ascii=True))
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except Exception as exc:  # noqa: BLE001
+        print(f"[netex-extract] ERROR: {exc}", file=sys.stderr)
+        raise

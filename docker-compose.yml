@@ -1,4 +1,22 @@
 services:
+  postgis:
+    image: postgis/postgis:16-3.4
+    container_name: trainscanner-postgis
+    restart: unless-stopped
+    profiles:
+      - dach-data
+    environment:
+      POSTGRES_DB: ${CANONICAL_DB_NAME:-trainscanner}
+      POSTGRES_USER: ${CANONICAL_DB_USER:-trainscanner}
+      POSTGRES_PASSWORD: ${CANONICAL_DB_PASSWORD:-trainscanner}
+    volumes:
+      - postgis_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   motis:
     image: ${MOTIS_IMAGE:-ghcr.io/motis-project/motis:latest}
     container_name: motis
@@ -42,3 +60,6 @@ services:
       - ./state:/app/state
       - ./data:/app/data
       - /var/run/docker.sock:/var/run/docker.sock
+
+volumes:
+  postgis_data:

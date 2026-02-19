@@ -43,7 +43,7 @@
 - Avoid introducing async races in switch flow.
 - If request mapping changes, update docs (`README.md` + AGENTS files) in same change.
 
-## DACH raw-source boundary
+## DACH data-pipeline boundary
 
-- `scripts/data/fetch-dach-sources.sh` and `scripts/data/verify-dach-sources.sh` are separate from orchestrator runtime.
-- Do not couple DACH raw retrieval into `/api/routes` or GTFS switch flow in this MVP.
+- `scripts/data/fetch-dach-sources.sh`, `scripts/data/verify-dach-sources.sh`, `scripts/data/db-migrate.sh`, `scripts/data/ingest-netex.sh`, and `scripts/data/build-canonical-stations.sh` are separate from orchestrator runtime.
+- Do not couple DACH retrieval/ingest/canonical build into `/api/routes` or GTFS switch flow in this MVP slice.

@@ -18,6 +18,7 @@ data/gtfs_raw/
 data/osm/
 data/gtfs_filtered/
 data/raw/
+data/postgis/
 *.osm.pbf
 *.gtfs.zip
 
