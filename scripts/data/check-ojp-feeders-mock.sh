@@ -116,6 +116,10 @@ wait_for_health() {
 main() {
   parse_args "$@"
 
+  if [[ "$MOCK_CONFIG_FILE" == "${ROOT_DIR}/config/ojp-endpoints.mock.json" ]]; then
+    "${ROOT_DIR}/scripts/validate-config.sh" --only ojp-mock >/dev/null
+  fi
+
   require_cmd node
   require_cmd curl
   require_cmd jq

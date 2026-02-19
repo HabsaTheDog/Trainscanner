@@ -9,12 +9,18 @@ const { createLogger } = require('./logger');
 const { GtfsSwitcher } = require('./switcher');
 const { normalizeProfiles, resolveProfileArtifact } = require('./profile-resolver');
 const { checkMotisHealth, queryMotisRoute } = require('./motis');
+const { AppError, errorToPayload, toAppError } = require('./core/errors');
+const { resolveCorrelationId } = require('./core/ids');
+const { resolveStationInput: resolveStationInputFromIndex } = require('./domains/routing/normalization');
+const { validateRouteRequestBody } = require('./domains/routing/contracts');
+const { MetricsCollector } = require('./core/metrics');
 
 const execFileAsync = promisify(execFile);
 
 const config = loadConfig();
-const logger = createLogger(config.switchLogPath);
+const logger = createLogger(config.switchLogPath, { service: 'orchestrator' });
 const switcher = new GtfsSwitcher(config, logger);
+const metrics = new MetricsCollector();
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -29,8 +35,19 @@ function sendJson(res, statusCode, payload) {
   res.end(JSON.stringify(payload));
 }
 
-function isValidDate(value) {
-  return value instanceof Date && !Number.isNaN(value.getTime());
+function sendText(res, statusCode, text, contentType = 'text/plain; charset=utf-8') {
+  res.writeHead(statusCode, { 'content-type': contentType });
+  res.end(String(text || ''));
+}
+
+function sendError(res, err, options = {}) {
+  const includeDetails = options.includeDetails !== undefined ? options.includeDetails : true;
+  const extra = options.extra && typeof options.extra === 'object' ? options.extra : {};
+  const { statusCode, payload } = errorToPayload(err, { includeDetails });
+  sendJson(res, statusCode, {
+    ...payload,
+    ...extra
+  });
 }
 
 function foldText(value) {
@@ -81,34 +98,6 @@ function isFiniteCoordinate(lat, lon) {
   return Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180;
 }
 
-function parseCoordinateToken(value) {
-  const input = String(value || '').trim();
-  if (!input) {
-    return null;
-  }
-
-  const match = input.match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
-  if (!match) {
-    return null;
-  }
-
-  const lat = Number.parseFloat(match[1]);
-  const lon = Number.parseFloat(match[2]);
-  if (!isFiniteCoordinate(lat, lon)) {
-    return null;
-  }
-  return `${lat},${lon}`;
-}
-
-function parseBracketId(value) {
-  const input = String(value || '').trim();
-  const match = input.match(/\[(.+?)\]\s*$/);
-  if (!match) {
-    return null;
-  }
-  return match[1].trim() || null;
-}
-
 function toTaggedStopId(tag, stopId) {
   const cleanTag = String(tag || '').trim();
   const cleanId = String(stopId || '').trim();
@@ -152,6 +141,39 @@ function pickPreferredStation(current, candidate) {
 
 const stationIndexCache = new Map();
 
+function touchStationCache(profileName, entry) {
+  stationIndexCache.delete(profileName);
+  stationIndexCache.set(profileName, {
+    ...entry,
+    cachedAt: entry.cachedAt || Date.now(),
+    lastAccessAt: Date.now()
+  });
+}
+
+function pruneStationCache() {
+  const ttlMs = config.stationIndexCacheTtlMs;
+  const maxEntries = config.stationIndexCacheMaxEntries;
+  const now = Date.now();
+
+  for (const [key, value] of stationIndexCache.entries()) {
+    if (now - (value.cachedAt || 0) > ttlMs) {
+      stationIndexCache.delete(key);
+    }
+  }
+
+  if (stationIndexCache.size <= maxEntries) {
+    return;
+  }
+
+  const ordered = Array.from(stationIndexCache.entries()).sort(
+    (a, b) => (a[1].lastAccessAt || 0) - (b[1].lastAccessAt || 0)
+  );
+  const removeCount = stationIndexCache.size - maxEntries;
+  for (let i = 0; i < removeCount; i += 1) {
+    stationIndexCache.delete(ordered[i][0]);
+  }
+}
+
 async function loadProfilesMap() {
   const raw = await fs.readFile(config.profilesPath, 'utf8');
   return normalizeProfiles(JSON.parse(raw));
@@ -180,14 +202,18 @@ async function resolveProfileZipForQuery(profileName) {
   const profiles = await loadProfilesMap();
   const profile = profiles[profileName];
   if (!profile) {
-    throw Object.assign(new Error(`Unknown profile '${profileName}'`), { statusCode: 404 });
+    throw new AppError({
+      code: 'UNKNOWN_PROFILE',
+      statusCode: 404,
+      message: `Unknown profile '${profileName}'`
+    });
   }
 
   const resolved = await resolveProfileArtifact(profileName, profile, {
     dataDir: config.dataDir,
     allowMissing: false
   }).catch((err) => {
-    throw Object.assign(new Error(err.message), { statusCode: 404 });
+    throw toAppError(err, 'PROFILE_ARTIFACT_MISSING');
   });
 
   return resolved;
@@ -198,27 +224,38 @@ async function getStationIndexForProfile(profileName) {
   const zipPath = resolved.absolutePath;
   const stat = await fs.stat(zipPath).catch(() => null);
   if (!stat || !stat.isFile()) {
-    throw Object.assign(new Error(`GTFS zip not found for profile '${profileName}': ${zipPath}`), { statusCode: 404 });
+    throw new AppError({
+      code: 'PROFILE_ARTIFACT_MISSING',
+      statusCode: 404,
+      message: `GTFS zip not found for profile '${profileName}': ${zipPath}`
+    });
   }
 
   const signature = `${zipPath}:${stat.size}:${stat.mtimeMs}`;
   const cached = stationIndexCache.get(profileName);
-  if (cached && cached.signature === signature) {
+  if (cached && cached.signature === signature && Date.now() - (cached.cachedAt || 0) <= config.stationIndexCacheTtlMs) {
+    touchStationCache(profileName, cached);
     return cached;
   }
 
   const unzip = await execFileAsync('unzip', ['-p', zipPath, 'stops.txt'], {
     maxBuffer: 64 * 1024 * 1024
   }).catch((err) => {
-    throw Object.assign(
-      new Error(`Failed to read stops.txt from ${zipPath}. Ensure 'unzip' exists in orchestrator container.`),
-      { cause: err, statusCode: 500 }
-    );
+    throw new AppError({
+      code: 'STATION_INDEX_FAILED',
+      statusCode: 500,
+      message: `Failed to read stops.txt from ${zipPath}. Ensure 'unzip' exists in orchestrator container.`,
+      cause: err
+    });
   });
 
   const lines = unzip.stdout.split(/\r?\n/).filter((line) => line.trim().length > 0);
   if (lines.length < 2) {
-    throw Object.assign(new Error(`stops.txt is empty in ${zipPath}`), { statusCode: 500 });
+    throw new AppError({
+      code: 'STATION_INDEX_FAILED',
+      statusCode: 500,
+      message: `stops.txt is empty in ${zipPath}`
+    });
   }
 
   const header = parseCsvLine(lines[0]);
@@ -228,8 +265,10 @@ async function getStationIndexForProfile(profileName) {
   const idxLon = header.indexOf('stop_lon');
   const idxLocationType = header.indexOf('location_type');
   if (idxName < 0 || idxId < 0) {
-    throw Object.assign(new Error(`stops.txt missing required columns stop_name/stop_id in ${zipPath}`), {
-      statusCode: 500
+    throw new AppError({
+      code: 'STATION_INDEX_FAILED',
+      statusCode: 500,
+      message: `stops.txt missing required columns stop_name/stop_id in ${zipPath}`
     });
   }
 
@@ -237,6 +276,17 @@ async function getStationIndexForProfile(profileName) {
   const byId = new Map();
   const byNameFold = new Map();
   const byValueFold = new Map();
+  const bucketSets = new Map();
+  function addBucketValue(bucket, stationIndex) {
+    if (!bucket || bucket.length < 3) {
+      return;
+    }
+    const key = bucket.slice(0, 3);
+    const set = bucketSets.get(key) || new Set();
+    set.add(stationIndex);
+    bucketSets.set(key, set);
+  }
+
   for (let i = 1; i < lines.length; i += 1) {
     const row = parseCsvLine(lines[i]);
     const name = (row[idxName] || '').trim();
@@ -280,8 +330,33 @@ async function getStationIndexForProfile(profileName) {
   }
 
   const stations = Array.from(byValue.values()).sort((a, b) => a.name.localeCompare(b.name, 'de'));
-  const result = { signature, profileName, zipPath, stations, byId, byNameFold, byValueFold };
-  stationIndexCache.set(profileName, result);
+
+  for (let i = 0; i < stations.length; i += 1) {
+    const station = stations[i];
+    addBucketValue(station.nameFold, i);
+    addBucketValue(station.valueFold, i);
+    addBucketValue(station.id, i);
+  }
+
+  const searchBuckets = new Map();
+  for (const [key, idsSet] of bucketSets.entries()) {
+    searchBuckets.set(key, Array.from(idsSet));
+  }
+
+  const result = {
+    signature,
+    profileName,
+    zipPath,
+    stations,
+    byId,
+    byNameFold,
+    byValueFold,
+    searchBuckets,
+    cachedAt: Date.now(),
+    lastAccessAt: Date.now()
+  };
+  touchStationCache(profileName, result);
+  pruneStationCache();
   return result;
 }
 
@@ -297,102 +372,23 @@ async function resolveRouteProfileName(status) {
 }
 
 async function resolveStationInput(profileName, inputValue) {
-  const input = String(inputValue || '').trim();
-  if (!input) {
-    return {
-      input,
-      resolved: input,
-      strategy: 'empty',
-      matched: null
-    };
-  }
-
-  const coordinate = parseCoordinateToken(input);
-  if (coordinate) {
-    return {
-      input,
-      resolved: coordinate,
-      strategy: 'coordinates',
-      matched: null
-    };
-  }
-
-  if (input.startsWith(`${config.motisDatasetTag}_`)) {
-    return {
-      input,
-      resolved: input,
-      strategy: 'tagged_stop_id',
-      matched: null
-    };
-  }
-
   const index = await getStationIndexForProfile(profileName);
-  const folded = foldText(input);
-  const bracketId = parseBracketId(input);
-  const idCandidate = !bracketId && /^\S+$/.test(input) ? input : null;
-  const station =
-    (bracketId ? index.byId.get(bracketId) : null) ||
-    (idCandidate ? index.byId.get(idCandidate) : null) ||
-    index.byValueFold.get(folded) ||
-    index.byNameFold.get(folded) ||
-    null;
-
-  if (station && station.token) {
-    return {
-      input,
-      resolved: station.token,
-      strategy: 'station_lookup',
-      matched: {
-        id: station.id,
-        name: station.name,
-        value: station.value,
-        token: station.token,
-        coordinateToken: station.coordinateToken
-      }
-    };
-  }
-
-  if (bracketId) {
-    return {
-      input,
-      resolved: toTaggedStopId(config.motisDatasetTag, bracketId),
-      strategy: 'bracket_id',
-      matched: null
-    };
-  }
-
-  if (idCandidate && /^\d+$/.test(idCandidate)) {
-    return {
-      input,
-      resolved: toTaggedStopId(config.motisDatasetTag, idCandidate),
-      strategy: 'numeric_stop_id',
-      matched: null
-    };
-  }
-
-  return {
-    input,
-    resolved: input,
-    strategy: 'raw',
-    matched: station
-      ? {
-          id: station.id,
-          name: station.name,
-          value: station.value,
-          token: station.token,
-          coordinateToken: station.coordinateToken
-        }
-      : null
-  };
+  return resolveStationInputFromIndex(inputValue, index, config.motisDatasetTag);
 }
 
 
 async function parseJsonBody(req) {
   const chunks = [];
+  let totalBytes = 0;
   for await (const chunk of req) {
     chunks.push(chunk);
-    if (Buffer.concat(chunks).length > 1024 * 1024) {
-      throw Object.assign(new Error('Request body too large'), { statusCode: 413 });
+    totalBytes += chunk.length;
+    if (totalBytes > 1024 * 1024) {
+      throw new AppError({
+        code: 'REQUEST_TOO_LARGE',
+        statusCode: 413,
+        message: 'Request body too large'
+      });
     }
   }
 
@@ -404,7 +400,11 @@ async function parseJsonBody(req) {
   try {
     return JSON.parse(raw);
   } catch {
-    throw Object.assign(new Error('Invalid JSON body'), { statusCode: 400 });
+    throw new AppError({
+      code: 'INVALID_JSON',
+      statusCode: 400,
+      message: 'Invalid JSON body'
+    });
   }
 }
 
@@ -436,7 +436,12 @@ async function serveStatic(req, res, urlPath) {
   }
 }
 
-async function handleApi(req, res, url) {
+async function handleApi(req, res, url, requestLogger) {
+  if (req.method === 'GET' && url.pathname === '/metrics') {
+    sendText(res, 200, metrics.renderPrometheus(), 'text/plain; version=0.0.4; charset=utf-8');
+    return;
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/gtfs/profiles') {
     const payload = await switcher.getProfilesWithMeta();
     sendJson(res, 200, payload);
@@ -446,20 +451,16 @@ async function handleApi(req, res, url) {
   if (req.method === 'POST' && url.pathname === '/api/gtfs/activate') {
     const body = await parseJsonBody(req);
     if (!body.profile || typeof body.profile !== 'string') {
-      sendJson(res, 400, { error: 'Missing required field: profile' });
-      return;
+      throw new AppError({
+        code: 'INVALID_REQUEST',
+        statusCode: 400,
+        message: 'Missing required field: profile'
+      });
     }
 
-    try {
-      await switcher.start(body.profile);
-      sendJson(res, 202, {
-        accepted: true,
-        profile: body.profile,
-        message: `Profile switch to '${body.profile}' started`
-      });
-    } catch (err) {
-      sendJson(res, err.statusCode || 500, { error: err.message });
-    }
+    const result = await switcher.start(body.profile);
+    const statusCode = result.noop ? 200 : 202;
+    sendJson(res, statusCode, result);
     return;
   }
 
@@ -489,8 +490,13 @@ async function handleApi(req, res, url) {
 
     const index = await getStationIndexForProfile(profileName);
     const qFold = foldText(query);
+    const bucketKey = qFold.length >= 3 ? qFold.slice(0, 3) : '';
+    const bucketRows = bucketKey && index.searchBuckets && index.searchBuckets.has(bucketKey)
+      ? index.searchBuckets.get(bucketKey).map((idx) => index.stations[idx])
+      : index.stations;
+
     const filtered = qFold
-      ? index.stations.filter(
+      ? bucketRows.filter(
           (station) =>
             station.nameFold.includes(qFold) ||
             station.valueFold.includes(qFold) ||
@@ -548,45 +554,21 @@ async function handleApi(req, res, url) {
     const status = await switcher.getStatus();
 
     if (status.state !== 'ready') {
-      sendJson(res, 409, {
-        error: 'MOTIS is not ready. Route search disabled while switching/importing/restarting.',
-        state: status.state,
-        message: status.message
+      throw new AppError({
+        code: 'ROUTE_NOT_READY',
+        statusCode: 409,
+        message: 'MOTIS is not ready. Route search disabled while switching/importing/restarting.',
+        details: {
+          state: status.state,
+          message: status.message
+        }
       });
-      return;
     }
 
-    const origin = body.origin;
-    const destination = body.destination;
-    const datetime = body.datetime;
-
-    if (!origin || !destination || !datetime) {
-      sendJson(res, 400, {
-        error: 'Required fields: origin, destination, datetime'
-      });
-      return;
-    }
-
-    const requestDate = new Date(datetime);
-    if (!isValidDate(requestDate)) {
-      sendJson(res, 400, {
-        error: 'Invalid datetime. Use ISO-8601 format, e.g. 2026-02-19T12:00:00Z.'
-      });
-      return;
-    }
-
-    const now = new Date();
-    const min = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-    const max = new Date(now.getTime() + 400 * 24 * 60 * 60 * 1000);
-    if (requestDate < min || requestDate > max) {
-      sendJson(res, 400, {
-        error: 'Datetime outside supported range. Pick a time between now - 30 days and the next 400 days.',
-        requestDatetime: requestDate.toISOString(),
-        min: min.toISOString(),
-        max: max.toISOString()
-      });
-      return;
-    }
+    const validated = validateRouteRequestBody(body);
+    const origin = validated.origin;
+    const destination = validated.destination;
+    const datetime = validated.datetime;
 
     const routeProfile = await resolveRouteProfileName(status);
     let originResolved = {
@@ -609,7 +591,7 @@ async function handleApi(req, res, url) {
           resolveStationInput(routeProfile, destination)
         ]);
       } catch (err) {
-        logger.warn('Failed to resolve station inputs, forwarding raw values to MOTIS', {
+        requestLogger.warn('Failed to resolve station inputs, forwarding raw values to MOTIS', {
           step: 'route_resolve',
           profile: routeProfile,
           error: err.message
@@ -625,20 +607,23 @@ async function handleApi(req, res, url) {
 
     const routeResponse = await queryMotisRoute(config, routeRequest);
     if (!routeResponse.ok) {
-      sendJson(res, routeResponse.status || 502, {
-        error: 'MOTIS route query failed',
-        motisMethod: routeResponse.routeMethod,
-        motisPath: routeResponse.routePath,
-        motisResponse: routeResponse.body,
-        motisAttempts: (routeResponse.routeAttempts || []).slice(0, 30),
-        routeRequestResolved: {
-          profile: routeProfile || null,
-          origin: originResolved,
-          destination: destinationResolved,
-          datetime
+      throw new AppError({
+        code: 'MOTIS_UNAVAILABLE',
+        statusCode: routeResponse.status || 502,
+        message: 'MOTIS route query failed',
+        details: {
+          motisMethod: routeResponse.routeMethod,
+          motisPath: routeResponse.routePath,
+          motisResponse: routeResponse.body,
+          motisAttempts: (routeResponse.routeAttempts || []).slice(0, 30),
+          routeRequestResolved: {
+            profile: routeProfile || null,
+            origin: originResolved,
+            destination: destinationResolved,
+            datetime
+          }
         }
       });
-      return;
     }
 
     sendJson(res, 200, {
@@ -658,27 +643,63 @@ async function handleApi(req, res, url) {
     return;
   }
 
-  sendJson(res, 404, { error: 'Unknown API endpoint' });
+  throw new AppError({
+    code: 'INVALID_REQUEST',
+    statusCode: 404,
+    message: 'Unknown API endpoint'
+  });
 }
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  const correlationId = resolveCorrelationId(req.headers || {});
+  const startedAtNs = process.hrtime.bigint();
+  res.setHeader('x-correlation-id', correlationId);
+  const requestLogger = logger.child({
+    correlationId,
+    method: req.method,
+    path: url.pathname
+  });
+
+  res.on('finish', () => {
+    const elapsedMs = Number(process.hrtime.bigint() - startedAtNs) / 1_000_000;
+    if (config.metricsEnabled) {
+      metrics.inc('orchestrator_http_requests_total', {
+        method: req.method || 'UNKNOWN',
+        path: url.pathname,
+        status: String(res.statusCode || 0)
+      });
+      metrics.observe('orchestrator_http_request_duration_ms', {
+        method: req.method || 'UNKNOWN',
+        path: url.pathname
+      }, elapsedMs);
+      metrics.set('orchestrator_station_cache_entries', {}, stationIndexCache.size);
+    }
+
+    requestLogger.info('request completed', {
+      statusCode: res.statusCode || 0,
+      latencyMs: Number(elapsedMs.toFixed(3))
+    });
+  });
 
   try {
-    if (url.pathname.startsWith('/api/') || url.pathname === '/health') {
-      await handleApi(req, res, url);
+    if (url.pathname.startsWith('/api/') || url.pathname === '/health' || url.pathname === '/metrics') {
+      await handleApi(req, res, url, requestLogger);
       return;
     }
 
     await serveStatic(req, res, url.pathname);
   } catch (err) {
-    logger.error('Unhandled request error', {
+    const appErr = toAppError(err);
+    requestLogger.error('Unhandled request error', {
       step: 'request',
-      method: req.method,
-      path: url.pathname,
-      error: err.message
+      error: appErr.message,
+      errorCode: appErr.code
     });
-    sendJson(res, err.statusCode || 500, { error: err.message });
+    sendError(res, appErr, {
+      includeDetails: false,
+      extra: appErr.details && typeof appErr.details === 'object' ? appErr.details : {}
+    });
   }
 });
 
@@ -695,6 +716,8 @@ async function ensureBootstrapFiles() {
         {
           state: 'idle',
           activeProfile: null,
+          requestedProfile: null,
+          runId: null,
           message: 'No switch executed yet',
           updatedAt: new Date().toISOString(),
           error: null

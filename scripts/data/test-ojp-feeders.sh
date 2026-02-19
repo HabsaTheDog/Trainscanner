@@ -275,6 +275,13 @@ main() {
 
   parse_args "$@"
 
+  if [[ "$OJP_CONFIG_FILE" == "${ROOT_DIR}/config/ojp-endpoints.json" ]]; then
+    "${ROOT_DIR}/scripts/validate-config.sh" --only ojp >/dev/null
+  fi
+  if [[ "$OJP_CONFIG_FILE" == "${ROOT_DIR}/config/ojp-endpoints.mock.json" ]]; then
+    "${ROOT_DIR}/scripts/validate-config.sh" --only ojp-mock >/dev/null
+  fi
+
   require_cmd jq
   require_cmd curl
 

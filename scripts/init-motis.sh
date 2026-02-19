@@ -67,44 +67,16 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
-PROFILE_ARTIFACT_INFO="$(node - <<'NODE' "$ROOT_DIR" "$PROFILE"
-const fs = require('node:fs');
-const path = require('node:path');
+"${ROOT_DIR}/scripts/validate-config.sh" --only profiles >/dev/null
 
-const rootDir = process.argv[2];
-const profileName = process.argv[3];
-const profilesPath = path.join(rootDir, 'config', 'gtfs-profiles.json');
-const resolverPath = path.join(rootDir, 'orchestrator', 'src', 'profile-resolver.js');
-
-const { normalizeProfiles, resolveProfileArtifact } = require(resolverPath);
-
-(async () => {
-  const raw = JSON.parse(fs.readFileSync(profilesPath, 'utf8'));
-  const profiles = normalizeProfiles(raw);
-  const selected = profiles[profileName];
-  if (!selected) {
-    throw new Error(`Profile '${profileName}' not found in ${profilesPath}`);
-  }
-
-  const resolved = await resolveProfileArtifact(profileName, selected, {
-    dataDir: path.join(rootDir, 'data'),
-    allowMissing: false
-  });
-
-  process.stdout.write(
-    `${resolved.zipPath}\t${resolved.absolutePath}\t${resolved.sourceType}`
-  );
-})().catch((err) => {
-  console.error(err.message || String(err));
-  process.exit(2);
-});
-NODE
-)" || {
+PROFILE_ARTIFACT_INFO="$(node "${ROOT_DIR}/orchestrator/src/cli/profile-runtime.js" resolve-artifact --root "$ROOT_DIR" --profile "$PROFILE")" || {
   echo "Profile '$PROFILE' not found/invalid or runtime artifact unresolved in config/gtfs-profiles.json" >&2
   exit 1
 }
 
-IFS=$'\t' read -r PROFILE_ZIP_RELATIVE PROFILE_ZIP_ABSOLUTE PROFILE_SOURCE_TYPE <<<"$PROFILE_ARTIFACT_INFO"
+PROFILE_ZIP_RELATIVE="$(node -e 'const obj = JSON.parse(process.argv[1]); process.stdout.write(obj.zipPath || \"\");' "$PROFILE_ARTIFACT_INFO")"
+PROFILE_ZIP_ABSOLUTE="$(node -e 'const obj = JSON.parse(process.argv[1]); process.stdout.write(obj.absolutePath || \"\");' "$PROFILE_ARTIFACT_INFO")"
+PROFILE_SOURCE_TYPE="$(node -e 'const obj = JSON.parse(process.argv[1]); process.stdout.write(obj.sourceType || \"static\");' "$PROFILE_ARTIFACT_INFO")"
 
 if [[ ! -f "$PROFILE_ZIP_ABSOLUTE" ]]; then
   echo "GTFS zip for profile '$PROFILE' not found: $PROFILE_ZIP_ABSOLUTE" >&2
@@ -263,8 +235,19 @@ const payload = {
   zipPath,
   activatedAt: new Date().toISOString()
 };
-fs.mkdirSync(require('node:path').dirname(file), { recursive: true });
-fs.writeFileSync(file, JSON.stringify(payload, null, 2) + '\n', 'utf8');
+try {
+  fs.mkdirSync(require('node:path').dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(payload, null, 2) + '\n', 'utf8');
+} catch (err) {
+  if (err && (err.code === 'EACCES' || err.code === 'EPERM')) {
+    console.error(
+      `Warning: could not update ${file} due to permissions (${err.code}). ` +
+      'Continuing because profile activation via API will refresh runtime state.'
+    );
+    process.exit(0);
+  }
+  throw err;
+}
 NODE
 
 echo "MOTIS data initialized for profile '$PROFILE'."

@@ -38,6 +38,8 @@ USAGE
   esac
 done
 
+"${ROOT_DIR}/scripts/validate-config.sh" --only profiles >/dev/null
+
 export API_URL MAX_ATTEMPTS TARGET_DATE ROOT_DIR MOTIS_DATASET_TAG
 python3 - <<'PY'
 import csv
@@ -284,8 +286,6 @@ def post_json(url, payload):
         with urllib.request.urlopen(req, timeout=15) as resp:
             body = resp.read().decode('utf-8')
             return resp.status, json.loads(body)
-    except urllib.error.URLError as e:
-        return None, {'error': f'network_error: {e}'}
     except urllib.error.HTTPError as e:
         body = e.read().decode('utf-8')
         try:
@@ -293,6 +293,8 @@ def post_json(url, payload):
         except Exception:
             parsed = {'raw': body}
         return e.code, parsed
+    except urllib.error.URLError as e:
+        return None, {'error': f'network_error: {e}'}
 
 attempted = 0
 last = None

@@ -1,0 +1,12 @@
+{
+  "version": "1",
+  "cases": [
+    {
+      "id": "smoke_tagged_success",
+      "label": "Tagged stop IDs resolve directly",
+      "origin": "active-gtfs_1001",
+      "destination": "active-gtfs_1002",
+      "datetime": "2026-02-20T08:00:00Z"
+    }
+  ]
+}

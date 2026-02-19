@@ -11,6 +11,7 @@ PROFILE=""
 AS_OF=""
 COUNTRY_FILTER=""
 OUTPUT_PATH=""
+FORCE_REBUILD="false"
 
 usage() {
   cat <<USAGE
@@ -23,6 +24,7 @@ Options:
   --as-of YYYY-MM-DD      Snapshot cutoff date (required)
   --country DE|AT|CH      Optional country scope override
   --output <path>         Optional output zip path (default: data/gtfs/runtime/<profile>/<as-of>/active-gtfs.zip)
+  --force                 Rebuild even if matching manifest/artifact already exists
   -h, --help              Show this help
 USAGE
 }
@@ -75,6 +77,10 @@ while [[ $# -gt 0 ]]; do
       OUTPUT_PATH="${2:-}"
       shift 2
       ;;
+    --force)
+      FORCE_REBUILD="true"
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -96,6 +102,8 @@ fi
 command -v node >/dev/null 2>&1 || fail "node is required"
 command -v python3 >/dev/null 2>&1 || fail "python3 is required"
 command -v jq >/dev/null 2>&1 || fail "jq is required"
+
+"${ROOT_DIR}/scripts/validate-config.sh" --only profiles >/dev/null
 
 PROFILE_META_JSON="$(node - <<'NODE' "$ROOT_DIR" "$PROFILE"
 const fs = require('node:fs');
@@ -166,6 +174,22 @@ fi
 OUTPUT_DIR="$(dirname "$OUTPUT_ZIP_PATH")"
 MANIFEST_PATH="${OUTPUT_DIR}/manifest.json"
 mkdir -p "$OUTPUT_DIR"
+
+if [[ "$FORCE_REBUILD" != "true" && -f "$OUTPUT_ZIP_PATH" && -f "$MANIFEST_PATH" ]]; then
+  EXISTING_PROFILE="$(jq -r '.profile // empty' "$MANIFEST_PATH")"
+  EXISTING_AS_OF="$(jq -r '.asOf // empty' "$MANIFEST_PATH")"
+  EXISTING_COUNTRY="$(jq -r '.countryScope // empty' "$MANIFEST_PATH")"
+  EXISTING_SHA="$(jq -r '.sha256 // empty' "$MANIFEST_PATH")"
+  CURRENT_SHA="$(sha256_file "$OUTPUT_ZIP_PATH")"
+
+  if [[ "$EXISTING_PROFILE" == "$PROFILE" && "$EXISTING_AS_OF" == "$AS_OF" && "$EXISTING_COUNTRY" == "$COUNTRY_FILTER" && "$EXISTING_SHA" == "$CURRENT_SHA" ]]; then
+    log "Idempotent export hit: existing artifact+manifest already match requested scope"
+    log "artifact=${OUTPUT_ZIP_PATH}"
+    log "manifest=${MANIFEST_PATH}"
+    log "sha256=${CURRENT_SHA}"
+    exit 0
+  fi
+fi
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT

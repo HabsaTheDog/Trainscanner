@@ -1,0 +1,13 @@
+{
+  "caseId": "reg_station_lookup_success",
+  "expected": {
+    "caseId": "reg_station_lookup_success",
+    "status": 200,
+    "errorCode": null,
+    "itineraryCount": 1,
+    "directCount": 0,
+    "motisAttemptCount": 2,
+    "originStrategy": "station_lookup",
+    "destinationStrategy": "station_lookup"
+  }
+}

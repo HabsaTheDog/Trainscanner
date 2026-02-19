@@ -6,7 +6,12 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "check": "node --check src/server.js && node --check src/switcher.js && node --check src/profile-resolver.js && node --check src/motis.js"
+    "lint": "bash -lc \"find src test -type f -name '*.js' -print0 | xargs -0 -n1 node --check\"",
+    "check": "npm run lint",
+    "test:unit": "node --test test/unit",
+    "test:integration": "node --test test/integration",
+    "test:e2e": "node --test test/e2e",
+    "test": "npm run test:unit && npm run test:integration && npm run test:e2e"
   },
   "engines": {
     "node": ">=20"

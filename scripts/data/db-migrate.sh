@@ -99,14 +99,15 @@ SELECT
   (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'canonical_review_queue') AS has_review_queue,
   (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'canonical_station_overrides') AS has_overrides,
   (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'station_transfer_rules') AS has_transfer_rules,
-  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'ojp_stop_refs') AS has_ojp_refs;
+  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'ojp_stop_refs') AS has_ojp_refs,
+  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'pipeline_jobs') AS has_pipeline_jobs;
 ")"
 
-IFS='|' read -r has_postgis has_import_runs has_raw_snapshots has_staging has_canonical has_mappings has_review_queue has_overrides has_transfer_rules has_ojp_refs <<<"$validation"
+IFS='|' read -r has_postgis has_import_runs has_raw_snapshots has_staging has_canonical has_mappings has_review_queue has_overrides has_transfer_rules has_ojp_refs has_pipeline_jobs <<<"$validation"
 
-if [[ "$has_postgis" != "1" || "$has_import_runs" != "1" || "$has_raw_snapshots" != "1" || "$has_staging" != "1" || "$has_canonical" != "1" || "$has_mappings" != "1" || "$has_review_queue" != "1" || "$has_overrides" != "1" || "$has_transfer_rules" != "1" || "$has_ojp_refs" != "1" ]]; then
-  printf '[db-migrate] ERROR: validation failed (postgis=%s import_runs=%s raw_snapshots=%s staging=%s canonical=%s mappings=%s review_queue=%s overrides=%s transfer_rules=%s ojp_refs=%s)\n' \
-    "$has_postgis" "$has_import_runs" "$has_raw_snapshots" "$has_staging" "$has_canonical" "$has_mappings" "$has_review_queue" "$has_overrides" "$has_transfer_rules" "$has_ojp_refs" >&2
+if [[ "$has_postgis" != "1" || "$has_import_runs" != "1" || "$has_raw_snapshots" != "1" || "$has_staging" != "1" || "$has_canonical" != "1" || "$has_mappings" != "1" || "$has_review_queue" != "1" || "$has_overrides" != "1" || "$has_transfer_rules" != "1" || "$has_ojp_refs" != "1" || "$has_pipeline_jobs" != "1" ]]; then
+  printf '[db-migrate] ERROR: validation failed (postgis=%s import_runs=%s raw_snapshots=%s staging=%s canonical=%s mappings=%s review_queue=%s overrides=%s transfer_rules=%s ojp_refs=%s pipeline_jobs=%s)\n' \
+    "$has_postgis" "$has_import_runs" "$has_raw_snapshots" "$has_staging" "$has_canonical" "$has_mappings" "$has_review_queue" "$has_overrides" "$has_transfer_rules" "$has_ojp_refs" "$has_pipeline_jobs" >&2
   exit 1
 fi
 

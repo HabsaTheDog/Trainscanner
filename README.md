@@ -14,8 +14,11 @@
 - Named GTFS profiles via `config/gtfs-profiles.json`
 - Active profile runtime state in `state/active-gtfs.json` (auto-migrates legacy `config/active-gtfs.json`)
 - Switch state machine with lock + status persistence
+- Idempotent switch semantics with per-run IDs (`runId`) and deterministic status persistence
 - Route query endpoint with station-resolution and MOTIS adapter
+- Structured logs with correlation IDs and machine-readable API error codes (`errorCode`)
 - Frontend profile switcher, status badge, autocomplete, route summary, map, raw JSON
+- Schema-based config validation for GTFS profiles, DACH sources, and OJP endpoint configs
 
 ## Quickstart
 
@@ -68,7 +71,7 @@ Active profile runtime state is tracked in `state/active-gtfs.json`.
 
 ## Runtime files
 
-- `state/gtfs-switch-status.json`: switch status (`idle|switching|importing|restarting|ready|failed`)
+- `state/gtfs-switch-status.json`: switch status (`idle|switching|importing|restarting|ready|failed`) with `runId` + `requestedProfile`
 - `state/gtfs-switch.lock`: concurrency lock
 - `state/gtfs-switch.log`: step logs and failures
 - `state/active-gtfs.json`: active GTFS profile marker used by orchestrator/scripts
@@ -89,6 +92,12 @@ curl -s -X POST http://localhost:3000/api/gtfs/activate \
   -H 'Content-Type: application/json' \
   -d '{"profile":"sample_de"}' | jq
 ```
+
+Response behavior:
+
+- New switch accepted: HTTP `202` with `runId`
+- Duplicate request for in-flight profile: HTTP `202` with `reused=true`
+- Profile already active/ready: HTTP `200` with `noop=true`
 
 ### `GET /api/gtfs/status`
 
@@ -118,11 +127,21 @@ Notes:
 - The orchestrator resolves station input to MOTIS stop IDs in `tag_stopId` format.
 - Default tag is `active-gtfs`, so resolved IDs look like `active-gtfs_198175`.
 - Responses include `routeRequestResolved` for debugging what was actually sent.
+- Error responses include `errorCode` for machine-readable handling.
+- Responses include `x-correlation-id` header for log tracing.
 
 ### `GET /health`
 
 ```bash
 curl -s http://localhost:3000/health | jq
+```
+
+### `GET /metrics`
+
+Prometheus-style runtime metrics:
+
+```bash
+curl -s http://localhost:3000/metrics
 ```
 
 ## Frontend
@@ -261,6 +280,23 @@ scripts/find-working-route.sh --target-date 2026-02-20 --max-attempts 300
 
 It generates real candidate pairs from GTFS and tests `/api/routes` until it finds non-empty itineraries.
 
+### `scripts/validate-config.sh`
+
+Validate schema contracts for config files:
+
+```bash
+scripts/validate-config.sh
+```
+
+Target one config contract:
+
+```bash
+scripts/validate-config.sh --only profiles
+scripts/validate-config.sh --only dach
+scripts/validate-config.sh --only ojp
+scripts/validate-config.sh --only ojp-mock
+```
+
 ### `scripts/qa/build-profile.sh`
 
 Deterministic canonical -> GTFS runtime export builder.
@@ -277,6 +313,39 @@ GTFS artifact validation gate.
 scripts/qa/validate-export.sh --zip data/gtfs/runtime/canonical_de_runtime/2026-02-19/active-gtfs.zip
 ```
 
+### `scripts/qa/run-route-smoke.sh`
+
+Run deterministic smoke route checks from fixture cases/baselines:
+
+```bash
+scripts/qa/run-route-smoke.sh --api-url http://localhost:3000
+```
+
+### `scripts/qa/run-route-regression.sh`
+
+Run full route regression suite and write QA report to `reports/qa/`:
+
+```bash
+scripts/qa/run-route-regression.sh --api-url http://localhost:3000
+```
+
+### `scripts/qa/report-pipeline-kpis.sh`
+
+Write pipeline KPI report (`reports/qa/pipeline-kpis.json`) from `pipeline_jobs`:
+
+```bash
+scripts/qa/report-pipeline-kpis.sh --window-hours 24
+```
+
+Pipeline orchestration semantics:
+
+- `pipeline_jobs` is idempotent by `(job_type, idempotency_key)`.
+- Duplicate starts for an in-flight/completed key reuse prior outcome.
+- Failed terminal jobs are replayed as the original failure for the same key (no implicit rerun).
+- Pending jobs (`queued`/`retry_wait`) are resumable for the same key and continue from persisted checkpoint context.
+- Running-slot race conflicts are normalized to `JOB_BACKPRESSURE` instead of generic internal errors.
+- Per-`job_type` concurrency uses `PIPELINE_JOB_MAX_CONCURRENT` and is enforced atomically in DB claim logic.
+
 ### DACH official source discovery/retrieval
 
 This repo now includes a separate raw-source layer for official DACH datasets (`DE`, `AT`, `CH`).
@@ -286,6 +355,8 @@ It does not change MOTIS GTFS-switch runtime behavior.
 - Source docs: `docs/dach-official-sources.md`
 - Raw fetch script: `scripts/data/fetch-dach-sources.sh`
 - Source verification script: `scripts/data/verify-dach-sources.sh`
+- Node CLI wrappers: `orchestrator/src/cli/fetch-dach-sources.js`, `orchestrator/src/cli/verify-dach-sources.js`
+- Domain service module: `orchestrator/src/domains/source-discovery/service.js`
 
 Validate source config, policy, and reachability:
 
@@ -336,6 +407,15 @@ This slice is local-first and is now the source for canonical->GTFS runtime expo
 - DB helper scripts: `scripts/data/`
 - Optional compose service profile for PostGIS: `dach-data`
 - PostGIS persistence in compose uses a Docker named volume: `postgis_data` (avoids root-owned host bind artifacts in `data/postgis/`)
+- Node CLI wrappers:
+  - `orchestrator/src/cli/ingest-netex.js`
+  - `orchestrator/src/cli/build-canonical-stations.js`
+  - `orchestrator/src/cli/build-review-queue.js`
+  - `orchestrator/src/cli/report-review-queue.js`
+- Domain service modules:
+  - `orchestrator/src/domains/ingest/service.js`
+  - `orchestrator/src/domains/canonical/service.js`
+  - `orchestrator/src/domains/qa/service.js`
 
 Run migrations (creates PostGIS extension + required tables):
 
@@ -545,6 +625,45 @@ Low-memory run mode (recommended for large CH NeTEx snapshots):
 nice -n 15 ionice -c3 scripts/data/ingest-netex.sh --country CH --as-of 2026-02-19
 ```
 
+## Domain architecture
+
+Core runtime/domain modules live in `orchestrator/src/`:
+
+- `core/`: schema validation, error taxonomy, ID/correlation helpers
+- `domains/source-discovery/`: DACH source contract validation
+- `domains/ingest/`: ingest run/option contracts
+- `domains/canonical/`: canonical scope contracts
+- `domains/export/`: deterministic export/hash contracts
+- `domains/switch-runtime/`: profile + switch contracts/state behavior
+- `domains/routing/`: station normalization + route request contracts
+- `domains/qa/`: QA case/baseline/report contracts
+- `cli/`: thin entrypoints for config validation, profile runtime helpers, route regression
+
+## Automated testing
+
+Fast local checks:
+
+```bash
+scripts/validate-config.sh
+cd orchestrator && npm run check && npm run test:unit && npm run test:integration
+```
+
+Full local suite (includes e2e + regression report generation under `reports/qa/`):
+
+```bash
+cd orchestrator && npm test
+```
+
+## CI quality gates
+
+- Fast PR: `.github/workflows/ci-pr.yml`
+- Full/nightly: `.github/workflows/ci-nightly.yml`
+- Legacy focused checks remain:
+  - `.github/workflows/qa-export-check.yml`
+  - `.github/workflows/ojp-mock-feeder-check.yml`
+
+PR CI fails when scoped runtime/script/config changes are missing required docs updates (`README.md`, `AGENTS.md`, `orchestrator/AGENTS.md`, `frontend/AGENTS.md`).
+
 ## Environment variables (orchestrator)
 
 Configured in `docker-compose.yml` by default:
@@ -561,6 +680,12 @@ Configured in `docker-compose.yml` by default:
 - `MOTIS_READY_TIMEOUT_MS`
 - `MOTIS_HEALTH_POLL_INTERVAL_MS`
 - `GTFS_SWITCH_LOCK_STALE_MS` (default `1800000`, 30 minutes)
+- `METRICS_ENABLED` (default `true`, controls `/metrics`)
+- `STATION_INDEX_CACHE_MAX_ENTRIES` (default `8`)
+- `STATION_INDEX_CACHE_TTL_MS` (default `300000`)
+- `PIPELINE_JOB_MAX_CONCURRENT` (default `1`, effective per-`job_type` running limit)
+- `PIPELINE_JOB_MAX_ATTEMPTS` (default `3`)
+- `PIPELINE_JOB_ORCHESTRATION_ENABLED` (default `true`)
 
 ## Environment variables (canonical PostGIS slice)
 
@@ -576,6 +701,7 @@ Configured in `docker-compose.yml` by default:
 - `CANONICAL_DB_DOCKER_PROFILE` (default `dach-data`)
 - `CANONICAL_DB_DOCKER_SERVICE` (default `postgis`)
 - `CANONICAL_DB_READY_TIMEOUT_SEC` (default `90`)
+- `ENABLE_POSTGIS_TESTS=1` enables DB-backed integration tests in CI/nightly
 
 ## Environment variables (OJP feeder scaffolding)
 
@@ -622,6 +748,16 @@ and provide valid tile profile config for your MOTIS build.
 ### Route returns empty itineraries
 
 Use resolved/tagged stop IDs (`active-gtfs_<stop_id>`) and check `routeRequestResolved` in response.
+
+### `init-motis.sh` warns about `state/active-gtfs.json` permissions
+
+If you see a warning like:
+
+```text
+Warning: could not update .../state/active-gtfs.json due to permissions (EACCES)
+```
+
+the GTFS artifact copy/config/import still completed. In this case, run profile activation via API (`scripts/switch-gtfs.sh --profile <name>`) so orchestrator refreshes runtime state files.
 
 ### Docker restart API version error
 

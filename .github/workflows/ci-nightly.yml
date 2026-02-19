@@ -1,0 +1,76 @@
+name: CI Nightly Full
+
+on:
+  schedule:
+    - cron: '15 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  full-quality-gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      CANONICAL_DB_MODE: docker-compose
+      CANONICAL_DB_DOCKER_PROFILE: dach-data
+      CANONICAL_DB_DOCKER_SERVICE: postgis
+      ENABLE_POSTGIS_TESTS: '1'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Syntax + config contract checks
+        run: |
+          bash -n scripts/*.sh scripts/ci/*.sh scripts/data/*.sh scripts/qa/*.sh
+          python3 -m py_compile scripts/qa/export-canonical-gtfs.py scripts/data/netex_extract_stops.py
+          scripts/validate-config.sh
+
+      - name: Orchestrator full test suite
+        run: |
+          cd orchestrator
+          npm run check
+          npm test
+
+      - name: Canonical export full determinism check
+        run: |
+          scripts/qa/seed-export-fixture.sh --as-of 2026-01-15
+
+          scripts/qa/build-profile.sh \
+            --profile canonical_de_runtime \
+            --as-of 2026-01-15 \
+            --country DE \
+            --output /tmp/active-gtfs-a.zip
+
+          scripts/qa/build-profile.sh \
+            --profile canonical_de_runtime \
+            --as-of 2026-01-15 \
+            --country DE \
+            --output /tmp/active-gtfs-b.zip
+
+          scripts/qa/validate-export.sh --zip /tmp/active-gtfs-a.zip
+
+          HASH_A="$(sha256sum /tmp/active-gtfs-a.zip | awk '{print $1}')"
+          HASH_B="$(sha256sum /tmp/active-gtfs-b.zip | awk '{print $1}')"
+          test "$HASH_A" = "$HASH_B"
+
+      - name: Upload QA reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-reports
+          path: reports/qa
+          if-no-files-found: warn
+
+      - name: Cleanup docker compose services
+        if: always()
+        run: docker compose --profile dach-data down -v

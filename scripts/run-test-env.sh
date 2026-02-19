@@ -80,38 +80,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+"${ROOT_DIR}/scripts/validate-config.sh" --only profiles >/dev/null
+
 if [[ -z "$PROFILE" ]]; then
-  PROFILE="$(node - <<'NODE' "$ROOT_DIR/state/active-gtfs.json" "$ROOT_DIR/config/active-gtfs.json" "$ROOT_DIR/config/gtfs-profiles.json"
-const fs = require('node:fs');
-const activePath = process.argv[2];
-const legacyActivePath = process.argv[3];
-const profilesPath = process.argv[4];
-let active = '';
-try {
-  const raw = JSON.parse(fs.readFileSync(activePath, 'utf8'));
-  active = typeof raw.activeProfile === 'string' ? raw.activeProfile : '';
-} catch {}
-if (!active) {
-  try {
-    const raw = JSON.parse(fs.readFileSync(legacyActivePath, 'utf8'));
-    active = typeof raw.activeProfile === 'string' ? raw.activeProfile : '';
-  } catch {}
-}
-
-let names = [];
-try {
-  const raw = JSON.parse(fs.readFileSync(profilesPath, 'utf8'));
-  const source = raw && typeof raw === 'object' ? (raw.profiles || raw) : {};
-  names = Object.keys(source);
-} catch {}
-
-if (active && names.includes(active)) {
-  process.stdout.write(active);
-} else if (names.length > 0) {
-  process.stdout.write(names[0]);
-}
-NODE
-)"
+  PROFILE="$(node "${ROOT_DIR}/orchestrator/src/cli/profile-runtime.js" resolve-default-profile --root "$ROOT_DIR" 2>/dev/null || true)"
 fi
 
 [[ -n "$PROFILE" ]] || fail "No profile detected. Set one in config/gtfs-profiles.json or pass --profile."

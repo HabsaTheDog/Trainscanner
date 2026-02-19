@@ -1,10 +1,10 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
-
-const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const { AppError } = require('./core/errors');
+const { ISO_DATE_RE, validateGtfsProfilesConfig } = require('./domains/switch-runtime/contracts');
 
 function normalizeProfiles(raw) {
-  const source = raw && typeof raw === 'object' ? raw.profiles || raw : {};
+  const source = validateGtfsProfilesConfig(raw);
   const normalized = {};
 
   for (const [name, entry] of Object.entries(source)) {
@@ -116,24 +116,37 @@ async function resolveProfileArtifact(profileName, profile, options = {}) {
   const dataDir = options.dataDir;
 
   if (!dataDir || typeof dataDir !== 'string') {
-    throw new Error('resolveProfileArtifact requires option dataDir');
+    throw new AppError({
+      code: 'INVALID_CONFIG',
+      message: 'resolveProfileArtifact requires option dataDir'
+    });
   }
 
   const projectRoot = projectRootFromDataDir(dataDir);
 
   if (!profile || typeof profile !== 'object') {
-    throw new Error(`Invalid profile '${profileName}' definition`);
+    throw new AppError({
+      code: 'INVALID_CONFIG',
+      message: `Invalid profile '${profileName}' definition`
+    });
   }
 
   if (profile.sourceType === 'static') {
     if (!profile.zipPath || typeof profile.zipPath !== 'string') {
-      throw new Error(`Static profile '${profileName}' is missing zipPath`);
+      throw new AppError({
+        code: 'INVALID_CONFIG',
+        message: `Static profile '${profileName}' is missing zipPath`
+      });
     }
 
     const absolutePath = resolveAgainstProject(projectRoot, profile.zipPath);
     const exists = await fileExists(absolutePath);
     if (!exists && !allowMissing) {
-      throw new Error(`GTFS zip not found for profile '${profileName}': ${absolutePath}`);
+      throw new AppError({
+        code: 'PROFILE_ARTIFACT_MISSING',
+        statusCode: 404,
+        message: `GTFS zip not found for profile '${profileName}': ${absolutePath}`
+      });
     }
 
     return {
@@ -146,13 +159,19 @@ async function resolveProfileArtifact(profileName, profile, options = {}) {
   }
 
   if (profile.sourceType !== 'runtime') {
-    throw new Error(`Profile '${profileName}' has unsupported source type`);
+    throw new AppError({
+      code: 'INVALID_CONFIG',
+      message: `Profile '${profileName}' has unsupported source type`
+    });
   }
 
   const runtime = profile.runtime || {};
   const mode = runtime.mode || 'canonical-export';
   if (mode !== 'canonical-export') {
-    throw new Error(`Profile '${profileName}' runtime mode '${mode}' is unsupported (expected canonical-export)`);
+    throw new AppError({
+      code: 'INVALID_CONFIG',
+      message: `Profile '${profileName}' runtime mode '${mode}' is unsupported (expected canonical-export)`
+    });
   }
 
   let absolutePath = '';
@@ -186,14 +205,19 @@ async function resolveProfileArtifact(profileName, profile, options = {}) {
             }
           };
         }
-        throw new Error(
-          `No runtime GTFS artifact found for profile '${profileName}' in ${runtimeRootAbs}. Run scripts/qa/build-profile.sh --profile ${runtimeProfile} --as-of <YYYY-MM-DD>.`
-        );
+        throw new AppError({
+          code: 'PROFILE_ARTIFACT_MISSING',
+          statusCode: 404,
+          message: `No runtime GTFS artifact found for profile '${profileName}' in ${runtimeRootAbs}. Run scripts/qa/build-profile.sh --profile ${runtimeProfile} --as-of <YYYY-MM-DD>.`
+        });
       }
       resolvedAsOf = latest;
     } else {
       if (!ISO_DATE_RE.test(requestedAsOf)) {
-        throw new Error(`Profile '${profileName}' runtime.asOf must be 'latest' or YYYY-MM-DD`);
+        throw new AppError({
+          code: 'INVALID_CONFIG',
+          message: `Profile '${profileName}' runtime.asOf must be 'latest' or YYYY-MM-DD`
+        });
       }
       resolvedAsOf = requestedAsOf;
     }
@@ -204,7 +228,11 @@ async function resolveProfileArtifact(profileName, profile, options = {}) {
 
   const exists = await fileExists(absolutePath);
   if (!exists && !allowMissing) {
-    throw new Error(`Runtime GTFS artifact not found for profile '${profileName}': ${absolutePath}`);
+    throw new AppError({
+      code: 'PROFILE_ARTIFACT_MISSING',
+      statusCode: 404,
+      message: `Runtime GTFS artifact not found for profile '${profileName}': ${absolutePath}`
+    });
   }
 
   return {

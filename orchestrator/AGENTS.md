@@ -13,6 +13,17 @@
 - `src/motis.js`: MOTIS health/route calls + Docker restart API
 - `src/lock.js`: filesystem lock (`state/gtfs-switch.lock`) with stale-lock cleanup
 - `src/config.js`: env/file path configuration
+- `src/core/`: shared schema validation, error taxonomy, ID/correlation helpers
+- `src/core/job-orchestrator.js`: idempotent DB-backed pipeline job orchestration with retry/resume
+- `src/core/circuit-breaker.js`: transient-failure circuit breaker for external calls
+- `src/core/metrics.js`: in-process Prometheus metric collectors
+- `src/domains/`: domain boundaries (`source-discovery`, `ingest`, `canonical`, `export`, `switch-runtime`, `routing`, `qa`)
+- `src/cli/`: thin wrappers for config validation, profile runtime helpers, route regression, and DACH data flows
+- `src/core/pipeline-runner.js`: shared runId/logging wrapper for CLI-triggered pipeline commands
+- `src/domains/source-discovery/service.js`: service entrypoints for fetch/verify flows
+- `src/domains/ingest/service.js`: service entrypoint for NeTEx ingest flow
+- `src/domains/canonical/service.js`: service entrypoints for canonical build + review queue build
+- `src/domains/qa/service.js`: service entrypoint for review queue reporting
 
 ## API contracts
 
@@ -21,7 +32,13 @@
 - `GET /api/gtfs/status`
 - `GET /api/gtfs/stations`
 - `GET /health`
+- `GET /metrics`
 - `POST /api/routes`
+
+Error contract:
+
+- failures include `errorCode`
+- responses include `x-correlation-id` header
 
 ## `/api/routes` expectations
 
@@ -37,6 +54,7 @@
 - Persist every transition to `state/gtfs-switch-status.json`.
 - Persist active profile marker to `state/active-gtfs.json` (legacy config path auto-migrates).
 - Prevent concurrent switches with lock file and clear stale locks when safe.
+- Switch requests are idempotent for same in-flight/active profile (`reused`/`noop`, `runId`).
 - Keep static profile activation behavior backward-compatible while supporting runtime descriptor profiles (`runtime.mode=canonical-export`).
 - When runtime descriptors are used, resolve to concrete artifact paths deterministically before copying to `data/motis/active-gtfs.zip`.
 
@@ -44,12 +62,18 @@
 
 - Keep behavior deterministic and debuggable.
 - Avoid introducing async races in switch flow.
+- Keep domain contracts validated at module boundaries.
 - If request mapping changes, update docs (`README.md` + AGENTS files) in same change.
 
 ## DACH data-pipeline boundary
 
 - `scripts/data/fetch-dach-sources.sh`, `scripts/data/verify-dach-sources.sh`, `scripts/data/db-migrate.sh`, `scripts/data/ingest-netex.sh`, and `scripts/data/build-canonical-stations.sh` are separate from orchestrator runtime.
 - `scripts/data/build-review-queue.sh`, `scripts/data/apply-station-overrides.sh`, `scripts/data/report-review-queue.sh`, `scripts/data/test-ojp-feeders.sh`, `scripts/data/check-ojp-feeders-mock.sh`, and `scripts/data/run-stitch-prototype.sh` are also separate from orchestrator runtime.
+- DACH script entrypoints are stable wrappers; Node CLIs/services are the default orchestration path and invoke `scripts/data/*.legacy.sh` compatibility implementations.
+- Pipeline jobs are DB-backed (`pipeline_jobs`) and idempotent by `(job_type, idempotency_key)`; duplicate in-flight/completed starts must reuse prior outcome.
+- Pending pipeline job rows (`queued|retry_wait`) are resumable for the same idempotency key and must continue from stored checkpoint context.
+- Per-`job_type` running limits come from `PIPELINE_JOB_MAX_CONCURRENT` and must be enforced atomically in DB claim logic.
+- Running-slot races while claiming `status=running` must be surfaced as `JOB_BACKPRESSURE`.
 - Do not couple DACH retrieval/ingest/canonical build into `/api/routes` or GTFS switch flow in this MVP slice.
 - Do not couple curation workflow, OJP feeder probing, or stitching prototype into `/api/routes` or GTFS switch flow in this MVP slice.
 - Canonical -> GTFS runtime export is script-driven in `scripts/qa/`; orchestrator consumes produced artifacts only.

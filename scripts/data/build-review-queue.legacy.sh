@@ -1,0 +1,393 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib-db.sh"
+
+COUNTRY_FILTER=""
+AS_OF=""
+GEO_THRESHOLD_M="3000"
+CLOSE_MISSING="true"
+
+usage() {
+  cat <<USAGE
+Usage: scripts/data/build-review-queue.sh [options]
+
+Build deterministic canonical-station QA review queue items.
+
+Options:
+  --country DE|AT|CH    Restrict to one country
+  --as-of YYYY-MM-DD    Restrict canonical mappings to snapshot_date <= date
+  --geo-threshold-m N   Suspicious spread threshold in meters (default: 3000)
+  --close-missing       Mark open/confirmed items as auto_resolved when not redetected (default)
+  --no-close-missing    Keep previously open items untouched
+  -h, --help            Show this help
+USAGE
+}
+
+log() {
+  printf '[build-review-queue] %s\n' "$*"
+}
+
+fail() {
+  printf '[build-review-queue] ERROR: %s\n' "$*" >&2
+  exit 1
+}
+
+is_iso_date() {
+  local d="$1"
+  [[ "$d" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || return 1
+  date -u -d "$d" +%F >/dev/null 2>&1
+}
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --country)
+        [[ $# -ge 2 ]] || fail "Missing value for --country"
+        COUNTRY_FILTER="$2"
+        shift 2
+        ;;
+      --as-of)
+        [[ $# -ge 2 ]] || fail "Missing value for --as-of"
+        AS_OF="$2"
+        shift 2
+        ;;
+      --geo-threshold-m)
+        [[ $# -ge 2 ]] || fail "Missing value for --geo-threshold-m"
+        GEO_THRESHOLD_M="$2"
+        shift 2
+        ;;
+      --close-missing)
+        CLOSE_MISSING="true"
+        shift
+        ;;
+      --no-close-missing)
+        CLOSE_MISSING="false"
+        shift
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        fail "Unknown argument: $1"
+        ;;
+    esac
+  done
+
+  if [[ -n "$COUNTRY_FILTER" && "$COUNTRY_FILTER" != "DE" && "$COUNTRY_FILTER" != "AT" && "$COUNTRY_FILTER" != "CH" ]]; then
+    fail "Invalid --country '$COUNTRY_FILTER' (expected DE, AT, or CH)"
+  fi
+
+  if [[ -n "$AS_OF" ]] && ! is_iso_date "$AS_OF"; then
+    fail "Invalid --as-of value '$AS_OF' (expected YYYY-MM-DD)"
+  fi
+
+  [[ "$GEO_THRESHOLD_M" =~ ^[0-9]+$ ]] || fail "--geo-threshold-m must be an integer"
+}
+
+main() {
+  local summary_json
+
+  parse_args "$@"
+
+  db_load_env
+  db_resolve_connection
+  db_ensure_ready
+
+  "${SCRIPT_DIR}/db-migrate.sh" --quiet
+
+  log "Building review queue (country=${COUNTRY_FILTER:-ALL} as_of=${AS_OF:-latest} geo_threshold_m=${GEO_THRESHOLD_M})"
+  summary_json="$(db_psql -At \
+    -v country_filter="$COUNTRY_FILTER" \
+    -v as_of="$AS_OF" \
+    -v geo_threshold_m="$GEO_THRESHOLD_M" \
+    -v close_missing="$CLOSE_MISSING" <<'SQL'
+BEGIN;
+
+CREATE TEMP TABLE _scoped_sources AS
+SELECT
+  css.canonical_station_id,
+  css.source_id,
+  css.source_stop_id,
+  css.country,
+  css.snapshot_date,
+  css.match_method,
+  css.hard_id,
+  s.geom,
+  s.stop_name,
+  s.normalized_name
+FROM canonical_station_sources css
+LEFT JOIN netex_stops_staging s
+  ON s.source_id = css.source_id
+ AND s.source_stop_id = css.source_stop_id
+ AND s.snapshot_date = css.snapshot_date
+WHERE (NULLIF(:'country_filter', '') IS NULL OR css.country = NULLIF(:'country_filter', '')::char(2))
+  AND (NULLIF(:'as_of', '') IS NULL OR css.snapshot_date <= NULLIF(:'as_of', '')::date);
+
+DO $$
+BEGIN
+  IF (SELECT COUNT(*) FROM _scoped_sources) = 0 THEN
+    RAISE EXCEPTION 'No canonical station mappings found for selected scope';
+  END IF;
+END $$;
+
+CREATE TEMP TABLE _scoped_station_ids AS
+SELECT DISTINCT canonical_station_id
+FROM _scoped_sources;
+
+CREATE TEMP TABLE _issues (
+  issue_key text PRIMARY KEY,
+  country char(2),
+  canonical_station_id text,
+  issue_type text,
+  severity text,
+  detected_as_of date,
+  details jsonb
+);
+
+WITH scope_params AS (
+  SELECT COALESCE(NULLIF(:'as_of', ''), 'latest') AS scope_tag
+)
+INSERT INTO _issues (issue_key, country, canonical_station_id, issue_type, severity, detected_as_of, details)
+SELECT
+  format('name_only_cluster|%s|%s', cs.canonical_station_id, sp.scope_tag) AS issue_key,
+  cs.country,
+  cs.canonical_station_id,
+  'name_only_cluster'::text AS issue_type,
+  CASE WHEN cs.member_count >= 4 THEN 'high' ELSE 'medium' END AS severity,
+  NULLIF(:'as_of', '')::date AS detected_as_of,
+  jsonb_build_object(
+    'canonicalStationId', cs.canonical_station_id,
+    'canonicalName', cs.canonical_name,
+    'memberCount', cs.member_count,
+    'matchMethod', cs.match_method
+  ) AS details
+FROM canonical_stations cs
+JOIN _scoped_station_ids ss
+  ON ss.canonical_station_id = cs.canonical_station_id
+JOIN scope_params sp ON true
+WHERE cs.match_method = 'name_only'
+  AND cs.member_count > 1;
+
+WITH scope_params AS (
+  SELECT COALESCE(NULLIF(:'as_of', ''), 'latest') AS scope_tag
+), geo_stats AS (
+  SELECT
+    s.canonical_station_id,
+    s.country,
+    COUNT(*) FILTER (WHERE s.geom IS NOT NULL) AS geom_members,
+    ST_MaxDistance(ST_Transform(ST_Collect(s.geom), 3857), ST_Transform(ST_Collect(s.geom), 3857)) AS max_distance_m
+  FROM _scoped_sources s
+  WHERE s.geom IS NOT NULL
+  GROUP BY s.canonical_station_id, s.country
+)
+INSERT INTO _issues (issue_key, country, canonical_station_id, issue_type, severity, detected_as_of, details)
+SELECT
+  format('suspicious_geo_spread|%s|%s', gs.canonical_station_id, sp.scope_tag) AS issue_key,
+  gs.country,
+  gs.canonical_station_id,
+  'suspicious_geo_spread'::text AS issue_type,
+  CASE WHEN gs.max_distance_m >= (NULLIF(:'geo_threshold_m', '')::double precision * 3) THEN 'high' ELSE 'medium' END AS severity,
+  NULLIF(:'as_of', '')::date AS detected_as_of,
+  jsonb_build_object(
+    'canonicalStationId', gs.canonical_station_id,
+    'maxDistanceMeters', ROUND(gs.max_distance_m::numeric, 2),
+    'geomMembers', gs.geom_members,
+    'thresholdMeters', NULLIF(:'geo_threshold_m', '')::integer
+  ) AS details
+FROM geo_stats gs
+JOIN scope_params sp ON true
+WHERE gs.geom_members > 1
+  AND gs.max_distance_m > NULLIF(:'geo_threshold_m', '')::double precision
+ON CONFLICT (issue_key) DO NOTHING;
+
+WITH scope_params AS (
+  SELECT COALESCE(NULLIF(:'as_of', ''), 'latest') AS scope_tag
+), dup_hard AS (
+  SELECT
+    s.country,
+    s.hard_id,
+    COUNT(*) AS mapping_rows,
+    COUNT(DISTINCT s.canonical_station_id) AS station_count,
+    array_agg(DISTINCT s.canonical_station_id ORDER BY s.canonical_station_id) AS station_ids
+  FROM _scoped_sources s
+  WHERE s.hard_id IS NOT NULL
+    AND btrim(s.hard_id) <> ''
+  GROUP BY s.country, s.hard_id
+  HAVING COUNT(DISTINCT s.canonical_station_id) > 1
+)
+INSERT INTO _issues (issue_key, country, canonical_station_id, issue_type, severity, detected_as_of, details)
+SELECT
+  format('duplicate_hard_id|%s|%s|%s', d.country, d.hard_id, sp.scope_tag) AS issue_key,
+  d.country,
+  NULL::text AS canonical_station_id,
+  'duplicate_hard_id'::text AS issue_type,
+  CASE WHEN d.station_count >= 3 THEN 'high' ELSE 'medium' END AS severity,
+  NULLIF(:'as_of', '')::date AS detected_as_of,
+  jsonb_build_object(
+    'hardId', d.hard_id,
+    'stationCount', d.station_count,
+    'mappingRows', d.mapping_rows,
+    'canonicalStationIds', d.station_ids
+  ) AS details
+FROM dup_hard d
+JOIN scope_params sp ON true
+ON CONFLICT (issue_key) DO NOTHING;
+
+WITH scope_params AS (
+  SELECT COALESCE(NULLIF(:'as_of', ''), 'latest') AS scope_tag
+), dup_name AS (
+  SELECT
+    cs.country,
+    cs.normalized_name,
+    COUNT(*) AS station_count,
+    array_agg(cs.canonical_station_id ORDER BY cs.canonical_station_id) AS station_ids
+  FROM canonical_stations cs
+  JOIN _scoped_station_ids ss
+    ON ss.canonical_station_id = cs.canonical_station_id
+  GROUP BY cs.country, cs.normalized_name
+  HAVING COUNT(*) > 1
+)
+INSERT INTO _issues (issue_key, country, canonical_station_id, issue_type, severity, detected_as_of, details)
+SELECT
+  format('duplicate_normalized_name|%s|%s|%s', d.country, d.normalized_name, sp.scope_tag) AS issue_key,
+  d.country,
+  NULL::text AS canonical_station_id,
+  'duplicate_normalized_name'::text AS issue_type,
+  CASE WHEN d.station_count >= 4 THEN 'high' ELSE 'low' END AS severity,
+  NULLIF(:'as_of', '')::date AS detected_as_of,
+  jsonb_build_object(
+    'normalizedName', d.normalized_name,
+    'stationCount', d.station_count,
+    'canonicalStationIds', d.station_ids
+  ) AS details
+FROM dup_name d
+JOIN scope_params sp ON true
+ON CONFLICT (issue_key) DO NOTHING;
+
+SELECT COALESCE(NULLIF(:'as_of', ''), 'latest') AS scope_tag
+INTO TEMP TABLE _scope;
+
+INSERT INTO canonical_review_queue (
+  issue_key,
+  country,
+  canonical_station_id,
+  issue_type,
+  severity,
+  detected_as_of,
+  status,
+  details,
+  provenance_source,
+  provenance_run_tag,
+  first_detected_at,
+  last_detected_at,
+  created_at,
+  updated_at
+)
+SELECT
+  i.issue_key,
+  i.country,
+  i.canonical_station_id,
+  i.issue_type,
+  i.severity,
+  i.detected_as_of,
+  'open'::text,
+  i.details,
+  'build-review-queue.sh'::text,
+  (SELECT scope_tag FROM _scope),
+  now(),
+  now(),
+  now(),
+  now()
+FROM _issues i
+ON CONFLICT (issue_key)
+DO UPDATE SET
+  country = EXCLUDED.country,
+  canonical_station_id = EXCLUDED.canonical_station_id,
+  issue_type = EXCLUDED.issue_type,
+  severity = EXCLUDED.severity,
+  detected_as_of = EXCLUDED.detected_as_of,
+  details = EXCLUDED.details,
+  provenance_source = EXCLUDED.provenance_source,
+  provenance_run_tag = EXCLUDED.provenance_run_tag,
+  last_detected_at = now(),
+  detected_count = canonical_review_queue.detected_count + 1,
+  status = CASE
+    WHEN canonical_review_queue.status IN ('resolved', 'auto_resolved') THEN 'open'
+    ELSE canonical_review_queue.status
+  END,
+  resolved_at = CASE
+    WHEN canonical_review_queue.status IN ('resolved', 'auto_resolved') THEN NULL
+    ELSE canonical_review_queue.resolved_at
+  END,
+  resolved_by = CASE
+    WHEN canonical_review_queue.status IN ('resolved', 'auto_resolved') THEN NULL
+    ELSE canonical_review_queue.resolved_by
+  END,
+  resolution_note = CASE
+    WHEN canonical_review_queue.status IN ('resolved', 'auto_resolved') THEN NULL
+    ELSE canonical_review_queue.resolution_note
+  END,
+  updated_at = now();
+
+UPDATE canonical_review_queue q
+SET
+  status = 'auto_resolved',
+  resolved_at = now(),
+  resolved_by = current_user,
+  resolution_note = COALESCE(q.resolution_note, 'Auto-resolved: not redetected in latest queue build for scope.'),
+  updated_at = now()
+WHERE :'close_missing' = 'true'
+  AND q.provenance_run_tag = (SELECT scope_tag FROM _scope)
+  AND q.status IN ('open', 'confirmed')
+  AND (NULLIF(:'country_filter', '') IS NULL OR q.country = NULLIF(:'country_filter', '')::char(2))
+  AND NOT EXISTS (
+    SELECT 1
+    FROM _issues i
+    WHERE i.issue_key = q.issue_key
+  );
+
+SELECT json_build_object(
+  'scopeCountry', NULLIF(:'country_filter', ''),
+  'scopeAsOf', NULLIF(:'as_of', ''),
+  'scopeTag', (SELECT scope_tag FROM _scope),
+  'detectedIssues', (SELECT COUNT(*) FROM _issues),
+  'openItems', (
+    SELECT COUNT(*)
+    FROM canonical_review_queue q
+    WHERE q.provenance_run_tag = (SELECT scope_tag FROM _scope)
+      AND (NULLIF(:'country_filter', '') IS NULL OR q.country = NULLIF(:'country_filter', '')::char(2))
+      AND q.status = 'open'
+  ),
+  'confirmedItems', (
+    SELECT COUNT(*)
+    FROM canonical_review_queue q
+    WHERE q.provenance_run_tag = (SELECT scope_tag FROM _scope)
+      AND (NULLIF(:'country_filter', '') IS NULL OR q.country = NULLIF(:'country_filter', '')::char(2))
+      AND q.status = 'confirmed'
+  ),
+  'resolvedItems', (
+    SELECT COUNT(*)
+    FROM canonical_review_queue q
+    WHERE q.provenance_run_tag = (SELECT scope_tag FROM _scope)
+      AND (NULLIF(:'country_filter', '') IS NULL OR q.country = NULLIF(:'country_filter', '')::char(2))
+      AND q.status IN ('resolved', 'auto_resolved')
+  )
+)::text;
+
+COMMIT;
+SQL
+  )"
+
+  summary_json="$(printf '%s\n' "$summary_json" | tr -d '\r' | grep -E '^\{.*\}$' | tail -n 1)"
+  [[ -n "$summary_json" ]] || fail "No summary JSON returned from SQL run"
+
+  log "Queue build complete"
+  printf '%s\n' "$summary_json" | jq .
+}
+
+main "$@"

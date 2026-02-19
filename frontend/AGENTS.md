@@ -16,6 +16,7 @@
 - Load station suggestions from `GET /api/gtfs/stations`.
 - Disable route form unless status is `ready`.
 - Keep UI responsive while switching/importing/restarting.
+- Treat API `errorCode` and `x-correlation-id` as optional debug metadata when showing failures.
 
 ## Route view requirements
 
@@ -38,5 +39,7 @@
 - Preserve route payload contract: `origin`, `destination`, `datetime`.
 - Treat active profile as API-owned runtime state (stored server-side in `state/active-gtfs.json`).
 - Keep DACH PostGIS/NeTEx canonical pipeline concerns out of frontend runtime unless explicitly requested.
+- Treat DACH `scripts/data/*.sh` commands as backend/ops tooling (now CLI-backed wrappers), not frontend runtime dependencies.
+- Treat backend pipeline orchestration semantics (`JOB_BACKPRESSURE`, resumable `queued|retry_wait` jobs, per-type concurrency limits) as ops concerns, not frontend state.
 - Keep canonical QA, OJP feeder probing, and stitching prototype concerns out of frontend runtime unless explicitly requested.
 - Keep local OJP mock fixture checks (`scripts/data/check-ojp-feeders-mock.sh`) out of frontend runtime unless explicitly requested.

@@ -1,0 +1,13 @@
+{
+  "caseId": "smoke_tagged_success",
+  "expected": {
+    "caseId": "smoke_tagged_success",
+    "status": 200,
+    "errorCode": null,
+    "itineraryCount": 1,
+    "directCount": 0,
+    "motisAttemptCount": 2,
+    "originStrategy": "tagged_stop_id",
+    "destinationStrategy": "tagged_stop_id"
+  }
+}

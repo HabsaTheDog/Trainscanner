@@ -1,0 +1,47 @@
+name: CI PR Fast
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  fast-quality-gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Shell and Python syntax checks
+        run: |
+          bash -n scripts/*.sh scripts/ci/*.sh scripts/data/*.sh scripts/qa/*.sh
+          python3 -m py_compile scripts/qa/export-canonical-gtfs.py scripts/data/netex_extract_stops.py
+
+      - name: Validate config contracts
+        run: scripts/validate-config.sh
+
+      - name: Docs update contract (PR only)
+        if: github.event_name == 'pull_request'
+        run: scripts/ci/check-docs-updated.sh "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}"
+
+      - name: Orchestrator lint + unit + integration
+        run: |
+          cd orchestrator
+          npm run check
+          npm run test:unit
+          npm run test:integration

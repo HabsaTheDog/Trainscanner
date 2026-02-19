@@ -28,6 +28,7 @@ pg_data/
 # IDE
 .vscode/
 .idea/
+.sonarlint/
 *.swp
 *.swo
 
@@ -41,6 +42,7 @@ npm-debug.log*
 
 # Testing
 coverage/
+reports/qa/*.json
 
 # Python
 __pycache__/

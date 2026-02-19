@@ -9,6 +9,9 @@ Maintain and extend the MOTIS GTFS-switch MVP for fast dataset testing/debugging
 ## Active architecture
 
 - `orchestrator/`: plain Node.js API server and switch workflow
+- `orchestrator/src/core/`: shared schema validation, errors, IDs, logging primitives
+- `orchestrator/src/domains/`: domain contracts/modules (`source-discovery|ingest|canonical|export|switch-runtime|routing|qa`)
+- `orchestrator/src/cli/`: thin CLI wrappers around tested modules
 - `frontend/`: static UI (no framework) with route summary + MapLibre map
 - `config/`: GTFS profile definitions
 - `config/dach-data-sources.json`: official DACH source registry
@@ -19,20 +22,25 @@ Maintain and extend the MOTIS GTFS-switch MVP for fast dataset testing/debugging
 - `db/migrations/`: PostGIS schema migrations for canonical station layer
 - `.github/workflows/ojp-mock-feeder-check.yml`: CI smoke check for deterministic OJP mock probe
 - `.github/workflows/qa-export-check.yml`: lightweight canonical export determinism check
+- `.github/workflows/ci-pr.yml`: fast PR quality gates (lint/contracts/unit+integration)
+- `.github/workflows/ci-nightly.yml`: full/nightly integration + e2e + report artifacts
 - `docker-compose.yml`: optional `postgis` service (`dach-data` profile) with named volume persistence
 - `state/`: switch lock, status, and logs
 - `data/motis/`: generated MOTIS runtime data
 - `data/gtfs/runtime/`: generated deterministic GTFS runtime artifacts
+- `reports/qa/`: generated QA/regression reports
 
 ## Core behavior that must remain true
 
 - Frontend remains reachable while profile switching/restart is running.
 - Only one switch can run at a time (lock file).
+- Idempotent switch requests for the same in-flight/active profile return reused/noop semantics with `runId`.
 - Switch states are persisted (`idle|switching|importing|restarting|ready|failed`).
 - Active profile runtime marker is persisted in `state/active-gtfs.json` (legacy `config/active-gtfs.json` may exist).
 - Route endpoint is blocked unless system state is `ready`.
 - Station autocomplete comes from active GTFS profile.
 - Route station inputs are normalized before MOTIS call.
+- API error payloads expose machine-readable `errorCode`; responses carry `x-correlation-id`.
 - Static GTFS profiles keep working unchanged; runtime descriptor profiles must resolve deterministically to concrete artifacts before activation.
 
 ## DACH data pipeline contract
@@ -41,6 +49,11 @@ Maintain and extend the MOTIS GTFS-switch MVP for fast dataset testing/debugging
 - discovery/retrieval of official raw DACH sources
 - NeTEx ingest into PostGIS staging
 - canonical station build with provenance mapping
+- Script entrypoints under `scripts/data/*.sh` remain stable and are thin wrappers to Node CLIs under `orchestrator/src/cli/`.
+- Legacy shell implementations are retained in `scripts/data/*.legacy.sh` for compatibility while Node services are the default entry path.
+- Pipeline jobs are idempotent by `(job_type, idempotency_key)` and pending states (`queued|retry_wait`) must be resumable.
+- Pipeline job concurrency is configurable per `job_type` (`PIPELINE_JOB_MAX_CONCURRENT`) and must be enforced atomically.
+- Multi-runner running-slot races must surface as `JOB_BACKPRESSURE` (not generic internal errors).
 - Prefer NeTEx; GTFS requires explicit `fallbackReason` per source.
 - No runtime auto-fallback from NeTEx to GTFS for the same source.
 - Raw snapshots must stay local under `data/raw/<country>/<provider>/<format>/<YYYY-MM-DD>/`.
@@ -83,6 +96,7 @@ Maintain and extend the MOTIS GTFS-switch MVP for fast dataset testing/debugging
 - `scripts/up.sh --profile <name>`
 - `scripts/init-motis.sh --profile <name>`
 - `scripts/check-motis-data.sh`
+- `scripts/validate-config.sh [--only profiles|dach|ojp|ojp-mock]`
 - `scripts/switch-gtfs.sh --profile <name>`
 - `scripts/find-working-route.sh --max-attempts <n>`
 - `scripts/data/verify-dach-sources.sh`
@@ -100,6 +114,9 @@ Maintain and extend the MOTIS GTFS-switch MVP for fast dataset testing/debugging
 - `scripts/qa/build-profile.sh --profile <name> --as-of <YYYY-MM-DD>`
 - `scripts/qa/validate-export.sh --zip /absolute/or/relative/path/to/active-gtfs.zip`
 - `scripts/qa/seed-export-fixture.sh --as-of <YYYY-MM-DD>`
+- `scripts/qa/run-route-smoke.sh --api-url <url>`
+- `scripts/qa/run-route-regression.sh --api-url <url>`
+- `scripts/qa/report-pipeline-kpis.sh [--window-hours <n>] [--job-type <type>]`
 
 ## Documentation policy (required)
 
