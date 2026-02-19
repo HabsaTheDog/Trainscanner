@@ -17,6 +17,7 @@ build/
 data/gtfs_raw/
 data/osm/
 data/gtfs_filtered/
+data/raw/
 *.osm.pbf
 *.gtfs.zip
 

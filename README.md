@@ -231,6 +231,56 @@ scripts/find-working-route.sh --target-date 2026-02-20 --max-attempts 300
 
 It generates real candidate pairs from GTFS and tests `/api/routes` until it finds non-empty itineraries.
 
+### DACH official source discovery/retrieval
+
+This repo now includes a separate raw-source layer for official DACH datasets (`DE`, `AT`, `CH`).
+It does not change MOTIS GTFS-switch runtime behavior.
+
+- Source registry: `config/dach-data-sources.json`
+- Source docs: `docs/dach-official-sources.md`
+- Raw fetch script: `scripts/data/fetch-dach-sources.sh`
+- Source verification script: `scripts/data/verify-dach-sources.sh`
+
+Validate source config, policy, and reachability:
+
+```bash
+scripts/data/verify-dach-sources.sh
+```
+
+Verify one source at a time:
+
+```bash
+scripts/data/verify-dach-sources.sh --source-id de_delfi_sollfahrplandaten_netex
+scripts/data/verify-dach-sources.sh --source-id at_oebb_mmtis_netex
+scripts/data/verify-dach-sources.sh --source-id ch_opentransportdata_timetable_netex
+```
+
+Fetch latest raw snapshots (local-only storage):
+
+```bash
+scripts/data/fetch-dach-sources.sh
+```
+
+Fetch one source at a time:
+
+```bash
+scripts/data/fetch-dach-sources.sh --source-id de_delfi_sollfahrplandaten_netex
+scripts/data/fetch-dach-sources.sh --source-id at_oebb_mmtis_netex
+scripts/data/fetch-dach-sources.sh --source-id ch_opentransportdata_timetable_netex
+```
+
+Deterministic replay mode with explicit date:
+
+```bash
+scripts/data/fetch-dach-sources.sh --as-of 2026-02-01
+```
+
+Note:
+
+- Some official sources are access-controlled. Configure login/session secrets in `.env` (for example `DE_DELFI_SOLLFAHRPLANDATEN_NETEX_COOKIE=...`) before running fetch/verify.
+- For automatic runs, prefer username/password env vars (for example `DE_DELFI_SOLLFAHRPLANDATEN_NETEX_USERNAME` and `DE_DELFI_SOLLFAHRPLANDATEN_NETEX_PASSWORD`) so scripts can refresh the session.
+- DE DELFI currently publishes a ZIP filename that does not contain `netex` in the name (`...fahrplaene_gesamtdeutschland.zip`); this can appear as a warning in verify output and is expected.
+
 ## Environment variables (orchestrator)
 
 Configured in `docker-compose.yml` by default:

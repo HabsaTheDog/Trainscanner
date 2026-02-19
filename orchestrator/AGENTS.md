@@ -42,3 +42,8 @@
 - Keep behavior deterministic and debuggable.
 - Avoid introducing async races in switch flow.
 - If request mapping changes, update docs (`README.md` + AGENTS files) in same change.
+
+## DACH raw-source boundary
+
+- `scripts/data/fetch-dach-sources.sh` and `scripts/data/verify-dach-sources.sh` are separate from orchestrator runtime.
+- Do not couple DACH raw retrieval into `/api/routes` or GTFS switch flow in this MVP.

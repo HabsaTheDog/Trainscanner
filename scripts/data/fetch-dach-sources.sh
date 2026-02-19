@@ -1,0 +1,607 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONFIG_FILE="config/dach-data-sources.json"
+AS_OF=""
+COUNTRY_FILTER=""
+SOURCE_ID_FILTER=""
+TEMP_FILES=()
+
+cleanup_temp_files() {
+  local f
+  for f in "${TEMP_FILES[@]}"; do
+    [[ -n "$f" ]] && rm -f "$f" 2>/dev/null || true
+  done
+}
+trap cleanup_temp_files EXIT
+
+usage() {
+  cat <<USAGE
+Usage: scripts/data/fetch-dach-sources.sh [options]
+
+Fetch official DACH raw datasets into data/raw/.
+
+Options:
+  --as-of YYYY-MM-DD   Deterministic replay date (select latest artifact <= date)
+  --country DE|AT|CH   Only fetch sources for one country
+  --source-id ID       Only fetch one source id
+  -h, --help           Show this help
+USAGE
+}
+
+log() {
+  printf '[fetch-dach] %s\n' "$*"
+}
+
+fail() {
+  printf '[fetch-dach] ERROR: %s\n' "$*" >&2
+  exit 1
+}
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || fail "Missing required command: $1"
+}
+
+slugify() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/_/g; s/^_+//; s/_+$//'
+}
+
+is_iso_date() {
+  local d="$1"
+  [[ "$d" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || return 1
+  date -u -d "$d" +%F >/dev/null 2>&1
+}
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --as-of)
+        [[ $# -ge 2 ]] || fail "Missing value for --as-of"
+        AS_OF="$2"
+        shift 2
+        ;;
+      --country)
+        [[ $# -ge 2 ]] || fail "Missing value for --country"
+        COUNTRY_FILTER="$2"
+        shift 2
+        ;;
+      --source-id)
+        [[ $# -ge 2 ]] || fail "Missing value for --source-id"
+        SOURCE_ID_FILTER="$2"
+        shift 2
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        fail "Unknown option: $1"
+        ;;
+    esac
+  done
+
+  if [[ -n "$AS_OF" ]] && ! is_iso_date "$AS_OF"; then
+    fail "Invalid --as-of value '$AS_OF' (expected YYYY-MM-DD)"
+  fi
+
+  if [[ -n "$COUNTRY_FILTER" && "$COUNTRY_FILTER" != "DE" && "$COUNTRY_FILTER" != "AT" && "$COUNTRY_FILTER" != "CH" ]]; then
+    fail "Invalid --country '$COUNTRY_FILTER' (expected DE, AT, or CH)"
+  fi
+}
+
+load_env() {
+  if [[ -f .env ]]; then
+    # shellcheck disable=SC1091
+    set -a; source .env; set +a
+  fi
+}
+
+build_auth_args() {
+  local source_id="$1"
+  local access_type="$2"
+  local auth_check_url="${3:-}"
+  AUTH_ARGS=()
+
+  case "$access_type" in
+    public)
+      ;;
+    api_key)
+      local var_name
+      var_name="$(printf '%s' "$source_id" | tr '[:lower:]-' '[:upper:]_')_API_KEY"
+      local api_key="${!var_name:-${DACH_API_KEY:-}}"
+      [[ -n "$api_key" ]] || fail "Missing auth for '$source_id': set $var_name or DACH_API_KEY"
+      AUTH_ARGS=(-H "X-API-Key: $api_key")
+      ;;
+    token)
+      local token_var
+      token_var="$(printf '%s' "$source_id" | tr '[:lower:]-' '[:upper:]_')_TOKEN"
+      local token="${!token_var:-${DACH_TOKEN:-}}"
+      [[ -n "$token" ]] || fail "Missing auth for '$source_id': set $token_var or DACH_TOKEN"
+      AUTH_ARGS=(-H "Authorization: Bearer $token")
+      ;;
+    other)
+      local source_key cookie_var cookie_file_var header_var user_var pass_var login_url_var
+      source_key="$(printf '%s' "$source_id" | tr '[:lower:]-' '[:upper:]_')"
+      cookie_var="${source_key}_COOKIE"
+      cookie_file_var="${source_key}_COOKIE_FILE"
+      header_var="${source_key}_HEADER"
+      user_var="${source_key}_USERNAME"
+      pass_var="${source_key}_PASSWORD"
+      login_url_var="${source_key}_LOGIN_URL"
+
+      local cookie cookie_file header username password login_url
+      cookie="${!cookie_var:-${DACH_COOKIE:-}}"
+      cookie_file="${!cookie_file_var:-${DACH_COOKIE_FILE:-}}"
+      header="${!header_var:-${DACH_HEADER:-}}"
+      username="${!user_var:-${DACH_USERNAME:-}}"
+      password="${!pass_var:-${DACH_PASSWORD:-}}"
+      login_url="${!login_url_var:-https://www.opendata-oepnv.de/ht/de/willkommen}"
+
+      [[ "$cookie" == *PASTE_* || "$cookie" == *YOUR_SESSION_COOKIE* ]] && cookie=""
+      [[ "$header" == *PASTE_* || "$header" == *YOUR_SESSION_COOKIE* ]] && header=""
+      [[ "$username" == *PASTE_* || "$username" == *YOUR_USERNAME* ]] && username=""
+      [[ "$password" == *PASTE_* || "$password" == *YOUR_PASSWORD* ]] && password=""
+
+      if [[ -z "$cookie" && -z "$cookie_file" && -z "$header" ]]; then
+        if [[ -n "$username" && -n "$password" ]]; then
+          local session_cookie_file
+          session_cookie_file="$(delfi_login_cookie_file "$source_id" "$login_url" "$username" "$password" "$auth_check_url")"
+          AUTH_ARGS+=(--cookie "$session_cookie_file")
+          return
+        fi
+        fail "Missing auth for '$source_id': set cookie/header ($cookie_var, $cookie_file_var, $header_var) or login credentials ($user_var, $pass_var)"
+      fi
+
+      if [[ -n "$cookie_file" ]]; then
+        [[ -f "$cookie_file" ]] || fail "Missing auth for '$source_id': cookie file not found at $cookie_file"
+        AUTH_ARGS+=(--cookie "$cookie_file")
+      fi
+      if [[ -n "$cookie" ]]; then
+        AUTH_ARGS+=(--cookie "$cookie")
+      fi
+      if [[ -n "$header" ]]; then
+        AUTH_ARGS+=(-H "$header")
+      fi
+      ;;
+    *)
+      fail "Invalid accessType '$access_type' for '$source_id'"
+      ;;
+  esac
+}
+
+extract_attr() {
+  local input="$1"
+  local attr="$2"
+  printf '%s\n' "$input" | sed -nE "s/.*${attr}=\"([^\"]*)\".*/\\1/p" | head -1
+}
+
+delfi_login_cookie_file() {
+  local source_id="$1"
+  local login_url="$2"
+  local username="$3"
+  local password="$4"
+  local auth_check_url="$5"
+
+  local cookie_file
+  cookie_file="$(mktemp)"
+  TEMP_FILES+=("$cookie_file")
+
+  local html form_block form_line action_rel action_url
+  html="$(curl -fsSL -c "$cookie_file" -b "$cookie_file" "$login_url")" || fail "Login bootstrap failed for '$source_id' at $login_url"
+  form_block="$(awk 'BEGIN{IGNORECASE=1}/<form[^>]*tx_felogin_login%5Baction%5D=login/{f=1} f{print} /<\/form>/{if(f){exit}}' <<<"$html")"
+  [[ -n "$form_block" ]] || fail "Could not find login form for '$source_id' at $login_url"
+
+  form_line="$(printf '%s\n' "$form_block" | head -1)"
+  action_rel="$(extract_attr "$form_line" "action")"
+  [[ -n "$action_rel" ]] || fail "Could not parse login form action for '$source_id'"
+  action_rel="${action_rel//&amp;/&}"
+  action_url="$(normalize_url "$login_url" "$action_rel")"
+
+  local post_args=()
+  while IFS= read -r hidden; do
+    local name value
+    name="$(extract_attr "$hidden" "name")"
+    value="$(extract_attr "$hidden" "value")"
+    [[ -n "$name" ]] || continue
+    post_args+=(--data-urlencode "$name=$value")
+  done < <(printf '%s\n' "$form_block" | grep -oE '<input[^>]+type="hidden"[^>]*>')
+
+  post_args+=(--data-urlencode "user=$username")
+  post_args+=(--data-urlencode "pass=$password")
+  post_args+=(--data-urlencode "submit=Anmelden")
+
+  curl -fsSL -c "$cookie_file" -b "$cookie_file" -X POST "$action_url" "${post_args[@]}" >/dev/null \
+    || fail "Login submit failed for '$source_id' at $action_url"
+
+  if [[ -n "$auth_check_url" ]]; then
+    local check_html has_download_links
+    check_html="$(curl -fsSL -c "$cookie_file" -b "$cookie_file" "$auth_check_url")" \
+      || fail "Post-login auth check failed for '$source_id'"
+    has_download_links=0
+    if printf '%s' "$check_html" | grep -Eiq 'href="[^"]+\.(zip|xml|xml\.gz|tgz|gz)"|data-download="[^"]+\.(zip|xml|xml\.gz|tgz|gz)"'; then
+      has_download_links=1
+    fi
+    if [[ "$has_download_links" -eq 0 ]] && printf '%s' "$check_html" | grep -Eiq 'Bitte Anmelden|This Download is only available for registered Users'; then
+      fail "Login appears unsuccessful for '$source_id' (still seeing login-required marker on dataset page)"
+    fi
+  fi
+
+  printf '%s\n' "$cookie_file"
+}
+
+normalize_url() {
+  local base_url="$1"
+  local maybe_relative="$2"
+
+  if [[ "$maybe_relative" =~ ^https?:// ]]; then
+    printf '%s\n' "$maybe_relative"
+    return
+  fi
+
+  local proto host
+  proto="${base_url%%://*}"
+  host="${base_url#*://}"
+  host="${host%%/*}"
+
+  if [[ "$maybe_relative" == /* ]]; then
+    printf '%s://%s%s\n' "$proto" "$host" "$maybe_relative"
+  else
+    printf '%s/%s\n' "${base_url%/}" "$maybe_relative"
+  fi
+}
+
+resolve_de_delfi_netex() {
+  local endpoint="$1"
+  local as_of="$2"
+
+  local html
+  html="$(curl -fsSL "${AUTH_ARGS[@]}" "$endpoint")" || fail "Source unavailable: could not open DE DELFI endpoint $endpoint"
+
+  mapfile -t raw_urls < <(
+    {
+      printf '%s' "$html" | grep -oE 'href="[^"]+\.(zip|xml|xml\.gz|tgz|gz)"' | sed -E 's/^href="([^"]+)"$/\1/'
+      printf '%s' "$html" | grep -oE 'data-download="[^"]+\.(zip|xml|xml\.gz|tgz|gz)"' | sed -E 's/^data-download="([^"]+)"$/\1/'
+    } | sort -u
+  )
+
+  if [[ ${#raw_urls[@]} -eq 0 ]]; then
+    if printf '%s' "$html" | grep -Eiq 'Bitte Anmelden|only available for registered users|Registration'; then
+      fail "Missing auth for DE DELFI NeTEx source: login required and no download links visible"
+    fi
+    fail "No DE DELFI NeTEx download links found on dataset detail page"
+  fi
+
+  local cutoff="999999999999"
+  if [[ -n "$as_of" ]]; then
+    cutoff="${as_of//-/}2359"
+  fi
+
+  local best_url="" best_ts="0" fallback_url="" u abs_u ts name
+  for u in "${raw_urls[@]}"; do
+    abs_u="$(normalize_url "$endpoint" "$u")"
+    [[ -n "$fallback_url" ]] || fallback_url="$abs_u"
+
+    name="${abs_u##*/}"
+    ts="$(printf '%s' "$name" | grep -oE '[0-9]{12}' | head -1 || true)"
+    if [[ -z "$ts" ]]; then
+      ts="$(printf '%s' "$name" | grep -oE '[0-9]{8}' | head -1 || true)"
+      [[ -n "$ts" ]] && ts="${ts}0000"
+    fi
+    [[ -n "$ts" ]] || continue
+
+    if [[ "$ts" -le "$cutoff" && "$ts" -ge "$best_ts" ]]; then
+      best_ts="$ts"
+      best_url="$abs_u"
+    fi
+  done
+
+  if [[ -n "$best_url" ]]; then
+    printf '%s\n' "$best_url"
+    return
+  fi
+
+  [[ -n "$fallback_url" ]] || fail "No DE DELFI download URL could be resolved"
+  printf '%s\n' "$fallback_url"
+}
+
+resolve_at_netex() {
+  local endpoint="$1"
+  local as_of="$2"
+
+  local html
+  html="$(curl -fsSL "${AUTH_ARGS[@]}" "$endpoint")" || fail "Source unavailable: could not open AT endpoint $endpoint"
+
+  mapfile -t raw_urls < <(printf '%s' "$html" | grep -oE 'data-download="[^"]+"' | sed -E 's/^data-download="([^"]+)"$/\1/' | grep -Ei 'netex.*\.zip|\.zip.*netex')
+  [[ ${#raw_urls[@]} -gt 0 ]] || fail "No AT NetEx download URLs found in dataset page"
+
+  local best_url=""
+  local best_year="0"
+  local as_of_year="9999"
+  if [[ -n "$as_of" ]]; then
+    as_of_year="${as_of:0:4}"
+  fi
+
+  local u abs_u year
+  for u in "${raw_urls[@]}"; do
+    abs_u="$(normalize_url "$endpoint" "$u")"
+    year="$(printf '%s' "$abs_u" | grep -oE '20[0-9]{2}' | head -1 || true)"
+    [[ -n "$year" ]] || year="0"
+    if [[ "$year" -le "$as_of_year" && "$year" -ge "$best_year" ]]; then
+      best_year="$year"
+      best_url="$abs_u"
+    fi
+  done
+
+  [[ -n "$best_url" ]] || fail "No AT NetEx URL matched as-of date '$as_of'"
+  printf '%s\n' "$best_url"
+}
+
+resolve_ch_netex() {
+  local endpoint="$1"
+  local as_of="$2"
+
+  local html
+  html="$(curl -fsSL "${AUTH_ARGS[@]}" "$endpoint")" || fail "Source unavailable: could not open CH endpoint $endpoint"
+
+  mapfile -t urls < <(printf '%s' "$html" \
+    | grep -oE 'href="https://data\.opentransportdata\.swiss/dataset/[^"]+/download/[^"]+\.zip"' \
+    | sed -E 's/^href="([^"]+)"$/\1/' \
+    | grep -Ei 'netex' \
+    | sort -u)
+
+  [[ ${#urls[@]} -gt 0 ]] || fail "No CH NetEx resource download URLs found in dataset page"
+
+  local cutoff="999999999999"
+  if [[ -n "$as_of" ]]; then
+    cutoff="${as_of//-/}2359"
+  fi
+
+  local best_url=""
+  local best_ts="0"
+  local u name ts
+  for u in "${urls[@]}"; do
+    name="${u##*/}"
+    ts="$(printf '%s' "$name" | grep -oE '[0-9]{12}' | head -1 || true)"
+    if [[ -z "$ts" ]]; then
+      ts="$(printf '%s' "$name" | grep -oE '[0-9]{8}' | head -1 || true)"
+      [[ -n "$ts" ]] && ts="${ts}0000"
+    fi
+    [[ -n "$ts" ]] || continue
+
+    if [[ "$ts" -le "$cutoff" && "$ts" -ge "$best_ts" ]]; then
+      best_ts="$ts"
+      best_url="$u"
+    fi
+  done
+
+  [[ -n "$best_url" ]] || fail "No CH NetEx URL matched as-of date '$as_of'"
+  printf '%s\n' "$best_url"
+}
+
+resolve_download_url() {
+  local source_json="$1"
+  local source_id="$2"
+  local method endpoint
+
+  method="$(jq -r '.downloadMethod' <<<"$source_json")"
+  endpoint="$(jq -r '.downloadUrlOrEndpoint' <<<"$source_json")"
+
+  case "$method" in
+    direct_url)
+      printf '%s\n' "$endpoint"
+      ;;
+    api)
+      fail "Source '$source_id' uses downloadMethod=api but API retrieval is not implemented yet"
+      ;;
+    manual_redirect)
+      case "$source_id" in
+        de_delfi_sollfahrplandaten_netex)
+          resolve_de_delfi_netex "$endpoint" "$AS_OF"
+          ;;
+        at_oebb_mmtis_netex)
+          resolve_at_netex "$endpoint" "$AS_OF"
+          ;;
+        ch_opentransportdata_timetable_netex)
+          resolve_ch_netex "$endpoint" "$AS_OF"
+          ;;
+        *)
+          fail "No manual_redirect resolver implemented for source '$source_id'"
+          ;;
+      esac
+      ;;
+    *)
+      fail "Unknown downloadMethod '$method' for source '$source_id'"
+      ;;
+  esac
+}
+
+check_format_match() {
+  local file_path="$1"
+  local format="$2"
+  local resolved_url="$3"
+
+  local file_name
+  file_name="${resolved_url##*/}"
+  file_name="${file_name%%\?*}"
+
+  case "$format" in
+    netex)
+      if printf '%s\n' "$file_name" | grep -Eiq 'netex|netx|\.xml$'; then
+        return 0
+      fi
+      if command -v unzip >/dev/null 2>&1 && printf '%s\n' "$file_name" | grep -Eiq '\.zip$'; then
+        if unzip -l "$file_path" 2>/dev/null | grep -Eiq 'netex|netx|\.xml'; then
+          return 0
+        fi
+      fi
+      return 1
+      ;;
+    gtfs)
+      if printf '%s\n' "$file_name" | grep -Eiq 'gtfs|google_transit'; then
+        return 0
+      fi
+      if command -v unzip >/dev/null 2>&1 && printf '%s\n' "$file_name" | grep -Eiq '\.zip$'; then
+        if unzip -l "$file_path" 2>/dev/null | grep -Eq '(agency|stops|routes|trips|stop_times)\.txt'; then
+          return 0
+        fi
+      fi
+      return 1
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+detect_version_hint() {
+  local resolved_url="$1"
+  local headers="$2"
+  local file_name hint
+
+  file_name="${resolved_url##*/}"
+  file_name="${file_name%%\?*}"
+
+  hint="$(printf '%s' "$file_name" | grep -oE '[0-9]{12}' | head -1 || true)"
+  if [[ -z "$hint" ]]; then
+    hint="$(printf '%s' "$file_name" | grep -oE '[0-9]{8}' | head -1 || true)"
+  fi
+  if [[ -z "$hint" ]]; then
+    hint="$(printf '%s\n' "$headers" | awk -F': ' 'tolower($1)=="last-modified"{print $2; exit}' | tr -d '\r' || true)"
+  fi
+
+  printf '%s\n' "$hint"
+}
+
+probe_http_code() {
+  local url="$1"
+  shift
+  local code
+  code="$(curl -sS -o /dev/null -w '%{http_code}' -L -I "$@" "$url" || true)"
+  if [[ -z "$code" || "$code" == "000" || "$code" -ge 400 ]]; then
+    code="$(curl -sS -o /dev/null -w '%{http_code}' -L -r 0-0 "$@" "$url" || true)"
+  fi
+  printf '%s\n' "$code"
+}
+
+main() {
+  parse_args "$@"
+
+  require_cmd jq
+  require_cmd curl
+  require_cmd sha256sum
+  require_cmd date
+  require_cmd stat
+
+  [[ -f "$CONFIG_FILE" ]] || fail "Config not found: $CONFIG_FILE"
+  jq -e '.sources and (.sources | type == "array")' "$CONFIG_FILE" >/dev/null || fail "Invalid config format in $CONFIG_FILE"
+
+  load_env
+
+  local run_date
+  run_date="${AS_OF:-$(date -u +%F)}"
+  local retrieval_ts
+  retrieval_ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+  local jq_filter='(.sources[] | select((($country == "") or (.country == $country)) and (($source_id == "") or (.id == $source_id))))'
+  mapfile -t selected_sources < <(jq -c --arg country "$COUNTRY_FILTER" --arg source_id "$SOURCE_ID_FILTER" "$jq_filter" "$CONFIG_FILE")
+
+  [[ ${#selected_sources[@]} -gt 0 ]] || fail "No sources matched the provided filters"
+
+  log "Selected ${#selected_sources[@]} source(s); run_date=$run_date${AS_OF:+ (as-of mode)}"
+
+  local source_json
+  for source_json in "${selected_sources[@]}"; do
+    local source_id country provider format access_type
+    source_id="$(jq -r '.id' <<<"$source_json")"
+    country="$(jq -r '.country' <<<"$source_json")"
+    provider="$(jq -r '.provider' <<<"$source_json")"
+    format="$(jq -r '.format' <<<"$source_json")"
+    access_type="$(jq -r '.accessType' <<<"$source_json")"
+
+    log "Resolving source '$source_id' ($country/$format)"
+    build_auth_args "$source_id" "$access_type" "$(jq -r '.downloadUrlOrEndpoint' <<<"$source_json")"
+
+    local resolved_url
+    resolved_url="$(resolve_download_url "$source_json" "$source_id")" || {
+      if [[ "$format" == "netex" ]]; then
+        fail "NeTEx source '$source_id' resolution failed (hard failure)"
+      fi
+      fail "Source '$source_id' resolution failed"
+    }
+
+    [[ -n "$resolved_url" ]] || fail "Source '$source_id' did not resolve a download URL"
+    log "Resolved URL: $resolved_url"
+
+    local http_code
+    http_code="$(probe_http_code "$resolved_url" "${AUTH_ARGS[@]}")"
+    if [[ -z "$http_code" || "$http_code" == "000" || "$http_code" -ge 400 ]]; then
+      if [[ "$format" == "netex" ]]; then
+        fail "NeTEx source '$source_id' HTTP error for $resolved_url (status=$http_code)"
+      fi
+      fail "HTTP error for source '$source_id' (status=$http_code, url=$resolved_url)"
+    fi
+
+    local head_headers
+    head_headers="$(curl -sSI -L "${AUTH_ARGS[@]}" "$resolved_url" || true)"
+
+    local file_name
+    file_name="${resolved_url##*/}"
+    file_name="${file_name%%\?*}"
+    [[ -n "$file_name" && "$file_name" != */ ]] || file_name="${source_id}_${run_date}.bin"
+
+    local provider_slug dest_dir out_file tmp_file
+    provider_slug="$(slugify "$provider")"
+    dest_dir="data/raw/${country}/${provider_slug}/${format}/${run_date}"
+    mkdir -p "$dest_dir"
+
+    out_file="${dest_dir}/${file_name}"
+    tmp_file="${dest_dir}/.${file_name}.tmp.$$"
+
+    log "Downloading to $out_file"
+    if ! curl -fSL "${AUTH_ARGS[@]}" "$resolved_url" -o "$tmp_file"; then
+      rm -f "$tmp_file"
+      if [[ "$format" == "netex" ]]; then
+        fail "NeTEx source '$source_id' download failed (hard failure): $resolved_url"
+      fi
+      fail "Download failed for source '$source_id'"
+    fi
+
+    if ! check_format_match "$tmp_file" "$format" "$resolved_url"; then
+      rm -f "$tmp_file"
+      fail "Format mismatch for source '$source_id': expected '$format', URL '$resolved_url'"
+    fi
+
+    mv "$tmp_file" "$out_file"
+
+    local file_size sha256 version_hint
+    file_size="$(stat -c '%s' "$out_file")"
+    sha256="$(sha256sum "$out_file" | awk '{print $1}')"
+    version_hint="$(detect_version_hint "$resolved_url" "$head_headers")"
+
+    jq -n \
+      --arg sourceId "$source_id" \
+      --arg resolvedDownloadUrl "$resolved_url" \
+      --arg retrievalTimestamp "$retrieval_ts" \
+      --arg fileName "$file_name" \
+      --argjson fileSizeBytes "$file_size" \
+      --arg sha256 "$sha256" \
+      --arg detectedVersionOrDate "$version_hint" \
+      --arg requestedAsOf "$AS_OF" \
+      '{
+        sourceId: $sourceId,
+        resolvedDownloadUrl: $resolvedDownloadUrl,
+        retrievalTimestamp: $retrievalTimestamp,
+        fileName: $fileName,
+        fileSizeBytes: $fileSizeBytes,
+        sha256: $sha256,
+        detectedVersionOrDate: (if $detectedVersionOrDate == "" then null else $detectedVersionOrDate end),
+        requestedAsOf: (if $requestedAsOf == "" then null else $requestedAsOf end)
+      }' > "${dest_dir}/manifest.json"
+
+    log "Completed '$source_id': size=${file_size} sha256=${sha256}"
+  done
+
+  log "All selected sources fetched successfully."
+}
+
+main "$@"
