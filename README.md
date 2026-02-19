@@ -1,272 +1,292 @@
-# European Rail Meta-Router (DACH MVP)
+# MOTIS GTFS Switch MVP
 
-Cross-border rail route planner for Germany, Switzerland, and Austria.  
-Stack: React + Vite frontend, NestJS orchestrator, MOTIS routing, Redis cache, PostGIS.
+MVP for fast GTFS profile switching and route debugging with MOTIS.
 
-## Architecture
+## Scope
 
-```
-User -> Frontend (Vite+React, :5173) -> Orchestrator (NestJS, :3000)
-                                              |- MOTIS (GTFS backbone, :8080)
-                                              |- OJP APIs (mock/live)
-                                              |- Redis (cache/rate limit, :6379)
-                                              `- PostGIS (stations, :5432)
-```
+- Active code is in repo root.
+- `archive(ignore)/` is historical and not part of the active runtime.
 
-## Services and Ports
+## What works
 
-| Service | Port | Purpose |
-|:---|:---|:---|
-| Frontend | 5173 | Search UI + map |
-| Orchestrator | 3000 | API (`/health`, `/api/routes`, `/api/stations`) |
-| MOTIS | 8080 | GTFS routing engine |
-| Redis | 6379 | Cache + rate limiting |
-| PostGIS | 5432 | Station DB (seeded via `config/init-db.sql`) |
+- MOTIS in Docker (`motis`)
+- Orchestrator API + static frontend (`orchestrator`)
+- Named GTFS profiles via `config/gtfs-profiles.json`
+- Active profile state in `config/active-gtfs.json`
+- Switch state machine with lock + status persistence
+- Route query endpoint with station-resolution and MOTIS adapter
+- Frontend profile switcher, status badge, autocomplete, route summary, map, raw JSON
 
-## Prerequisites
+## Quickstart
 
-### Docker path
-- Docker Engine + Docker Compose plugin
-
-### Local development path
-- Node.js 20+
-- npm
-- Python 3 (for pipeline scripts)
-- `curl`, `unzip`
-- Optional for OSM extraction: `osmium` (`osmium-tool`)
-
-## Quick Start (Docker, full stack)
+Main command (recommended):
 
 ```bash
-cp .env.example .env
-mkdir -p data/gtfs_raw data/gtfs_filtered data/osm
-docker compose up --build -d
+scripts/run-test-env.sh --profile sample_de
 ```
 
 Open:
-- Frontend: `http://localhost:5173`
-- Health: `http://localhost:3000/health`
 
-Quick checks:
+- Frontend: `http://localhost:3000`
+- MOTIS direct: `http://localhost:8080`
+
+Stop:
 
 ```bash
-curl http://localhost:3000/health
-curl "http://localhost:3000/api/stations?q=Zurich"
+scripts/stop-test-env.sh
 ```
 
-## Local Development (without Docker)
+## GTFS profiles
 
-You can run frontend + orchestrator locally without Redis/MOTIS; the backend has fallback behavior:
-- Redis fallback: in-memory cache
-- MOTIS fallback: mock backbone segment
+Edit `config/gtfs-profiles.json`:
 
-Terminal 1 (backend):
-
-```bash
-cd orchestrator
-npm install
-npm run start:dev
+```json
+{
+  "profiles": {
+    "sample_de": { "zipPath": "data/gtfs/de_fv.zip" },
+    "de_full": { "zipPath": "data/gtfs/de_full.zip" }
+  }
+}
 ```
 
-Terminal 2 (frontend):
+Active profile is tracked in `config/active-gtfs.json`.
+
+## Runtime files
+
+- `state/gtfs-switch-status.json`: switch status (`idle|switching|importing|restarting|ready|failed`)
+- `state/gtfs-switch.lock`: concurrency lock
+- `state/gtfs-switch.log`: step logs and failures
+- `data/motis/`: generated MOTIS runtime data
+
+## API
+
+### `GET /api/gtfs/profiles`
 
 ```bash
-cd frontend
-npm install
-npm run dev
+curl -s http://localhost:3000/api/gtfs/profiles | jq
 ```
 
-Open:
-- Frontend: `http://localhost:5173`
-- API proxied by Vite to `http://localhost:3000`
-
-Optional: run infrastructure only via Docker while coding locally:
+### `POST /api/gtfs/activate`
 
 ```bash
-docker compose up -d redis db motis
+curl -s -X POST http://localhost:3000/api/gtfs/activate \
+  -H 'Content-Type: application/json' \
+  -d '{"profile":"sample_de"}' | jq
 ```
 
-## API Usage
-
-### Health
+### `GET /api/gtfs/status`
 
 ```bash
-curl http://localhost:3000/health
+curl -s http://localhost:3000/api/gtfs/status | jq
 ```
 
-### Station autocomplete
+### `GET /api/gtfs/stations`
+
+Autocomplete source from active profile:
 
 ```bash
-curl "http://localhost:3000/api/stations?q=Munchen"
+curl -s "http://localhost:3000/api/gtfs/stations?q=munchen&limit=20" | jq
 ```
 
-### Route search
+### `POST /api/routes`
 
 ```bash
-curl -X POST http://localhost:3000/api/routes \
-  -H "Content-Type: application/json" \
-  -d '{
-    "origin": "Munchen Hbf",
-    "destination": "Wien Hbf",
-    "departure": "2026-02-18T18:00:00.000Z",
-    "max_results": 5
-  }'
-```
-
-## Data Pipeline
-
-The pipeline is under `data-pipeline/`.
-
-### 1. Download GTFS feeds
-
-Default output folder is `data/gtfs_raw`.
-
-```bash
-# Germany only (automatic)
-bash data-pipeline/download-gtfs.sh --de
-
-# All sources (DE automatic, CH/AT with manual browser steps)
-bash data-pipeline/download-gtfs.sh --all
-
-# Custom output folder (optional)
-bash data-pipeline/download-gtfs.sh ./data/gtfs_raw --all
+curl -s -X POST http://localhost:3000/api/routes \
+  -H 'Content-Type: application/json' \
+  -d '{"origin":"München Hbf [198175]","destination":"Augsburg Hbf [179149]","datetime":"2026-02-20T18:00:00Z"}' | jq
 ```
 
 Notes:
-- CH feed (`ch_full.zip`) and AT feed (`at_oebb.zip`) must be downloaded manually due provider restrictions.
-- Script validates ZIP integrity and GTFS core files.
 
-### 2. Run the GTFS visualizer (interactive filter)
+- Route search is only accepted in status `ready`.
+- The orchestrator resolves station input to MOTIS stop IDs in `tag_stopId` format.
+- Default tag is `active-gtfs`, so resolved IDs look like `active-gtfs_198175`.
+- Responses include `routeRequestResolved` for debugging what was actually sent.
 
-Recommended (serve over HTTP):
-
-```bash
-python3 -m http.server 8090 --directory data-pipeline/gtfs-explorer
-```
-
-Then open `http://localhost:8090`.
-
-Alternative:
+### `GET /health`
 
 ```bash
-xdg-open data-pipeline/gtfs-explorer/index.html
+curl -s http://localhost:3000/health | jq
 ```
 
-Visualizer workflow:
-1. Drag a GTFS `.zip` (or select `.txt/.csv` files).
-2. Filter by route types and operators.
-3. Click `Export Filtered` to download a filtered GTFS zip.
+## Frontend
 
-### 3. Filter GTFS via CLI (zip -> zip)
+### Features
+
+- Profile dropdown + activate button
+- Live switch status badge
+- Station autocomplete
+- Route summary (cleaned display)
+- Interactive map
+- Collapsible raw JSON response
+
+### Map stack
+
+The frontend uses **MapLibre GL JS** and follows your planned stack direction.
+
+- Preferred style source: Protomaps (if key is configured)
+- Fallback style: OpenFreeMap style URL (when no key is set)
+
+Runtime config file: `frontend/config.js`
+
+```js
+window.PROTOMAPS_API_KEY = '';
+window.MAP_STYLE_URL = '';
+```
+
+Behavior:
+
+- If `MAP_STYLE_URL` is set, it is used directly.
+- Else if `PROTOMAPS_API_KEY` is set, Protomaps style URL is used.
+- Else fallback style is used.
+
+## Script reference
+
+### `scripts/run-test-env.sh`
+
+Primary local dev/test command.
 
 ```bash
-python3 data-pipeline/gtfs-filter.py data/gtfs_raw/de_fv.zip data/gtfs_filtered/de_fv.zip
-python3 data-pipeline/gtfs-filter.py data/gtfs_raw/de_rv.zip data/gtfs_filtered/de_rv.zip
-python3 data-pipeline/gtfs-filter.py data/gtfs_raw/de_nv.zip data/gtfs_filtered/de_nv.zip
+scripts/run-test-env.sh --profile sample_de
 ```
 
-### 4. Station dedup helper (semi-auto + manual review)
+Useful options:
 
-The dedup helper matches GTFS `stops.txt` entries to `data/station_map.json` by:
-- name similarity
-- coordinate proximity
+- `--no-build`
+- `--logs`
+- `--wait-sec <n>`
+- `--osm-url <url>`
+- `--osm-file <path>`
+- `--force-osm-download`
 
-It is designed for the plan workflow: auto-suggest first, then manual curation.
+### `scripts/setup.sh`
 
-Generate suggestions (CSV):
+One-command setup (download/copy OSM, bootstrap MOTIS data, start compose):
 
 ```bash
-python3 data-pipeline/gtfs-dedup.py suggest \
-  data/gtfs_raw/de_fv.zip data/gtfs_raw/de_rv.zip data/gtfs_raw/de_nv.zip \
-  --out-csv data/station_dedup_review.csv \
-  --include-unmatched --accept-auto
+scripts/setup.sh --profile sample_de
 ```
 
-Interactive manual review:
+Useful options:
+
+- `--detach`
+- `--no-build`
+- `--no-start`
+- `--skip-import`
+- `--osm-url <url>`
+- `--osm-file <path>`
+
+### `scripts/up.sh`
+
+Compose startup wrapper with preflight + optional auto-init.
 
 ```bash
-python3 data-pipeline/gtfs-dedup.py review data/gtfs_raw \
-  --out-csv data/station_dedup_review.csv \
-  --include-unmatched --accept-auto
+scripts/up.sh --profile sample_de
 ```
 
-Apply reviewed decisions back to station map:
+### `scripts/init-motis.sh`
+
+Manual bootstrap for MOTIS data/config/import:
 
 ```bash
-python3 data-pipeline/gtfs-dedup.py apply data/station_dedup_review.csv --backup
+scripts/init-motis.sh --profile sample_de
 ```
 
-Notes:
-- Decision types in CSV: `link`, `create`, empty (skip).
-- If a station already has `gtfs_ids[country]`, additional IDs for the same country are flagged as conflicts (manual decision required).
+Useful options:
 
-### 5. Detect station changes between updates
+- `--skip-import`
+- `--osm-file <path>`
+- `--motis-image <image>`
+
+### `scripts/check-motis-data.sh`
+
+Preflight checks for required MOTIS files.
 
 ```bash
-bash data-pipeline/gtfs-diff.sh old/stops.txt new/stops.txt
+scripts/check-motis-data.sh
 ```
 
-### 6. Extract OSM station islands (optional)
+### `scripts/switch-gtfs.sh`
 
-Prerequisite: `osmium` and `europe-latest.osm.pbf`.
+Switch active profile via API and wait for terminal state.
 
 ```bash
-bash data-pipeline/osm-island-extract.sh \
-  /path/to/stops.txt \
-  /path/to/europe-latest.osm.pbf \
-  data/osm/europe_islands.pbf
+scripts/switch-gtfs.sh --profile sample_de
 ```
 
-## Running the Project After Data Prep
-
-When `data/gtfs_filtered` and `data/osm` are ready:
+Optional full reimport before activation:
 
 ```bash
-docker compose up --build -d
+scripts/switch-gtfs.sh --profile sample_de --reimport
 ```
 
-MOTIS gets:
-- GTFS from `./data/gtfs_filtered` -> `/input/gtfs`
-- OSM from `./data/osm` -> `/input/osm`
+### `scripts/find-working-route.sh`
 
-## Useful Commands
+Automated route smoke finder from active GTFS.
 
 ```bash
-# Start/restart all services
-docker compose up --build -d
-
-# Follow logs
-docker compose logs -f orchestrator frontend motis
-
-# Stop everything
-docker compose down
-
-# Stop and remove volumes (DB/Redis data)
-docker compose down -v
+scripts/find-working-route.sh --target-date 2026-02-20 --max-attempts 300
 ```
+
+It generates real candidate pairs from GTFS and tests `/api/routes` until it finds non-empty itineraries.
+
+## Environment variables (orchestrator)
+
+Configured in `docker-compose.yml` by default:
+
+- `MOTIS_BASE_URL`
+- `MOTIS_HEALTH_PATH`
+- `MOTIS_HEALTH_ACCEPT_404`
+- `MOTIS_ROUTE_PATH`
+- `MOTIS_DATASET_TAG` (default `active-gtfs`)
+- `MOTIS_RESTART_MODE`
+- `MOTIS_DOCKER_SOCKET_PATH`
+- `MOTIS_DOCKER_API_VERSION`
+- `MOTIS_CONTAINER_NAME`
+- `MOTIS_READY_TIMEOUT_MS`
+- `MOTIS_HEALTH_POLL_INTERVAL_MS`
 
 ## Troubleshooting
 
-- `Frontend loads but API calls fail`:
-  - Check `http://localhost:3000/health`
-  - Ensure orchestrator is running and port `3000` is free
+### MOTIS loop: `could not read config file at data/config.yml`
 
-- `No real MOTIS routes`:
-  - If MOTIS is unavailable, orchestrator returns mock backbone segments by design
-  - Verify `http://localhost:8080/` and that GTFS files exist in `data/gtfs_filtered`
+Run:
 
-- `Visualizer does not load correctly`:
-  - Prefer HTTP mode (`python3 -m http.server ...`) instead of `file://`
-  - Ensure browser can access CDN assets (`unpkg.com`, `fonts.googleapis.com`)
-
-## Repo Layout
-
+```bash
+scripts/setup.sh --profile <name>
 ```
-Trainscanner/
-|- orchestrator/      # NestJS backend
-|- frontend/          # React + Vite frontend
-|- data-pipeline/     # GTFS and OSM helper scripts
-|- data/              # station_map.json, GTFS inputs/outputs
-|- config/            # MOTIS and DB config
-`- docker-compose.yml
+
+(or `scripts/init-motis.sh --profile <name>` if OSM already exists), then restart compose.
+
+### Bootstrap error: `exec: "config": executable file not found`
+
+Use explicit CLI binary:
+
+```bash
+MOTIS_CLI_BIN=motis scripts/setup.sh --profile <name>
 ```
+
+### Import error: `tiles profile ... does not exist`
+
+MVP bootstrap disables street/geocoding/tiles by default. If you need them, set:
+
+```bash
+MOTIS_DISABLE_STREET_FEATURES=false
+```
+
+and provide valid tile profile config for your MOTIS build.
+
+### Route returns empty itineraries
+
+Use resolved/tagged stop IDs (`active-gtfs_<stop_id>`) and check `routeRequestResolved` in response.
+
+### Docker restart API version error
+
+Set/override `MOTIS_DOCKER_API_VERSION` or keep `auto` (default).
+
+## Known limitations
+
+- No auth/rate-limit layer yet.
+- No realtime GTFS-RT/OJP enrichment yet.
+- Frontend map currently draws first returned itinerary only.
+- Fallback map style is not Protomaps-branded unless key/style is configured.

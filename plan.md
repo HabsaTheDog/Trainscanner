@@ -8,8 +8,10 @@ Entwicklung eines ressourceneffizienten, europaweiten Zug-Routenplaners mit Foku
 Im Gegensatz zu Grauzonen-Lösungen (Scraping) setzt diese Architektur auf **offizielle Open-Data-Standards (GTFS/OJP)** und die **National Access Points (NAPs)** der EU, um Rechtssicherheit zu gewährleisten und IP-Sperren zu vermeiden.
 
 **Kern-Strategie:**
-* **Long-Haul (Backbone):** Self-hosted MOTIS Instanz basierend auf statischen GTFS-Daten (Fernverkehr).
+* **Long-Haul (Backbone):** Self-hosted MOTIS Instanz (GTFS-Runtime-Profile, umschaltbar für Debugging).
 * **Last-Mile (Feeder):** Live-Abfrage offizieller APIs via OJP (Open Journey Planner) Standard.
+* **Canonical Data Layer:** Rohdaten formattreu ingestieren (NeTEx *oder* GTFS), intern normalisieren, daraus GTFS für MOTIS exportieren.
+* **Quality Harness:** Automatisierte Routing-Tests gegen MOTIS (Smoke/Regression) und optionaler Vergleich gegen externe Referenz-Provider.
 * **Compliance:** Nutzung von Open Data Lizenzen (CC-BY, ODbL) und Deep-Linking statt Ticket-Reselling.
 
 **Rollout-Strategie:** Phasenbasiert mit **DACH-First MVP** (Deutschland, Österreich, Schweiz), da diese Länder die ausgereifteste OJP/GTFS-Infrastruktur bieten.
@@ -22,8 +24,9 @@ Wir nutzen einen **hybriden Ansatz**, um Serverkosten zu minimieren und Legalit�
 
 ### A. Der Backbone (Self-Hosted MOTIS)
 * **Zweck:** Berechnet das Grundgerüst der Reise (z.B. Hamburg -> Mailand).
-* **Datenbasis:** Kuratierte GTFS-Feeds (nur Rail/Long-Distance) + Island-OSM (Bahnhofsumgebungen).
+* **Datenbasis:** Versionierte GTFS-Runtime-Profile (`long_distance`, `full_rail_debug`, `dach_mixed`) + Island-OSM.
 * **Technik:** MOTIS v2 (C++) mit `routing` und `intermodal` Modulen.
+* **MVP-Betrieb:** Profilwechsel per Backend-Workflow (`validate -> activate -> restart/reload -> healthcheck`) statt ad-hoc Upload zur Query-Zeit.
 
 ### B. Die Feeder (External Compliance APIs)
 * **Zweck:** Findet den Weg vom Dorf zum Hub (z.B. Hintertupfingen -> München Hbf).
@@ -42,24 +45,27 @@ Wir nutzen einen **hybriden Ansatz**, um Serverkosten zu minimieren und Legalit�
     5.  Kombiniert Segmente via **Stitching Engine** (→ siehe Abschnitt 6).
     6.  Prüft Echtzeit-Status via GTFS-RT.
 
-### D. Station Resolution (Manuell kuratiert + GTFS-Diff)
-* **Zweck:** Löst das fundamentale Problem inkompatibler Stations-IDs zwischen Betreibern.
-* **Ansatz:** **Manuell kuratierte JSON-Datei** (`station_map.json`) im Repository.
-* **Begründung:** Bahnhöfe und Stationen ändern sich extrem selten (wenige Neueröffnungen pro Jahr im gesamten DACH-Raum). Eine Datenbank-Lösung wäre Over-Engineering — ein manuell gepflegtes Mapping-File ist zuverlässiger, transparenter und zu 100% korrekt.
-* **Mapping pro Eintrag:**
+### D. Canonical Transit Layer (Station Resolution + ID-Normalisierung)
+* **Zweck:** Löst inkompatible IDs zwischen Betreibern/Formaten (GTFS, NeTEx, OJP).
+* **Ansatz:** **Canonical Layer** mit Mapping-Tabellen (PostGIS/DB) + manuell kuratierte Overrides in `station_map.json`.
+* **Prinzip:** Rohfeeds bleiben unverändert. Matching erfolgt in drei Stufen: harte IDs (UIC/IFOPT), Name+Geo-Score, manuelle Prüfung.
+* **Canonical Mapping pro Eintrag (Beispiel):**
     ```json
     {
       "name": "München Hbf",
       "uic": "8000261",
-      "gtfs_ids": { "de": "8000261", "at": "...", "ch": "..." },
+      "source_ids": {
+        "gtfs": { "de": "8000261", "at": "...", "ch": "..." },
+        "netex": { "de": "...", "at": "...", "ch": "..." }
+      },
       "ojp_ref": "de:09162:6",
       "coords": [48.1402, 11.5600],
       "min_transfer_minutes": 10,
       "type": "hub"
     }
     ```
-* **Laufende Pflege:** Über ein **GTFS-Diff-Script** (→ siehe §4.3), das Änderungen in den Feeds automatisch erkennt und neue/geänderte Stops zur manuellen Kuratierung flaggt.
-* **Aufwand:** Initiales Mapping DACH ~2–3 Tage, laufende Pflege ~5 Min. pro Update-Zyklus.
+* **Laufende Pflege:** Über Diff-Jobs je Feed-Version (GTFS/NeTEx), die neue/geänderte Stops flaggen und Review-Queues erzeugen.
+* **Aufwand:** Initiales Mapping DACH ~2–3 Tage, danach inkrementelle Pflege pro Update-Zyklus.
 
 ---
 
@@ -70,7 +76,9 @@ Wir nutzen einen **hybriden Ansatz**, um Serverkosten zu minimieren und Legalit�
 | **Routing Engine** | **MOTIS** (C++) | Core-System. Module: `routing`, `intermodal`, `ppr` (Pedestrian), `rt` (Realtime). |
 | **Orchestrator** | **TypeScript (NestJS)** | Typsichere API-Logik. Ersetzt `hafas-client` durch `ojp-js` Adapter. |
 | **Protocol** | **OJP / GTFS-RT** | Offizielle EU-Standards für Fahrplanauskunft und Echtzeitdaten. |
-| **ID-Resolver** | **JSON-Datei (manuell kuratiert)** | `station_map.json` — manuell gepflegtes Multi-Key Mapping. GTFS-Diff-Script flaggt Änderungen. |
+| **Canonical Layer** | **PostGIS + JSON Overrides** | Normalisiert IDs aus GTFS/NeTEx. `station_map.json` bleibt als manuell kuratierter Override-Layer. |
+| **Dataset Profiles** | **JSON Config + Switch Script** | `gtfs-profiles.json` + `active-gtfs.json` + Switch-Workflow für MOTIS-Reload. |
+| **QA & Benchmarking** | **pytest + CLI scripts + JSON fixtures** | Smoke-Tests, Regression, Qualitätsmetriken und Vergleich gegen externe Referenzdaten. |
 | **Caching** | **Redis** | Cacht externe OJP-Anfragen (TTL: 15min) und Route-Lookups. |
 | **Geocoding** | **Photon** | OSM-basierter Geocoder (Lizenzfrei, ODbL). |
 | **Frontend Map** | **MapLibre GL JS** | Vektor-Tiles via Protomaps (Serverless, kosteneffizient). |
@@ -82,14 +90,27 @@ Wir nutzen einen **hybriden Ansatz**, um Serverkosten zu minimieren und Legalit�
 
 Um den RAM-Verbrauch gering zu halten (< 32GB) und rechtlich sauber zu bleiben:
 
-### 4.1 GTFS Pre-Processing ("The Legal Filter")
-* **Input:** Offizielle Feeds von Mobility Database / TransitFeeds.
-* **Filter:**
-    * `KEEP`: `route_type = 2` (Rail), `1` (Metro), `100-109` (Regio).
-    * `DROP`: Bus, Tram (spart ~60% RAM).
-* **Tooling:** `gtfs-filter` oder Python-Skripte (Pandas).
+### 4.1 Multi-Format Ingestion ("Raw First")
+* **Input:** Offizielle Feeds aus NAPs/Portalen im Originalformat (NeTEx oder GTFS).
+* **Regel:** Rohdaten unverändert versionieren (`raw/netex/*`, `raw/gtfs/*`), keine direkte Bearbeitung.
+* **Ziel:** Format-Unterschiede früh kapseln und spätere Engine-Wechsel ermöglichen.
 
-### 4.2 OSM Pre-Processing ("Island Strategy")
+### 4.2 Canonical Normalization ("One Internal Model")
+* **Normalisierung:** Stops/Stationen, Operatoren und Service-IDs in ein kanonisches Schema überführen.
+* **Matching-Strategie:**
+    1. Harte IDs (UIC/IFOPT/OJP-Refs),
+    2. Geo+Name Scoring,
+    3. Manuelle Review bei Ambiguität.
+* **Output:** Versionierte Mapping-Tabellen + Review-Artefakte (CSV/JSON).
+
+### 4.3 GTFS Runtime Export für MOTIS ("Engine Adapter")
+* **Exportziel:** Aus dem canonical Layer reproduzierbare GTFS-Runtime-Profile erzeugen.
+* **Filter:**
+    * `KEEP`: `route_type = 2` (Rail), optional `1`, `100-109` je Profil.
+    * `DROP`: nicht benötigte Modi pro Profil (RAM/Importzeit reduzieren).
+* **Tooling:** Konverter + `gtfs-filter`/Python; Validierung mit GTFS-Validator.
+
+### 4.4 OSM Pre-Processing ("Island Strategy")
 * **Problem:** Ganz Europa routingfähig in OSM sprengt den Speicher.
 * **Lösung:**
     1.  Extrahiere Geo-Koordinaten aller Bahnhöfe aus GTFS.
@@ -97,20 +118,20 @@ Um den RAM-Verbrauch gering zu halten (< 32GB) und rechtlich sauber zu bleiben:
     3.  Nutze `osmium-tool`, um nur diese "Inseln" aus `europe-latest.osm.pbf` zu schneiden.
 * **Lizenz:** ODbL (Attribution erforderlich: "© OpenStreetMap contributors").
 
-### 4.3 GTFS-Diff & Stations-Pflege
+### 4.5 Feed-Diff & Stations-Pflege
 
 > [!NOTE]
-> Bahnhöfe ändern sich selten. Das Mapping wird einmalig manuell erstellt und danach nur noch inkrementell gepflegt.
+> Bahnhöfe ändern sich selten. Die Pflege bleibt inkrementell, aber läuft über den canonical Layer statt nur über ein einzelnes GTFS-File.
 
 **Initialer Import (einmalig):**
-1. Alle `stops.txt` aus DACH-GTFS-Feeds einlesen.
-2. Semi-automatisches Matching via Name + Koordinaten-Nähe → ergibt ~90% korrekte Zuordnungen.
-3. Restliche ~10% manuell kuratieren und in `station_map.json` eintragen.
+1. Alle Stops aus DACH-Feeds (GTFS + NeTEx) in Staging laden.
+2. Semi-automatisches Matching via IDs + Name/Koordinaten-Nähe.
+3. Ambiguitäten manuell kuratieren (`station_map.json` / Review-Queue).
 
 **Laufende Pflege (bei jedem GTFS-Update):**
 ```
-gtfs-diff.sh (automatisiert):
-1. Lade neue Version von stops.txt
+feed-diff.sh (automatisiert):
+1. Lade neue Feed-Version (GTFS/NeTEx)
 2. Diff gegen vorherige Version:
    - NEUE stop_ids     → Status: "NEW — needs mapping"     → Log + Notification
    - GELÖSCHTE stop_ids → Status: "REMOVED — check mapping" → Log + Notification
@@ -120,6 +141,52 @@ gtfs-diff.sh (automatisiert):
 ```
 
 **Erwarteter Aufwand:** ~5 Minuten pro monatlichem Update-Zyklus.
+
+### 4.6 MVP: GTFS Profile Switching & Debug UX
+* **Konfiguration:**
+  * `config/gtfs-profiles.json` definiert benannte Runtime-Profile.
+  * `config/active-gtfs.json` enthält nur das aktive Profil.
+* **Ablauf beim Wechsel:**
+  1. Profil validieren (Dateien/Lizenzmetadaten vorhanden),
+  2. Status `switching -> importing -> restarting`,
+  3. MOTIS reload/restart,
+  4. Healthcheck bis `ready` oder `failed`.
+* **Frontend-Anforderung:** Während Reload klaren Status anzeigen und Suche deaktivieren; automatische Reaktivierung bei `ready`.
+
+### 4.7 Routing Quality Harness (MVP+)
+* **Ziel:** Sicherstellen, dass GTFS-Exporte funktionierende Routen liefern und bei Feed-Updates nicht regressieren.
+* **Test-Typen:**
+  * **Smoke:** Erreichbarkeit (`health`), Profile-Activation, 10-20 Kernrelationen.
+  * **Regression:** Feste Testfälle pro Land/Korridor mit Erwartungsintervallen (nicht nur exakte Zeitstempel).
+  * **Metadaten-QA:** Service-Abdeckung, Anzahl Trips, Null-Result-Rate, Transfer-Anzahl.
+* **Artefakte:**
+  * `tests/routes/smoke_cases.json`
+  * `tests/routes/regression_cases.json`
+  * `tests/routes/baselines/*.json`
+  * `reports/qa/*.json`
+* **Command-Layer (Beispiel):**
+```bash
+# 1) Profil bauen/exportieren
+scripts/qa/build-profile.sh --profile de_full
+
+# 2) Profil aktivieren (inkl. MOTIS restart + health wait)
+scripts/qa/switch-profile.sh --profile de_full
+
+# 3) Smoke suite gegen MOTIS
+scripts/qa/run-smoke.sh --profile de_full --cases tests/routes/smoke_cases.json
+
+# 4) Regression suite gegen Baseline
+scripts/qa/run-regression.sh --profile de_full --cases tests/routes/regression_cases.json --baseline tests/routes/baselines/de_full.json
+
+# 5) Optional: Vergleich mit externem Referenzanbieter
+scripts/qa/compare-external.sh --provider hafas --cases tests/routes/regression_cases.json
+scripts/qa/compare-external.sh --provider rome2rio --cases tests/routes/regression_cases.json
+```
+* **Bewertungskriterien (MVP):**
+  * `null_result_rate <= 5%` bei Smoke-Cases.
+  * `travel_time_delta_p50 <= 15 min` vs. Baseline.
+  * `travel_time_delta_p90 <= 30 min` vs. Baseline.
+  * Alle Pflichtkorridore liefern mindestens 1 Route.
 
 ---
 
@@ -268,6 +335,7 @@ Routing: MOTIS (MIT License)
 * Pro-Endpunkt Rate-Limiter in Redis (Token-Bucket-Algorithmus).
 * Request-Queue (Bull) für Burst-Handling bei vielen parallelen User-Anfragen.
 * Automatischer Fallback auf gecachte Daten bei Rate-Limit-Überschreitung.
+* Für externe Vergleichstests (z.B. HAFAS/Rome2Rio) nur offiziell erlaubte APIs/Verträge verwenden; kein Scraping geschützter Oberflächen.
 
 ### 7.4 DSGVO-Konformität
 
@@ -345,10 +413,18 @@ volumes:
 | **Phase 3: Gesamteuropa** | + ES, PL, CZ, SE, etc. | Volle Abdeckung mit Fallback-Hierarchie. Community-Beiträge für ID-Matching. | Ongoing |
 | **Phase 4: Extras** | Seat-Linking, Preis-Vergleich | Deep-Links zu Buchungsseiten mit Pre-filled Parametern. | TBD |
 
+### Phase 0 — Data Foundation (vor DACH MVP)
+1. Canonical Layer für Stops/IDs aufsetzen (GTFS + NeTEx ingest).
+2. Export-Pipeline `canonical -> GTFS runtime` etablieren.
+3. GTFS-Profilumschaltung (`active_profile`) inkl. MOTIS-Reload und Status-API implementieren.
+4. Minimal-Frontend für Profilwahl + Reload-Status + Test-Routing bereitstellen.
+5. Routing Quality Harness (Smoke + Regression + Report-Artefakte) einführen.
+
 ### Phase 1 — Meilensteine (Detail)
-1. ✅ MOTIS mit DACH GTFS-Feeds aufsetzen (Docker).
-2. ✅ Station Resolution Service: UIC ↔ GTFS-ID Mapping für DACH.
-3. ✅ OJP-Integration: Mobilithek (DE) + opentransportdata.swiss (CH).
-4. ✅ Stitching Engine v1: Einfache Segment-Kombination mit Transfer-Zeit-Validierung.
-5. ✅ Frontend: Suchmaske + Kartenansicht + Ergebnisliste mit Attribution.
-6. ✅ DSGVO: Datenschutzerklärung + Cookie-Banner (nur technisch notwendig).
+1. [ ] MOTIS mit DACH GTFS-Feeds aufsetzen (Docker).
+2. [ ] Station Resolution Service: UIC ↔ GTFS/NeTEx-ID Mapping für DACH.
+3. [ ] OJP-Integration: Mobilithek (DE) + opentransportdata.swiss (CH).
+4. [ ] Stitching Engine v1: Segment-Kombination mit Transfer-Zeit-Validierung.
+5. [ ] Frontend: Profilwahl + Reload-Status + Suchmaske + Ergebnisliste mit Attribution.
+6. [ ] DSGVO: Datenschutzerklärung + Cookie-Banner (nur technisch notwendig).
+7. [ ] Route-Qualitätsgates in CI: Smoke mandatory, Regression nightly, Vergleichsreport optional.

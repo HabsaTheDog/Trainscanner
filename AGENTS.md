@@ -1,128 +1,58 @@
-# European Rail Meta-Router — AGENTS.md
+## Project Notes For Future Agents
 
-## Purpose
-Cross-border rail route planner for DACH region (Germany, Switzerland, Austria).
-Stitches together routes from multiple national operators (DB, SBB, ÖBB) into unified
-multi-hop journeys using MOTIS for GTFS routing and OJP for cross-border segments.
+Scope: repository root only. Ignore `archive(ignore)/` for active implementation.
 
-## Architecture
+## Primary goal
 
-```
-┌─────────────┐     ┌──────────────────┐     ┌────────┐
-│  React+Vite │────▶│  NestJS          │────▶│ MOTIS  │
-│  Frontend   │     │  Orchestrator    │     │ (GTFS) │
-│  :5173      │     │  :3000           │     │ :8080  │
-└─────────────┘     │  ├─ StationsService      └────────┘
-                    │  ├─ StitchingEngine │
-                    │  ├─ OJP Client (mock)│──▶ OJP API
-                    │  └─ Cache (Redis)   │
-                    └──────────────────┘
-                            │
-                    ┌───────┴───────┐
-                    │   PostGIS     │
-                    │   :5432       │
-                    └───────────────┘
-```
+Maintain and extend the MOTIS GTFS-switch MVP for fast dataset testing/debugging.
 
-## Project Structure
+## Active architecture
 
-```
-Trainscanner/
-├── docker-compose.yml          # All 5 services
-├── .env.example                # Environment template
-│
-├── orchestrator/               # NestJS backend (:3000)
-│   ├── src/
-│   │   ├── routing/            # /api/routes, /api/stations endpoints
-│   │   ├── motis/              # MOTIS client (GTFS routing)
-│   │   ├── ojp/                # OJP client (mock mode default)
-│   │   ├── stations/           # Station resolver (station_map.json)
-│   │   ├── stitching/          # Route combiner + ranking
-│   │   ├── cache/              # Redis with in-memory fallback
-│   │   ├── rate-limiter/       # Token bucket rate limiter
-│   │   └── health/             # /health endpoint
-│   ├── Dockerfile
-│   └── package.json
-│
-├── frontend/                   # Vite+React (:5173)
-│   ├── src/
-│   │   ├── components/         # SearchForm, MapView, RouteCard, etc.
-│   │   ├── pages/              # SearchPage, PrivacyPage
-│   │   ├── services/           # API client
-│   │   └── types/              # Shared TypeScript types
-│   ├── Dockerfile
-│   └── package.json
-│
-├── data/
-│   ├── station_map.json        # 20 DACH hub stations
-│   └── gtfs_raw/               # Downloaded GTFS feeds
-│       ├── de_fv.zip           # Germany long-distance (ICE/IC)
-│       ├── de_rv.zip           # Germany regional (RE/RB/S-Bahn)
-│       └── de_nv.zip           # Germany local transit
-│
-├── data-pipeline/
-│   ├── download-gtfs.sh        # GTFS feed downloader
-│   ├── gtfs-filter.py          # Rail-only filter script
-│   ├── gtfs-explorer/          # Interactive browser-based filter tool
-│   │   └── index.html
-│   ├── osm-island-extract.sh
-│   └── gtfs-diff.sh
-│
-└── config/
-    ├── motis-config.ini        # MOTIS v2 config
-    └── init-db.sql             # PostGIS schema + seed data
-```
+- `orchestrator/`: plain Node.js API server and switch workflow
+- `frontend/`: static UI (no framework) with route summary + MapLibre map
+- `config/`: GTFS profile definitions and active profile
+- `state/`: switch lock, status, and logs
+- `data/motis/`: generated MOTIS runtime data
 
-## Key Technologies
-- **Backend:** NestJS, TypeScript, Redis, PostGIS
-- **Frontend:** React 18, Vite, MapLibre GL JS, TypeScript
-- **Routing Engine:** MOTIS v2 (GTFS-based)
-- **Cross-border:** OJP API (mock mode for MVP)
-- **Infrastructure:** Docker Compose, Node 20 Alpine
-- **GTFS Sources:** gtfs.de (DE, CC-BY-4.0), opentransportdata.swiss (CH), data.oebb.at (AT)
+## Core behavior that must remain true
 
-## Running the Project
+- Frontend remains reachable while profile switching/restart is running.
+- Only one switch can run at a time (lock file).
+- Switch states are persisted (`idle|switching|importing|restarting|ready|failed`).
+- Route endpoint is blocked unless system state is `ready`.
+- Station autocomplete comes from active GTFS profile.
+- Route station inputs are normalized before MOTIS call.
 
-### Quick Start (Docker)
-```bash
-cp .env.example .env
-docker compose up --build
-# Frontend: http://localhost:5173
-# API:      http://localhost:3000/health
-```
+## MOTIS routing contract in this MVP
 
-### Development (without Docker)
-```bash
-# Backend
-cd orchestrator && npm install && npm run start:dev
+- `/api/routes` should resolve user input to MOTIS stop IDs in `tag_stopId` format.
+- Default dataset tag is `active-gtfs`.
+- Debug output should include `routeRequestResolved` and attempted MOTIS request variants.
 
-# Frontend (separate terminal)
-cd frontend && npm install && npm run dev
-```
+## Map stack contract
 
-### GTFS Explorer (standalone)
-```bash
-xdg-open data-pipeline/gtfs-explorer/index.html
-# Drag a GTFS .zip onto the page to visualize
-```
+- Frontend map stack is **MapLibre GL JS**.
+- Protomaps is preferred when a key is configured in `frontend/config.js`.
+- Do not switch to Leaflet unless explicitly requested by the user.
 
-## Environment Variables
-See `.env.example`. Key ones:
-- `OJP_MODE=mock` — Use mock OJP data (default, no API key needed)
-- `REDIS_URL` — Redis connection (falls back to in-memory)
-- `MOTIS_URL` — MOTIS endpoint
+## Key commands
 
-## Data Pipeline
-1. `bash data-pipeline/download-gtfs.sh` — Download GTFS feeds
-2. Open `data-pipeline/gtfs-explorer/index.html` — Visually filter
-3. `python3 data-pipeline/gtfs-filter.py <in> <out>` — Filter to rail-only
+- `scripts/run-test-env.sh --profile <name>`
+- `scripts/stop-test-env.sh`
+- `scripts/setup.sh --profile <name>`
+- `scripts/up.sh --profile <name>`
+- `scripts/init-motis.sh --profile <name>`
+- `scripts/check-motis-data.sh`
+- `scripts/switch-gtfs.sh --profile <name>`
+- `scripts/find-working-route.sh --max-attempts <n>`
 
-## Current Status
-- [x] Project scaffolding & Docker setup
-- [x] NestJS orchestrator with all modules
-- [x] React frontend with dark theme & MapLibre
-- [x] GTFS download pipeline (DE complete, CH/AT manual)
-- [x] Interactive GTFS explorer tool
-- [ ] MOTIS integration with real GTFS data
-- [ ] OJP live API integration (needs API key)
-- [ ] Production deployment
+## Documentation policy (required)
+
+When behavior, endpoints, scripts, or map stack change, update all relevant docs in the same change:
+
+- `README.md`
+- `AGENTS.md`
+- `frontend/AGENTS.md`
+- `orchestrator/AGENTS.md`
+
+Keep docs command-accurate and copy/paste runnable.

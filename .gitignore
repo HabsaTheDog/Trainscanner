@@ -45,3 +45,16 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+
+# MVP runtime artifacts
+state/*.lock
+state/*.tmp
+state/gtfs-switch-status.json
+state/gtfs-switch.log
+data/motis/active-gtfs.zip
+data/motis/config.yml
+data/motis/*.bin
+data/motis/*.mdb
+data/motis/osm.pbf
+data/motis/data/
+data/gtfs/*.zip
