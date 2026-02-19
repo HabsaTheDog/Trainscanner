@@ -12,8 +12,11 @@ Maintain and extend the MOTIS GTFS-switch MVP for fast dataset testing/debugging
 - `frontend/`: static UI (no framework) with route summary + MapLibre map
 - `config/`: GTFS profile definitions
 - `config/dach-data-sources.json`: official DACH source registry
-- `scripts/data/`: DACH source fetch/verify + NeTEx ingest/canonical scripts
+- `config/ojp-endpoints.json`: OJP feeder endpoint/auth scaffolding
+- `config/ojp-endpoints.mock.json`: local OJP mock fixture config for deterministic checks
+- `scripts/data/`: DACH source fetch/verify + NeTEx ingest/canonical/QA/OJP/stitch scripts
 - `db/migrations/`: PostGIS schema migrations for canonical station layer
+- `.github/workflows/ojp-mock-feeder-check.yml`: CI smoke check for deterministic OJP mock probe
 - `docker-compose.yml`: optional `postgis` service (`dach-data` profile) with named volume persistence
 - `state/`: switch lock, status, and logs
 - `data/motis/`: generated MOTIS runtime data
@@ -39,8 +42,21 @@ Maintain and extend the MOTIS GTFS-switch MVP for fast dataset testing/debugging
 - Raw snapshots must stay local under `data/raw/<country>/<provider>/<format>/<YYYY-MM-DD>/`.
 - Each fetch run must write a `manifest.json` with retrieval metadata + hash.
 - PostGIS is mandatory for canonical layer (`canonical_stations`, `canonical_station_sources`).
+- PostGIS curation/stitch prep tables are part of the same DACH slice (`canonical_review_queue`, `canonical_station_overrides`, `station_transfer_rules`, `ojp_stop_refs`).
 - Selected `format=netex` ingest must fail hard on parse/source errors (non-zero exit).
 - DACH scope remains `DE|AT|CH`.
+
+## Canonical QA + curation contract
+
+- Review queue generation must be deterministic per scope (`latest` or explicit `--as-of`).
+- Manual overrides must be auditable in DB (`canonical_station_overrides`) and applied explicitly.
+- Queue/report/override tooling must remain script-driven and reversible.
+
+## OJP + stitching boundary
+
+- OJP feeder probing is configuration-driven via `config/ojp-endpoints.json` and `.env`; no secrets in repo.
+- Stitching prototype is offline/service-layer only and outputs JSON for manual inspection.
+- Do not wire OJP/stitching prototype into production `/api/routes` unless explicitly requested.
 
 ## MOTIS routing contract in this MVP
 
@@ -70,6 +86,12 @@ Maintain and extend the MOTIS GTFS-switch MVP for fast dataset testing/debugging
 - `scripts/data/ingest-netex.sh --country <DE|AT|CH> --as-of <YYYY-MM-DD>`
 - `scripts/data/build-canonical-stations.sh --as-of <YYYY-MM-DD>`
 - `scripts/data/report-canonical.sh`
+- `scripts/data/build-review-queue.sh --as-of <YYYY-MM-DD>`
+- `scripts/data/apply-station-overrides.sh [--csv /absolute/path/overrides.csv]`
+- `scripts/data/report-review-queue.sh`
+- `scripts/data/test-ojp-feeders.sh --country <DE|AT|CH>`
+- `scripts/data/check-ojp-feeders-mock.sh`
+- `scripts/data/run-stitch-prototype.sh --country <DE|AT|CH>`
 
 ## Documentation policy (required)
 

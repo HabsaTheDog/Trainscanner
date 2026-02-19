@@ -1,6 +1,6 @@
-# MOTIS GTFS Switch MVP
+# MOTIS GTFS Switch
 
-MVP for fast GTFS profile switching and route debugging with MOTIS.
+ GTFS profile switching and route debugging with MOTIS.
 
 ## Scope
 
@@ -317,6 +317,126 @@ scripts/data/report-canonical.sh
 scripts/data/check-canonical-pipeline.sh --min-canonical 1
 ```
 
+### Canonical station QA + manual curation workflow
+
+Manual confirmation is deterministic and DB-auditable through queue + overrides tables.
+This workflow is separate from runtime `/api/routes`.
+
+- Queue table: `canonical_review_queue`
+- Override table: `canonical_station_overrides`
+
+Build review queue items from canonical data:
+
+```bash
+scripts/data/build-review-queue.sh
+scripts/data/build-review-queue.sh --country CH --as-of 2026-02-19
+```
+
+Apply approved overrides (table-backed):
+
+```bash
+scripts/data/apply-station-overrides.sh
+scripts/data/apply-station-overrides.sh --country DE --as-of 2026-02-19
+```
+
+Import overrides from CSV and apply in one run:
+
+```bash
+scripts/data/apply-station-overrides.sh --csv /absolute/path/overrides.csv
+```
+
+CSV headers (required):
+
+```text
+operation,country,source_canonical_station_id,target_canonical_station_id,source_id,source_stop_id,new_canonical_name,reason,requested_by,approved_by,external_ref
+```
+
+Starter template CSV:
+
+```bash
+cat scripts/data/samples/overrides.example.csv
+```
+
+Report queue coverage + open/resolved items:
+
+```bash
+scripts/data/report-review-queue.sh
+scripts/data/report-review-queue.sh --country AT --as-of 2026-02-19 --limit 25
+```
+
+### OJP feeder scaffolding (standalone, not runtime-wired)
+
+- Endpoint config: `config/ojp-endpoints.json`
+- Canonical -> OJP reference map table: `ojp_stop_refs`
+- Probe script: `scripts/data/test-ojp-feeders.sh`
+
+Configure provider endpoint + auth env vars in `.env` first, then probe:
+
+```bash
+scripts/data/test-ojp-feeders.sh --country DE
+scripts/data/test-ojp-feeders.sh --provider-id at_ojp_primary --case-index 0
+```
+
+Probe with canonical IDs resolved via `ojp_stop_refs`:
+
+```bash
+scripts/data/test-ojp-feeders.sh \
+  --provider-id ch_ojp_primary \
+  --from-canonical-id cstn_example_from \
+  --to-canonical-id cstn_example_to \
+  --departure-time 2026-02-20T08:00:00Z
+```
+
+Deterministic local happy-path check with built-in mock endpoint:
+
+```bash
+scripts/data/check-ojp-feeders-mock.sh
+```
+
+GitHub Actions CI job (already included in repo):
+
+- `.github/workflows/ojp-mock-feeder-check.yml`
+
+Manual probe against mock config:
+
+```bash
+OJP_ENDPOINTS_CONFIG=config/ojp-endpoints.mock.json \
+  scripts/data/test-ojp-feeders.sh --provider-id de_ojp_mock_local
+```
+
+### Offline stitching prototype (standalone service-layer experiment)
+
+- Transfer rules table: `station_transfer_rules`
+- Prototype runner: `scripts/data/run-stitch-prototype.sh`
+- Core stitch logic: `scripts/data/stitch-prototype.js`
+- Sample inputs:
+  - `scripts/data/samples/ojp-feeder-sample.json`
+  - `scripts/data/samples/motis-backbone-sample.json`
+
+Run the prototype against sample feeder + backbone data:
+
+```bash
+scripts/data/run-stitch-prototype.sh --country DE --top-n 5
+```
+
+Run with custom sample files:
+
+```bash
+scripts/data/run-stitch-prototype.sh \
+  --ojp-json /absolute/path/ojp-feeders.json \
+  --motis-json /absolute/path/motis-backbone.json \
+  --country CH \
+  --as-of 2026-02-19 \
+  --top-n 10 \
+  --output state/stitch-report-ch.json
+```
+
+Output is a ranked JSON report with transfer-risk flags:
+
+- `tight_connection`
+- `long_wait`
+- `invalid_time_order`
+
 Low-memory run mode (recommended for large CH NeTEx snapshots):
 
 ```bash
@@ -354,6 +474,18 @@ Configured in `docker-compose.yml` by default:
 - `CANONICAL_DB_DOCKER_PROFILE` (default `dach-data`)
 - `CANONICAL_DB_DOCKER_SERVICE` (default `postgis`)
 - `CANONICAL_DB_READY_TIMEOUT_SEC` (default `90`)
+
+## Environment variables (OJP feeder scaffolding)
+
+Set per-provider auth using each feeder's `envPrefix` in `config/ojp-endpoints.json`.
+
+Example for `envPrefix=OJP_DE_PRIMARY`:
+
+- `OJP_DE_PRIMARY_BEARER_TOKEN` (for `authMode=bearer`)
+- `OJP_DE_PRIMARY_API_KEY` and optional `OJP_DE_PRIMARY_API_KEY_HEADER` (for `authMode=api_key`)
+- `OJP_DE_PRIMARY_USERNAME` and `OJP_DE_PRIMARY_PASSWORD` (for `authMode=basic`)
+- `OJP_DE_PRIMARY_HEADER` (for `authMode=header`)
+- `OJP_ENDPOINTS_CONFIG` (optional path override for feeder endpoint config; useful for mock/CI checks)
 
 ## Troubleshooting
 
@@ -399,3 +531,4 @@ Set/override `MOTIS_DOCKER_API_VERSION` or keep `auto` (default).
 - No realtime GTFS-RT/OJP enrichment yet.
 - Frontend map currently draws first returned itinerary only.
 - Fallback map style is not Protomaps-branded unless key/style is configured.
+- OJP feeder probing + stitching prototype are not wired into production `/api/routes` in this MVP slice.

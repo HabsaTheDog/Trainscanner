@@ -1,0 +1,15 @@
+{
+  "backbone": [
+    {
+      "itineraryId": "motis-backbone-main",
+      "country": "DE",
+      "originCanonicalStationId": "cstn_hub",
+      "destinationCanonicalStationId": "cstn_dest_hub",
+      "departureTime": "2026-02-20T09:00:00Z",
+      "arrivalTime": "2026-02-20T09:40:00Z",
+      "transferHubFrom": "berlin_hub",
+      "transferHubTo": "munich_hub",
+      "baseScore": 0
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+operation,country,source_canonical_station_id,target_canonical_station_id,source_id,source_stop_id,new_canonical_name,reason,requested_by,approved_by,external_ref
+rename,CH,,cstn_replace_target,,,,Normalize canonical spelling from QA review,qa_reviewer,qa_lead,override-rename-example-001
+merge,DE,cstn_replace_source,cstn_replace_target,,,,Merge duplicate hard-id cluster after manual confirmation,qa_reviewer,qa_lead,override-merge-example-001
+split,AT,cstn_replace_source,cstn_split_target_example,at_oebb_mmtis_netex,STOP_REPLACE_ME,Wien Mitte (Split),Split incorrect cluster member into dedicated canonical station,qa_reviewer,qa_lead,override-split-example-001

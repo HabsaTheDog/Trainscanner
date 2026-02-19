@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<OJP xmlns="http://www.vdv.de/ojp" version="2.0">
+  <OJPResponse>
+    <ServiceDelivery>
+      <ResponseTimestamp>2026-02-20T08:00:00Z</ResponseTimestamp>
+      <OJPFulfillmentResponse>
+        <ResponseTimestamp>2026-02-20T08:00:00Z</ResponseTimestamp>
+        <OJPTripDelivery>
+          <TripResult id="mock-trip-1">
+            <Trip>
+              <TripSection id="mock-section-1">
+                <LegTrack>
+                  <From>
+                    <StopPointRef>de:stop:mock:from</StopPointRef>
+                    <DepArrTime>2026-02-20T08:10:00Z</DepArrTime>
+                  </From>
+                  <To>
+                    <StopPointRef>de:stop:mock:to</StopPointRef>
+                    <DepArrTime>2026-02-20T08:40:00Z</DepArrTime>
+                  </To>
+                </LegTrack>
+              </TripSection>
+            </Trip>
+          </TripResult>
+        </OJPTripDelivery>
+      </OJPFulfillmentResponse>
+    </ServiceDelivery>
+  </OJPResponse>
+</OJP>

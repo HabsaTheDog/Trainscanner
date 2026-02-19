@@ -1,0 +1,48 @@
+{
+  "feederSegments": [
+    {
+      "segmentId": "feeder-access-fast",
+      "role": "access",
+      "country": "DE",
+      "providerId": "de_ojp_primary",
+      "originCanonicalStationId": "cstn_origin",
+      "destinationCanonicalStationId": "cstn_hub",
+      "departureTime": "2026-02-20T08:10:00Z",
+      "arrivalTime": "2026-02-20T08:45:00Z",
+      "transferHub": "berlin_hub"
+    },
+    {
+      "segmentId": "feeder-access-tight",
+      "role": "access",
+      "country": "DE",
+      "providerId": "de_ojp_primary",
+      "originCanonicalStationId": "cstn_origin",
+      "destinationCanonicalStationId": "cstn_hub",
+      "departureTime": "2026-02-20T08:35:00Z",
+      "arrivalTime": "2026-02-20T08:57:00Z",
+      "transferHub": "berlin_hub"
+    },
+    {
+      "segmentId": "feeder-egress-normal",
+      "role": "egress",
+      "country": "DE",
+      "providerId": "de_ojp_primary",
+      "originCanonicalStationId": "cstn_dest_hub",
+      "destinationCanonicalStationId": "cstn_final",
+      "departureTime": "2026-02-20T09:47:00Z",
+      "arrivalTime": "2026-02-20T10:05:00Z",
+      "transferHub": "munich_hub"
+    },
+    {
+      "segmentId": "feeder-egress-longwait",
+      "role": "egress",
+      "country": "DE",
+      "providerId": "de_ojp_primary",
+      "originCanonicalStationId": "cstn_dest_hub",
+      "destinationCanonicalStationId": "cstn_final",
+      "departureTime": "2026-02-20T10:50:00Z",
+      "arrivalTime": "2026-02-20T11:05:00Z",
+      "transferHub": "munich_hub"
+    }
+  ]
+}

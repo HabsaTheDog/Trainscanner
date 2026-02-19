@@ -1,0 +1,56 @@
+{
+  "schemaVersion": "1.0.0",
+  "feeders": [
+    {
+      "providerId": "de_ojp_primary",
+      "country": "DE",
+      "endpointUrl": "",
+      "authMode": "bearer",
+      "envPrefix": "OJP_DE_PRIMARY",
+      "requestMode": "ojp_xml_post",
+      "timeoutSec": 25,
+      "notes": "Fill endpointUrl and env vars before probing DE OJP feeders.",
+      "testCases": [
+        {
+          "fromRef": "",
+          "toRef": "",
+          "departureTime": "2026-02-20T08:00:00Z"
+        }
+      ]
+    },
+    {
+      "providerId": "at_ojp_primary",
+      "country": "AT",
+      "endpointUrl": "",
+      "authMode": "bearer",
+      "envPrefix": "OJP_AT_PRIMARY",
+      "requestMode": "ojp_xml_post",
+      "timeoutSec": 25,
+      "notes": "Fill endpointUrl and env vars before probing AT OJP feeders.",
+      "testCases": [
+        {
+          "fromRef": "",
+          "toRef": "",
+          "departureTime": "2026-02-20T08:00:00Z"
+        }
+      ]
+    },
+    {
+      "providerId": "ch_ojp_primary",
+      "country": "CH",
+      "endpointUrl": "",
+      "authMode": "bearer",
+      "envPrefix": "OJP_CH_PRIMARY",
+      "requestMode": "ojp_xml_post",
+      "timeoutSec": 25,
+      "notes": "Fill endpointUrl and env vars before probing CH OJP feeders.",
+      "testCases": [
+        {
+          "fromRef": "",
+          "toRef": "",
+          "departureTime": "2026-02-20T08:00:00Z"
+        }
+      ]
+    }
+  ]
+}

@@ -54,6 +54,8 @@ state/*.tmp
 state/active-gtfs.json
 state/gtfs-switch-status.json
 state/gtfs-switch.log
+state/stitch-prototype-report.json
+state/stitch-report-*.json
 data/motis/active-gtfs.zip
 data/motis/config.yml
 data/motis/*.bin

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "1.0.0",
+  "feeders": [
+    {
+      "providerId": "de_ojp_mock_local",
+      "country": "DE",
+      "endpointUrl": "http://127.0.0.1:18080/ojp",
+      "authMode": "none",
+      "envPrefix": "OJP_DE_MOCK",
+      "requestMode": "ojp_xml_post",
+      "timeoutSec": 10,
+      "notes": "Local mock endpoint for deterministic OJP feeder smoke checks.",
+      "testCases": [
+        {
+          "fromRef": "de:stop:mock:from",
+          "toRef": "de:stop:mock:to",
+          "departureTime": "2026-02-20T08:00:00Z"
+        }
+      ]
+    }
+  ]
+}

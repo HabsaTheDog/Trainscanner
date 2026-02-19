@@ -37,3 +37,5 @@
 - Preserve route payload contract: `origin`, `destination`, `datetime`.
 - Treat active profile as API-owned runtime state (stored server-side in `state/active-gtfs.json`).
 - Keep DACH PostGIS/NeTEx canonical pipeline concerns out of frontend runtime unless explicitly requested.
+- Keep canonical QA, OJP feeder probing, and stitching prototype concerns out of frontend runtime unless explicitly requested.
+- Keep local OJP mock fixture checks (`scripts/data/check-ojp-feeders-mock.sh`) out of frontend runtime unless explicitly requested.
