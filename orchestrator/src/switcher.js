@@ -3,32 +3,9 @@ const path = require('node:path');
 
 const { acquireLock } = require('./lock');
 const { restartMotisContainer, waitForMotisReady } = require('./motis');
+const { normalizeProfiles, resolveProfileArtifact } = require('./profile-resolver');
 
 const VALID_STATES = new Set(['idle', 'switching', 'importing', 'restarting', 'ready', 'failed']);
-
-function normalizeProfiles(raw) {
-  const source = raw && typeof raw === 'object' ? raw.profiles || raw : {};
-  const normalized = {};
-
-  for (const [name, entry] of Object.entries(source)) {
-    if (typeof entry === 'string') {
-      normalized[name] = { zipPath: entry };
-      continue;
-    }
-
-    if (entry && typeof entry === 'object' && typeof entry.zipPath === 'string') {
-      normalized[name] = { zipPath: entry.zipPath, description: entry.description || '' };
-      continue;
-    }
-
-    if (entry && typeof entry === 'object' && typeof entry.zip === 'string') {
-      normalized[name] = { zipPath: entry.zip, description: entry.description || '' };
-      continue;
-    }
-  }
-
-  return normalized;
-}
 
 async function readJson(filePath, fallback) {
   try {
@@ -65,27 +42,36 @@ class GtfsSwitcher {
     const profilesRaw = await readJson(this.config.profilesPath, { profiles: {} });
     const activeRaw = await this.readActiveProfile();
     const profiles = normalizeProfiles(profilesRaw);
+    const items = [];
 
-    const items = Object.entries(profiles).map(([name, value]) => {
-      const absolutePath = path.isAbsolute(value.zipPath)
-        ? value.zipPath
-        : path.resolve(this.config.dataDir, '..', value.zipPath);
-
-      return {
-        name,
-        zipPath: value.zipPath,
-        description: value.description || '',
-        exists: false,
-        absolutePath
-      };
-    });
-
-    for (const item of items) {
+    for (const [name, value] of Object.entries(profiles)) {
       try {
-        const stat = await fs.stat(item.absolutePath);
-        item.exists = stat.isFile();
-      } catch {
-        item.exists = false;
+        const resolved = await resolveProfileArtifact(name, value, {
+          dataDir: this.config.dataDir,
+          allowMissing: true
+        });
+
+        items.push({
+          name,
+          zipPath: resolved.zipPath,
+          description: value.description || '',
+          sourceType: resolved.sourceType,
+          runtime: resolved.runtime || null,
+          exists: resolved.exists,
+          absolutePath: resolved.absolutePath,
+          resolutionError: null
+        });
+      } catch (err) {
+        items.push({
+          name,
+          zipPath: '',
+          description: value.description || '',
+          sourceType: value.sourceType || 'static',
+          runtime: value.runtime || null,
+          exists: false,
+          absolutePath: null,
+          resolutionError: err.message
+        });
       }
     }
 
@@ -201,25 +187,16 @@ class GtfsSwitcher {
         throw new Error(`Profile '${profileName}' not found in ${this.config.profilesPath}`);
       }
 
-      const sourceZipPath = path.isAbsolute(selected.zipPath)
-        ? selected.zipPath
-        : path.resolve(this.config.dataDir, '..', selected.zipPath);
-
-      let sourceStat;
-      try {
-        sourceStat = await fs.stat(sourceZipPath);
-      } catch {
-        throw new Error(`GTFS zip not found for profile '${profileName}': ${sourceZipPath}`);
-      }
-
-      if (!sourceStat.isFile()) {
-        throw new Error(`GTFS path is not a file for profile '${profileName}': ${sourceZipPath}`);
-      }
+      const resolved = await resolveProfileArtifact(profileName, selected, {
+        dataDir: this.config.dataDir,
+        allowMissing: false
+      });
+      const sourceZipPath = resolved.absolutePath;
 
       await this.setStatus({
         state: 'importing',
         requestedProfile: profileName,
-        message: `Preparing MOTIS input from ${selected.zipPath}`,
+        message: `Preparing MOTIS input from ${resolved.zipPath}`,
         error: null
       });
 
@@ -228,7 +205,9 @@ class GtfsSwitcher {
 
       await writeJsonAtomic(this.config.activeProfilePath, {
         activeProfile: profileName,
-        zipPath: selected.zipPath,
+        zipPath: resolved.zipPath,
+        sourceType: resolved.sourceType,
+        runtime: resolved.runtime || null,
         activatedAt: nowIso()
       });
 

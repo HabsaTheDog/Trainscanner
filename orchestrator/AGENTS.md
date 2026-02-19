@@ -9,6 +9,7 @@
 
 - `src/server.js`: HTTP API + static hosting + station resolution
 - `src/switcher.js`: profile switch state machine
+- `src/profile-resolver.js`: profile normalization + static/runtime artifact resolution
 - `src/motis.js`: MOTIS health/route calls + Docker restart API
 - `src/lock.js`: filesystem lock (`state/gtfs-switch.lock`) with stale-lock cleanup
 - `src/config.js`: env/file path configuration
@@ -36,6 +37,8 @@
 - Persist every transition to `state/gtfs-switch-status.json`.
 - Persist active profile marker to `state/active-gtfs.json` (legacy config path auto-migrates).
 - Prevent concurrent switches with lock file and clear stale locks when safe.
+- Keep static profile activation behavior backward-compatible while supporting runtime descriptor profiles (`runtime.mode=canonical-export`).
+- When runtime descriptors are used, resolve to concrete artifact paths deterministically before copying to `data/motis/active-gtfs.zip`.
 
 ## Editing rules
 
@@ -49,3 +52,4 @@
 - `scripts/data/build-review-queue.sh`, `scripts/data/apply-station-overrides.sh`, `scripts/data/report-review-queue.sh`, `scripts/data/test-ojp-feeders.sh`, `scripts/data/check-ojp-feeders-mock.sh`, and `scripts/data/run-stitch-prototype.sh` are also separate from orchestrator runtime.
 - Do not couple DACH retrieval/ingest/canonical build into `/api/routes` or GTFS switch flow in this MVP slice.
 - Do not couple curation workflow, OJP feeder probing, or stitching prototype into `/api/routes` or GTFS switch flow in this MVP slice.
+- Canonical -> GTFS runtime export is script-driven in `scripts/qa/`; orchestrator consumes produced artifacts only.

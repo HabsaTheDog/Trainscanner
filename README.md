@@ -44,10 +44,25 @@ Edit `config/gtfs-profiles.json`:
 {
   "profiles": {
     "sample_de": { "zipPath": "data/gtfs/de_fv.zip" },
-    "de_full": { "zipPath": "data/gtfs/de_full.zip" }
+    "de_full": { "zipPath": "data/gtfs/de_full.zip" },
+    "canonical_de_runtime": {
+      "runtime": {
+        "mode": "canonical-export",
+        "profile": "canonical_de_runtime",
+        "asOf": "latest",
+        "country": "DE"
+      }
+    }
   }
 }
 ```
+
+Profile entry modes:
+
+- Static: `zipPath` or `zip`
+- Runtime descriptor: `runtime.mode=canonical-export` (+ optional `profile`, `asOf`, `country`, `artifactPath`)
+
+Runtime descriptor resolution keeps static behavior backward-compatible and lets switch/init consume canonical export artifacts from `data/gtfs/runtime/...`.
 
 Active profile runtime state is tracked in `state/active-gtfs.json`.
 
@@ -199,6 +214,8 @@ Useful options:
 - `--osm-file <path>`
 - `--motis-image <image>`
 
+Profile resolution supports both static `zipPath` profiles and runtime descriptor profiles (`mode=canonical-export`).
+
 ### `scripts/check-motis-data.sh`
 
 Preflight checks for required MOTIS files.
@@ -221,6 +238,19 @@ Optional full reimport before activation:
 scripts/switch-gtfs.sh --profile sample_de --reimport
 ```
 
+Optional post-activation smoke gate (strict by default):
+
+```bash
+scripts/switch-gtfs.sh --profile sample_de --smoke-gate --smoke-max-attempts 180
+```
+
+Smoke options:
+
+- `--smoke-gate`
+- `--smoke-strict` / `--smoke-nonstrict`
+- `--smoke-max-attempts <n>`
+- `--smoke-target-date YYYY-MM-DD`
+
 ### `scripts/find-working-route.sh`
 
 Automated route smoke finder from active GTFS.
@@ -230,6 +260,22 @@ scripts/find-working-route.sh --target-date 2026-02-20 --max-attempts 300
 ```
 
 It generates real candidate pairs from GTFS and tests `/api/routes` until it finds non-empty itineraries.
+
+### `scripts/qa/build-profile.sh`
+
+Deterministic canonical -> GTFS runtime export builder.
+
+```bash
+scripts/qa/build-profile.sh --profile canonical_de_runtime --as-of 2026-02-19
+```
+
+### `scripts/qa/validate-export.sh`
+
+GTFS artifact validation gate.
+
+```bash
+scripts/qa/validate-export.sh --zip data/gtfs/runtime/canonical_de_runtime/2026-02-19/active-gtfs.zip
+```
 
 ### DACH official source discovery/retrieval
 
@@ -284,7 +330,7 @@ Note:
 ### DACH NeTEx -> PostGIS canonical stations (MVP slice)
 
 This repo now includes a PostGIS-backed NeTEx ingest and canonical station layer for DACH (`DE`, `AT`, `CH`).
-This slice is local-first and does not rewire MOTIS GTFS switch runtime.
+This slice is local-first and is now the source for canonical->GTFS runtime export artifacts.
 
 - Migrations: `db/migrations/`
 - DB helper scripts: `scripts/data/`
@@ -315,6 +361,61 @@ Report and checks:
 ```bash
 scripts/data/report-canonical.sh
 scripts/data/check-canonical-pipeline.sh --min-canonical 1
+```
+
+### Canonical -> GTFS runtime export (deterministic)
+
+Build deterministic runtime GTFS artifact from canonical data:
+
+```bash
+scripts/qa/build-profile.sh --profile canonical_de_runtime --as-of 2026-02-19
+```
+
+Output (default):
+
+- `data/gtfs/runtime/<profile>/<YYYY-MM-DD>/active-gtfs.zip`
+- `data/gtfs/runtime/<profile>/<YYYY-MM-DD>/manifest.json`
+
+Validate export explicitly:
+
+```bash
+scripts/qa/validate-export.sh --zip data/gtfs/runtime/canonical_de_runtime/2026-02-19/active-gtfs.zip
+```
+
+Activate exported runtime profile:
+
+```bash
+scripts/init-motis.sh --profile canonical_de_runtime
+scripts/switch-gtfs.sh --profile canonical_de_runtime --smoke-gate --smoke-strict
+```
+
+Fail-fast behavior:
+
+- Export fails when canonical scope has no snapshots/stops.
+- Export fails when coordinates are missing/invalid.
+- Export uses a clearly marked MVP bridge mode (`synthetic-journeys-from-canonical-stops`) and never emits empty required GTFS files.
+
+### End-to-end workflow (raw -> canonical -> activated runtime)
+
+```bash
+# 1) Fetch official raw snapshots
+scripts/data/fetch-dach-sources.sh --as-of 2026-02-19
+
+# 2) Ingest NeTEx into PostGIS staging
+scripts/data/ingest-netex.sh --country DE --as-of 2026-02-19
+
+# 3) Build canonical stations
+scripts/data/build-canonical-stations.sh --as-of 2026-02-19
+
+# 4) Build deterministic runtime GTFS artifact
+scripts/qa/build-profile.sh --profile canonical_de_runtime --as-of 2026-02-19 --country DE
+
+# 5) Validate artifact explicitly (optional extra gate)
+scripts/qa/validate-export.sh --zip data/gtfs/runtime/canonical_de_runtime/2026-02-19/active-gtfs.zip
+
+# 6) Activate profile in runtime + smoke gate
+scripts/init-motis.sh --profile canonical_de_runtime
+scripts/switch-gtfs.sh --profile canonical_de_runtime --smoke-gate --smoke-strict
 ```
 
 ### Canonical station QA + manual curation workflow
@@ -396,6 +497,7 @@ scripts/data/check-ojp-feeders-mock.sh
 GitHub Actions CI job (already included in repo):
 
 - `.github/workflows/ojp-mock-feeder-check.yml`
+- `.github/workflows/qa-export-check.yml`
 
 Manual probe against mock config:
 

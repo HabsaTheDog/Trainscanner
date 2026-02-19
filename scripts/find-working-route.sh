@@ -1,4 +1,4 @@
-cd #!/usr/bin/env bash
+#!/usr/bin/env bash
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -120,11 +120,59 @@ if not active_profile or active_profile not in profiles:
     print('ERROR: active profile missing or unknown', file=sys.stderr)
     sys.exit(2)
 
-entry = profiles[active_profile]
-if isinstance(entry, str):
-    zip_rel = entry
-else:
-    zip_rel = entry.get('zipPath') or entry.get('zip')
+def resolve_runtime_zip(entry_obj, default_profile):
+    runtime = entry_obj.get('runtime') if isinstance(entry_obj, dict) else None
+    if not isinstance(runtime, dict):
+        return None
+
+    mode = (runtime.get('mode') or runtime.get('source') or 'canonical-export').strip()
+    if mode != 'canonical-export':
+        print(f"ERROR: unsupported runtime mode '{mode}' in profile '{default_profile}'", file=sys.stderr)
+        sys.exit(2)
+
+    artifact_path = (runtime.get('artifactPath') or '').strip()
+    if artifact_path:
+        return artifact_path
+
+    runtime_profile = (runtime.get('profile') or default_profile).strip()
+    requested_as_of = (runtime.get('asOf') or 'latest').strip()
+    runtime_root = os.path.join(ROOT_DIR, 'data', 'gtfs', 'runtime', runtime_profile)
+
+    if requested_as_of == 'latest':
+        if not os.path.isdir(runtime_root):
+            return None
+        date_dirs = []
+        for name in os.listdir(runtime_root):
+            full = os.path.join(runtime_root, name)
+            if not os.path.isdir(full):
+                continue
+            if len(name) == 10 and name[4] == '-' and name[7] == '-' and name.replace('-', '').isdigit():
+                zip_candidate = os.path.join(full, 'active-gtfs.zip')
+                if os.path.isfile(zip_candidate):
+                    date_dirs.append(name)
+        if not date_dirs:
+            return None
+        date_dirs.sort()
+        return os.path.join('data', 'gtfs', 'runtime', runtime_profile, date_dirs[-1], 'active-gtfs.zip')
+
+    return os.path.join('data', 'gtfs', 'runtime', runtime_profile, requested_as_of, 'active-gtfs.zip')
+
+zip_rel = (active.get('zipPath') or '').strip()
+if zip_rel:
+    zip_path_candidate = zip_rel if os.path.isabs(zip_rel) else os.path.join(ROOT_DIR, zip_rel)
+    if not os.path.isfile(zip_path_candidate):
+        zip_rel = ''
+
+if not zip_rel:
+    entry = profiles[active_profile]
+    if isinstance(entry, str):
+        zip_rel = entry
+    elif isinstance(entry, dict):
+        zip_rel = (entry.get('zipPath') or entry.get('zip') or '').strip()
+        if not zip_rel:
+            zip_rel = resolve_runtime_zip(entry, active_profile) or ''
+    else:
+        zip_rel = ''
 
 if not zip_rel:
     print('ERROR: active profile has no zip path', file=sys.stderr)
@@ -137,6 +185,8 @@ if not os.path.isfile(zip_path):
 
 with zipfile.ZipFile(zip_path) as zf:
     def read_csv(name):
+        if name not in zf.namelist():
+            return []
         with zf.open(name) as fp:
             return list(csv.DictReader(io.TextIOWrapper(fp, encoding='utf-8-sig')))
 

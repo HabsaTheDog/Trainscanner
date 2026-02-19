@@ -17,8 +17,8 @@ Usage:
   scripts/init-motis.sh --profile <name> [--osm-file <path>] [--motis-image <image>] [--skip-import]
 
 What it does:
-  1) Validates profile from config/gtfs-profiles.json
-  2) Copies selected GTFS zip to data/motis/active-gtfs.zip
+  1) Resolves profile artifact from config/gtfs-profiles.json (static zip or runtime descriptor)
+  2) Copies selected GTFS zip artifact to data/motis/active-gtfs.zip
   3) Generates data/motis/config.yml using MOTIS config command
   4) Applies MVP-safe config defaults (disable street/geocoding/tiles unless MOTIS_DISABLE_STREET_FEATURES=false)
   5) Runs MOTIS import (unless --skip-import)
@@ -67,28 +67,44 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
-PROFILE_ZIP_RELATIVE="$(node - <<'NODE' "$ROOT_DIR/config/gtfs-profiles.json" "$PROFILE"
+PROFILE_ARTIFACT_INFO="$(node - <<'NODE' "$ROOT_DIR" "$PROFILE"
 const fs = require('node:fs');
-const file = process.argv[2];
-const profile = process.argv[3];
-const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
-const src = raw && typeof raw === 'object' ? (raw.profiles || raw) : {};
-const entry = src[profile];
-let zipPath = null;
-if (typeof entry === 'string') zipPath = entry;
-if (entry && typeof entry === 'object') zipPath = entry.zipPath || entry.zip || null;
-if (!zipPath) process.exit(2);
-process.stdout.write(zipPath);
+const path = require('node:path');
+
+const rootDir = process.argv[2];
+const profileName = process.argv[3];
+const profilesPath = path.join(rootDir, 'config', 'gtfs-profiles.json');
+const resolverPath = path.join(rootDir, 'orchestrator', 'src', 'profile-resolver.js');
+
+const { normalizeProfiles, resolveProfileArtifact } = require(resolverPath);
+
+(async () => {
+  const raw = JSON.parse(fs.readFileSync(profilesPath, 'utf8'));
+  const profiles = normalizeProfiles(raw);
+  const selected = profiles[profileName];
+  if (!selected) {
+    throw new Error(`Profile '${profileName}' not found in ${profilesPath}`);
+  }
+
+  const resolved = await resolveProfileArtifact(profileName, selected, {
+    dataDir: path.join(rootDir, 'data'),
+    allowMissing: false
+  });
+
+  process.stdout.write(
+    `${resolved.zipPath}\t${resolved.absolutePath}\t${resolved.sourceType}`
+  );
+})().catch((err) => {
+  console.error(err.message || String(err));
+  process.exit(2);
+});
 NODE
 )" || {
-  echo "Profile '$PROFILE' not found or invalid in config/gtfs-profiles.json" >&2
+  echo "Profile '$PROFILE' not found/invalid or runtime artifact unresolved in config/gtfs-profiles.json" >&2
   exit 1
 }
 
-PROFILE_ZIP_ABSOLUTE="$PROFILE_ZIP_RELATIVE"
-if [[ "$PROFILE_ZIP_ABSOLUTE" != /* ]]; then
-  PROFILE_ZIP_ABSOLUTE="${ROOT_DIR}/${PROFILE_ZIP_RELATIVE}"
-fi
+IFS=$'\t' read -r PROFILE_ZIP_RELATIVE PROFILE_ZIP_ABSOLUTE PROFILE_SOURCE_TYPE <<<"$PROFILE_ARTIFACT_INFO"
 
 if [[ ! -f "$PROFILE_ZIP_ABSOLUTE" ]]; then
   echo "GTFS zip for profile '$PROFILE' not found: $PROFILE_ZIP_ABSOLUTE" >&2
@@ -105,6 +121,7 @@ fi
 
 mkdir -p "$ROOT_DIR/data/motis"
 cp "$PROFILE_ZIP_ABSOLUTE" "$ROOT_DIR/data/motis/active-gtfs.zip"
+echo "Using profile artifact source='${PROFILE_SOURCE_TYPE}' zip='${PROFILE_ZIP_RELATIVE}'"
 
 motis_cmd0_from_image() {
   docker image inspect "$MOTIS_IMAGE" --format '{{json .Config.Cmd}}' 2>/dev/null | node -e '

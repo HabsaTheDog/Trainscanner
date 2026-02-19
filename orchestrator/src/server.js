@@ -6,7 +6,8 @@ const { promisify } = require('node:util');
 
 const { loadConfig } = require('./config');
 const { createLogger } = require('./logger');
-const { GtfsSwitcher, normalizeProfiles } = require('./switcher');
+const { GtfsSwitcher } = require('./switcher');
+const { normalizeProfiles, resolveProfileArtifact } = require('./profile-resolver');
 const { checkMotisHealth, queryMotisRoute } = require('./motis');
 
 const execFileAsync = promisify(execFile);
@@ -156,21 +157,45 @@ async function loadProfilesMap() {
   return normalizeProfiles(JSON.parse(raw));
 }
 
-function resolveProfileZipPath(zipPath) {
-  if (path.isAbsolute(zipPath)) {
-    return zipPath;
+async function resolveProfileZipForQuery(profileName) {
+  const active = await switcher.readActiveProfile().catch(() => null);
+  if (
+    active &&
+    active.activeProfile === profileName &&
+    typeof active.zipPath === 'string' &&
+    active.zipPath.trim().length > 0
+  ) {
+    const absolutePath = path.isAbsolute(active.zipPath)
+      ? active.zipPath
+      : path.resolve(config.dataDir, '..', active.zipPath);
+    const stat = await fs.stat(absolutePath).catch(() => null);
+    if (stat && stat.isFile()) {
+      return {
+        zipPath: active.zipPath,
+        absolutePath
+      };
+    }
   }
-  return path.resolve(config.dataDir, '..', zipPath);
-}
 
-async function getStationIndexForProfile(profileName) {
   const profiles = await loadProfilesMap();
   const profile = profiles[profileName];
   if (!profile) {
     throw Object.assign(new Error(`Unknown profile '${profileName}'`), { statusCode: 404 });
   }
 
-  const zipPath = resolveProfileZipPath(profile.zipPath);
+  const resolved = await resolveProfileArtifact(profileName, profile, {
+    dataDir: config.dataDir,
+    allowMissing: false
+  }).catch((err) => {
+    throw Object.assign(new Error(err.message), { statusCode: 404 });
+  });
+
+  return resolved;
+}
+
+async function getStationIndexForProfile(profileName) {
+  const resolved = await resolveProfileZipForQuery(profileName);
+  const zipPath = resolved.absolutePath;
   const stat = await fs.stat(zipPath).catch(() => null);
   if (!stat || !stat.isFile()) {
     throw Object.assign(new Error(`GTFS zip not found for profile '${profileName}': ${zipPath}`), { statusCode: 404 });

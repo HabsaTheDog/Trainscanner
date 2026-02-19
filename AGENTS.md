@@ -15,11 +15,14 @@ Maintain and extend the MOTIS GTFS-switch MVP for fast dataset testing/debugging
 - `config/ojp-endpoints.json`: OJP feeder endpoint/auth scaffolding
 - `config/ojp-endpoints.mock.json`: local OJP mock fixture config for deterministic checks
 - `scripts/data/`: DACH source fetch/verify + NeTEx ingest/canonical/QA/OJP/stitch scripts
+- `scripts/qa/`: canonical -> GTFS runtime export, validation, and fixture QA scripts
 - `db/migrations/`: PostGIS schema migrations for canonical station layer
 - `.github/workflows/ojp-mock-feeder-check.yml`: CI smoke check for deterministic OJP mock probe
+- `.github/workflows/qa-export-check.yml`: lightweight canonical export determinism check
 - `docker-compose.yml`: optional `postgis` service (`dach-data` profile) with named volume persistence
 - `state/`: switch lock, status, and logs
 - `data/motis/`: generated MOTIS runtime data
+- `data/gtfs/runtime/`: generated deterministic GTFS runtime artifacts
 
 ## Core behavior that must remain true
 
@@ -30,6 +33,7 @@ Maintain and extend the MOTIS GTFS-switch MVP for fast dataset testing/debugging
 - Route endpoint is blocked unless system state is `ready`.
 - Station autocomplete comes from active GTFS profile.
 - Route station inputs are normalized before MOTIS call.
+- Static GTFS profiles keep working unchanged; runtime descriptor profiles must resolve deterministically to concrete artifacts before activation.
 
 ## DACH data pipeline contract
 
@@ -63,6 +67,7 @@ Maintain and extend the MOTIS GTFS-switch MVP for fast dataset testing/debugging
 - `/api/routes` should resolve user input to MOTIS stop IDs in `tag_stopId` format.
 - Default dataset tag is `active-gtfs`.
 - Debug output should include `routeRequestResolved` and attempted MOTIS request variants.
+- OJP/stitching prototype remains out of production `/api/routes`.
 
 ## Map stack contract
 
@@ -92,6 +97,9 @@ Maintain and extend the MOTIS GTFS-switch MVP for fast dataset testing/debugging
 - `scripts/data/test-ojp-feeders.sh --country <DE|AT|CH>`
 - `scripts/data/check-ojp-feeders-mock.sh`
 - `scripts/data/run-stitch-prototype.sh --country <DE|AT|CH>`
+- `scripts/qa/build-profile.sh --profile <name> --as-of <YYYY-MM-DD>`
+- `scripts/qa/validate-export.sh --zip /absolute/or/relative/path/to/active-gtfs.zip`
+- `scripts/qa/seed-export-fixture.sh --as-of <YYYY-MM-DD>`
 
 ## Documentation policy (required)
 

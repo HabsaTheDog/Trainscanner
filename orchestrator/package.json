@@ -6,7 +6,7 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "check": "node --check src/server.js && node --check src/switcher.js && node --check src/motis.js"
+    "check": "node --check src/server.js && node --check src/switcher.js && node --check src/profile-resolver.js && node --check src/motis.js"
   },
   "engines": {
     "node": ">=20"

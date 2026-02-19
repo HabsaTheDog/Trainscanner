@@ -10,6 +10,7 @@
 ## Required UX behavior
 
 - Show GTFS profiles from `GET /api/gtfs/profiles`.
+- Treat profile metadata fields (`sourceType`, `runtime`, `resolutionError`) as optional and non-blocking for rendering.
 - Activate profile via `POST /api/gtfs/activate`.
 - Poll `GET /api/gtfs/status` and render status badge.
 - Load station suggestions from `GET /api/gtfs/stations`.
