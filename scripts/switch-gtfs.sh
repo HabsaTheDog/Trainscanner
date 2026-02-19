@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+API_URL="${API_URL:-http://localhost:3000}"
+POLL_INTERVAL="${POLL_INTERVAL:-2}"
+TIMEOUT_SEC="${TIMEOUT_SEC:-300}"
+PROFILE=""
+REIMPORT="false"
+
+usage() {
+  cat <<USAGE
+Usage:
+  scripts/switch-gtfs.sh --profile <name> [--reimport] [--api-url <url>] [--timeout-sec <seconds>]
+
+Examples:
+  scripts/switch-gtfs.sh --profile sample_de
+  scripts/switch-gtfs.sh --profile sample_de --reimport
+  scripts/switch-gtfs.sh --profile sample_dach --api-url http://localhost:3000
+USAGE
+}
+
+json_field() {
+  local json="$1"
+  local key="$2"
+
+  if command -v jq >/dev/null 2>&1; then
+    printf '%s' "$json" | jq -r ".${key} // empty"
+  else
+    printf '%s' "$json" | sed -n "s/.*\"${key}\":\"\([^\"]*\)\".*/\1/p"
+  fi
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --profile)
+      PROFILE="${2:-}"
+      shift 2
+      ;;
+    --api-url)
+      API_URL="${2:-}"
+      shift 2
+      ;;
+    --timeout-sec)
+      TIMEOUT_SEC="${2:-}"
+      shift 2
+      ;;
+    --reimport)
+      REIMPORT="true"
+      shift
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage
+      exit 1
+      ;;
+  esac
+done
+
+if [[ -z "$PROFILE" ]]; then
+  echo "Missing required --profile" >&2
+  usage
+  exit 1
+fi
+
+if [[ "$REIMPORT" == "true" ]]; then
+  echo "Running full MOTIS re-import before activation for profile '${PROFILE}'..."
+  "${ROOT_DIR}/scripts/init-motis.sh" --profile "$PROFILE"
+fi
+
+echo "Starting GTFS switch for profile '${PROFILE}' via ${API_URL}"
+ACTIVATE_PAYLOAD="$(printf '{"profile":"%s"}' "$PROFILE")"
+HTTP_CODE="$(curl -sS -o /tmp/switch_activate_resp.json -w '%{http_code}' -X POST "${API_URL}/api/gtfs/activate" -H 'Content-Type: application/json' -d "$ACTIVATE_PAYLOAD")"
+
+if [[ "$HTTP_CODE" -ge 400 ]]; then
+  echo "Activation request failed (HTTP ${HTTP_CODE}):" >&2
+  cat /tmp/switch_activate_resp.json >&2
+  echo >&2
+  exit 1
+fi
+
+START_TS="$(date +%s)"
+LAST_STATE=""
+
+while true; do
+  STATUS_JSON="$(curl -sS "${API_URL}/api/gtfs/status")"
+  STATE="$(json_field "$STATUS_JSON" state)"
+  MESSAGE="$(json_field "$STATUS_JSON" message)"
+
+  if [[ "$STATE" != "$LAST_STATE" ]]; then
+    echo "state=${STATE} message=${MESSAGE}"
+    LAST_STATE="$STATE"
+  fi
+
+  if [[ "$STATE" == "ready" ]]; then
+    echo "Profile '${PROFILE}' activated successfully."
+    exit 0
+  fi
+
+  if [[ "$STATE" == "failed" ]]; then
+    echo "Profile switch failed:" >&2
+    printf '%s\n' "$STATUS_JSON" >&2
+    exit 1
+  fi
+
+  NOW_TS="$(date +%s)"
+  ELAPSED="$((NOW_TS - START_TS))"
+  if [[ "$ELAPSED" -ge "$TIMEOUT_SEC" ]]; then
+    echo "Timeout waiting for switch completion after ${TIMEOUT_SEC}s" >&2
+    printf '%s\n' "$STATUS_JSON" >&2
+    exit 1
+  fi
+
+  sleep "$POLL_INTERVAL"
+done
