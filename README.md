@@ -12,12 +12,12 @@
 - MOTIS in Docker (`motis`)
 - Orchestrator API + static frontend (`orchestrator`)
 - Named GTFS profiles via `config/gtfs-profiles.json`
-- Active profile runtime state in `state/active-gtfs.json` (auto-migrates legacy `config/active-gtfs.json`)
+- Active profile runtime state in PostGIS `system_state.active_gtfs` with filesystem fallback (`state/active-gtfs.json`, legacy `config/active-gtfs.json` auto-migration)
 - Switch state machine with lock + status persistence
 - Idempotent switch semantics with per-run IDs (`runId`) and deterministic status persistence
 - Route query endpoint with station-resolution and MOTIS adapter
 - Structured logs with correlation IDs and machine-readable API error codes (`errorCode`)
-- Frontend profile switcher, status badge, autocomplete, route summary, map, raw JSON
+- Frontend profile switcher, status badge, autocomplete, route summary, map, raw JSON, and QA curation dashboard (`/curation.html`)
 - Schema-based config validation for GTFS profiles, DACH sources, and OJP endpoint configs
 
 ## Quickstart
@@ -67,14 +67,13 @@ Profile entry modes:
 
 Runtime descriptor resolution keeps static behavior backward-compatible and lets switch/init consume canonical export artifacts from `data/gtfs/runtime/...`.
 
-Active profile runtime state is tracked in `state/active-gtfs.json`.
+## Runtime state
 
-## Runtime files
-
-- `state/gtfs-switch-status.json`: switch status (`idle|switching|importing|restarting|ready|failed`) with `runId` + `requestedProfile` (Note: Planned migration to Postgres `system_state` table; see `docs/state_migration_prompt.md`)
+- `system_state` (PostGIS): primary persistence for `gtfs_switch_status` and `active_gtfs` when DB connectivity is available
+- `state/gtfs-switch-status.json`: filesystem fallback for switch status (`idle|switching|importing|restarting|ready|failed`) with `runId` + `requestedProfile`
 - `state/gtfs-switch.lock`: concurrency lock
 - `state/gtfs-switch.log`: step logs and failures
-- `state/active-gtfs.json`: active GTFS profile marker used by orchestrator/scripts (Note: Planned migration to Postgres `system_state` table)
+- `state/active-gtfs.json`: filesystem fallback marker for active GTFS profile (legacy `config/active-gtfs.json` auto-migrates)
 - `data/motis/`: generated MOTIS runtime data
 
 ## API
@@ -112,6 +111,55 @@ Autocomplete source from active profile:
 ```bash
 curl -s "http://localhost:3000/api/gtfs/stations?q=munchen&limit=20" | jq
 ```
+
+### `GET /api/qa/queue`
+
+Review queue feed for curation dashboard (optional `country=DE|AT|CH` filter):
+
+```bash
+curl -s "http://localhost:3000/api/qa/queue?country=DE" | jq
+```
+
+### `POST /api/qa/overrides`
+
+Apply curation action for a queue item (`keep_separate|merge|rename`):
+
+```bash
+curl -s -X POST http://localhost:3000/api/qa/overrides \
+  -H 'Content-Type: application/json' \
+  -d '{"review_item_id":123,"operation":"keep_separate"}' | jq
+```
+
+### `POST /api/qa/jobs/refresh`
+
+Trigger the asynchronous refresh pipeline (`fetch -> ingest -> canonical -> review queue`):
+
+```bash
+curl -s -X POST http://localhost:3000/api/qa/jobs/refresh \
+  -H 'Content-Type: application/json' \
+  -d '{"country":"DE"}' | jq
+```
+
+The endpoint responds immediately with HTTP `202` and `job_id` (also mirrored in `job.job_id`).
+
+If you run via Docker Compose and just pulled code changes, rebuild the orchestrator service first:
+
+```bash
+docker compose up -d --build orchestrator
+```
+
+### `GET /api/qa/jobs/:job_id`
+
+Poll refresh pipeline status:
+
+```bash
+curl -s http://localhost:3000/api/qa/jobs/<job_id> | jq
+```
+
+While `step=fetching_sources`, payloads include `download_progress` with live source/file/bytes fields
+(`source_id`, `source_index`, `total_sources`, `downloaded_bytes`, `total_bytes`) for UI progress bars.
+
+Note: A failed fetch step usually indicates missing source auth env vars (for example `DE_DELFI_SOLLFAHRPLANDATEN_NETEX_USERNAME`/`..._PASSWORD` or cookie/header equivalents).
 
 ### `POST /api/routes`
 
@@ -154,6 +202,7 @@ curl -s http://localhost:3000/metrics
 - Route summary (cleaned display)
 - Interactive map
 - Collapsible raw JSON response
+- QA curation dashboard at `http://localhost:3000/curation.html`
 
 ### Map stack
 
@@ -505,7 +554,9 @@ This workflow is separate from runtime `/api/routes`.
 
 - Queue table: `canonical_review_queue`
 - Override table: `canonical_station_overrides`
-- **Planned Curation Tool**: A Frontend Curation Tool is planned to replace manual CSV curation (see `docs/curation_tool_prompt.md`).
+- Frontend dashboard: `http://localhost:3000/curation.html` (uses `/api/qa/queue`, `/api/qa/overrides`, `/api/qa/jobs/refresh`, `/api/qa/jobs/:job_id`).
+- Dashboard includes `Run Pipeline` (async refresh with polling + step/download progress bars) and `Refresh Queue` (fetch queue rows only).
+- Planned next step: richer curation workflow is documented in `docs/curation_tool_prompt.md`.
 
 Build review queue items from canonical data:
 

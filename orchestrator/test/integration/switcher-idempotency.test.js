@@ -5,6 +5,7 @@ const path = require('node:path');
 
 const { GtfsSwitcher } = require('../../src/switcher');
 const { createLogger } = require('../../src/logger');
+const { setSystemState } = require('../../src/data/postgis/system-state');
 const { mkTempDir, writeJson, waitFor } = require('../helpers/test-utils');
 
 test('GtfsSwitcher supports idempotent start semantics', async () => {
@@ -44,6 +45,21 @@ test('GtfsSwitcher supports idempotent start semantics', async () => {
   };
 
   const logger = createLogger(config.switchLogPath, { service: 'test' });
+
+  // Ensure deterministic baseline when DB-backed system_state is available.
+  await setSystemState('gtfs_switch_status', {
+    state: 'idle',
+    activeProfile: null,
+    requestedProfile: null,
+    runId: null,
+    message: 'integration-test reset',
+    updatedAt: new Date().toISOString(),
+    error: null
+  }).catch(() => {});
+  await setSystemState('active_gtfs', {
+    activeProfile: null
+  }).catch(() => {});
+
   const switcher = new GtfsSwitcher(config, logger, {
     motisAdapter: {
       async restartMotisContainer() {

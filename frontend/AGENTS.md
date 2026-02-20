@@ -4,6 +4,8 @@
 
 - `frontend/index.html`
 - `frontend/app.js`
+- `frontend/curation.html`
+- `frontend/curation.js`
 - `frontend/styles.css`
 - `frontend/config.js`
 
@@ -17,6 +19,12 @@
 - Disable route form unless status is `ready`.
 - Keep UI responsive while switching/importing/restarting.
 - Treat API `errorCode` and `x-correlation-id` as optional debug metadata when showing failures.
+- Keep the home page link to `/curation.html` available.
+- Curation dashboard loads items from `GET /api/qa/queue` and supports optional `country=DE|AT|CH`.
+- Curation actions submit to `POST /api/qa/overrides` using `keep_separate|merge|rename`.
+- Curation refresh pipeline trigger calls `POST /api/qa/jobs/refresh` and polls `GET /api/qa/jobs/:job_id` to completion/failure.
+- While polling refresh jobs, render both step-level and fetch download-level progress bars from `progress` + `download_progress`.
+- Display backend pipeline failure messages as-is (common case: missing source-auth env vars for protected providers).
 
 ## Route view requirements
 
@@ -37,9 +45,11 @@
 - Do not hardcode profile names.
 - Preserve status vocabulary exactly.
 - Preserve route payload contract: `origin`, `destination`, `datetime`.
-- Treat active profile as API-owned runtime state (stored server-side in `state/active-gtfs.json`).
+- Treat active profile as API-owned runtime state (server-side `system_state.active_gtfs` with filesystem fallback).
 - Keep DACH PostGIS/NeTEx canonical pipeline concerns out of frontend runtime unless explicitly requested.
 - Treat DACH `scripts/data/*.sh` commands as backend/ops tooling (now CLI-backed wrappers), not frontend runtime dependencies.
 - Treat backend pipeline orchestration semantics (`JOB_BACKPRESSURE`, resumable `queued|retry_wait` jobs, per-type concurrency limits) as ops concerns, not frontend state.
-- Keep canonical QA, OJP feeder probing, and stitching prototype concerns out of frontend runtime unless explicitly requested.
+- Keep curation queue browsing responsive while pipeline polling is active (non-blocking UI, explicit running/completed/failed feedback).
+- Keep curation interaction limited to QA API contracts; do not call `/api/routes` from curation workflow.
+- Keep OJP feeder probing and stitching prototype concerns out of frontend runtime unless explicitly requested.
 - Keep local OJP mock fixture checks (`scripts/data/check-ojp-feeders-mock.sh`) out of frontend runtime unless explicitly requested.

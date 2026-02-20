@@ -457,6 +457,29 @@ async function handleApi(req, res, url, requestLogger) {
     return;
   }
 
+  if (req.method === 'POST' && url.pathname === '/api/qa/jobs/refresh') {
+    const body = await parseJsonBody(req);
+    const { postRefreshJob } = require('./domains/qa/api');
+    const result = await postRefreshJob(body, {
+      rootDir: process.cwd()
+    });
+    sendJson(res, 202, result);
+    return;
+  }
+
+  if (req.method === 'GET') {
+    const match = url.pathname.match(/^\/api\/qa\/jobs\/([^/]+)$/);
+    if (match) {
+      const { getRefreshJob } = require('./domains/qa/api');
+      const jobId = decodeURIComponent(match[1]);
+      const result = await getRefreshJob(jobId, {
+        rootDir: process.cwd()
+      });
+      sendJson(res, 200, result);
+      return;
+    }
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/gtfs/profiles') {
     const payload = await switcher.getProfilesWithMeta();
     sendJson(res, 200, payload);

@@ -26,7 +26,30 @@
                     <option value="AT">AT</option>
                     <option value="CH">CH</option>
                 </select>
-                <button id="refreshBtn" type="button">Refresh</button>
+                <button id="refreshBtn" type="button">Refresh Queue</button>
+            </div>
+            <div class="pipeline-row">
+                <span id="pipelineStatus" class="muted" style="margin: 0;">Pipeline idle.</span>
+                <button id="runPipelineBtn" type="button">Run Pipeline</button>
+            </div>
+            <div id="pipelineProgress" class="pipeline-progress" hidden>
+                <div class="progress-label-row">
+                    <span id="pipelineStepLabel" class="muted">Pipeline progress</span>
+                    <span id="pipelineStepValue" class="muted">0 / 4</span>
+                </div>
+                <div class="progress-track" aria-hidden="true">
+                    <div id="pipelineStepBar" class="progress-fill"></div>
+                </div>
+
+                <div id="pipelineDownloadRow">
+                    <div class="progress-label-row">
+                        <span id="pipelineDownloadLabel" class="muted">Download progress</span>
+                        <span id="pipelineDownloadValue" class="muted">Waiting...</span>
+                    </div>
+                    <div class="progress-track" aria-hidden="true">
+                        <div id="pipelineDownloadBar" class="progress-fill indeterminate"></div>
+                    </div>
+                </div>
             </div>
 
             <div id="queueList">Loading...</div>

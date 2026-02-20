@@ -27,20 +27,34 @@ function normalizeJobRow(row) {
     return null;
   }
 
+  const startedAt = row.started_at || row.startedat || row.startedAt || '';
+  const endedAt = row.ended_at || row.endedat || row.endedAt || '';
+  const errorCode = row.error_code || row.errorcode || row.errorCode || '';
+  const errorMessage = row.error_message || row.errormessage || row.errorMessage || '';
+
   const out = {
     jobId: row.job_id || row.jobid || row.jobId,
     jobType: row.job_type || row.jobtype || row.jobType,
     idempotencyKey: row.idempotency_key || row.idempotencykey || row.idempotencyKey,
     status: row.status,
     attempt: Number.parseInt(String(row.attempt || 0), 10) || 0,
-    startedAt: row.started_at || row.startedat || row.startedAt || null,
-    endedAt: row.ended_at || row.endedat || row.endedAt || null,
-    errorCode: row.error_code || row.errorcode || row.errorCode || null,
-    errorMessage: row.error_message || row.errormessage || row.errorMessage || null,
     runContext: row.run_context && typeof row.run_context === 'object' ? row.run_context : {},
     checkpoint: row.checkpoint && typeof row.checkpoint === 'object' ? row.checkpoint : {},
     resultContext: row.result_context && typeof row.result_context === 'object' ? row.result_context : {}
   };
+
+  if (startedAt) {
+    out.startedAt = startedAt;
+  }
+  if (endedAt) {
+    out.endedAt = endedAt;
+  }
+  if (errorCode) {
+    out.errorCode = errorCode;
+  }
+  if (errorMessage) {
+    out.errorMessage = errorMessage;
+  }
 
   validateOrThrow(out, JOB_SCHEMA, {
     code: 'INVALID_CONFIG',

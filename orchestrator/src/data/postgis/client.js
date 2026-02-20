@@ -74,10 +74,56 @@ function buildVariableArgs(params = {}) {
   return args;
 }
 
+function escapeRegex(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function toSqlStringLiteral(value) {
+  const raw = value === undefined || value === null ? '' : String(value);
+  return `'${raw.replace(/'/g, "''")}'`;
+}
+
+function interpolateSqlParams(sql, params = {}) {
+  let query = String(sql || '');
+  const entries = Object.entries(params || {});
+
+  for (const [key, value] of entries) {
+    const token = new RegExp(`:'${escapeRegex(key)}'`, 'g');
+    query = query.replace(token, toSqlStringLiteral(value));
+  }
+
+  const unresolved = query.match(/:'[A-Za-z_][A-Za-z0-9_]*'/g);
+  if (unresolved && unresolved.length > 0) {
+    throw new AppError({
+      code: 'INVALID_REQUEST',
+      message: `Missing SQL params for placeholders: ${Array.from(new Set(unresolved)).join(', ')}`
+    });
+  }
+
+  return query;
+}
+
 function parseRowsFromJsonOutput(stdout) {
   const text = String(stdout || '').trim();
   if (!text) {
     return [];
+  }
+
+  // Prefer parsing the full payload first because psql can wrap long JSON output
+  // across lines even in unaligned mode.
+  try {
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed)) {
+      return parsed;
+    }
+    if (typeof parsed === 'string') {
+      const nested = JSON.parse(parsed);
+      if (Array.isArray(nested)) {
+        return nested;
+      }
+    }
+  } catch {
+    // Fall back to last-line parsing for mixed stdout payloads.
   }
 
   const lines = text
@@ -289,14 +335,15 @@ function createPostgisClient(options = {}) {
         message: 'SQL query is required'
       });
     }
+    const interpolatedQuery = interpolateSqlParams(query, params);
 
     const args = [
       '-X',
       '-q',
       ...(options.at === false ? [] : ['-At']),
-      ...buildVariableArgs(params),
+      ...buildVariableArgs(),
       '-c',
-      query
+      interpolatedQuery
     ];
 
     return runPsql(args, { maxBuffer: options.maxBuffer });
@@ -310,8 +357,9 @@ function createPostgisClient(options = {}) {
         message: 'SQL script is required'
       });
     }
+    const interpolatedQuery = interpolateSqlParams(query, params);
 
-    const args = ['-X', ...(options.at === false ? [] : ['-At']), ...buildVariableArgs(params), '-c', query];
+    const args = ['-X', ...(options.at === false ? [] : ['-At']), ...buildVariableArgs(), '-c', interpolatedQuery];
     return runPsql(args, { maxBuffer: options.maxBuffer });
   }
 
@@ -324,7 +372,8 @@ function createPostgisClient(options = {}) {
   }
 
   async function queryRows(sql, params = {}, options = {}) {
-    const wrapped = `WITH __q AS (${sql}) SELECT COALESCE(json_agg(__q), '[]'::json)::text FROM __q;`;
+    const innerQuery = String(sql || '').trim().replace(/;+\s*$/, '');
+    const wrapped = `WITH __q AS (${innerQuery}) SELECT COALESCE(json_agg(__q), '[]'::json)::text FROM __q;`;
     const result = await runSql(wrapped, params, { ...options, at: true });
     return parseRowsFromJsonOutput(result.stdout);
   }
@@ -467,6 +516,7 @@ function createPostgisClient(options = {}) {
 
 module.exports = {
   createPostgisClient,
+  interpolateSqlParams,
   parseRowsFromJsonOutput,
   resolveConnectionConfig
 };

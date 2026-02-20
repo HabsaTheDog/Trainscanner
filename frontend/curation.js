@@ -3,6 +3,7 @@ let currentMarkers = [];
 let queueItems = [];
 let activeItem = null;
 let currentRenameAction = null;
+let pipelinePollHandle = null;
 
 async function initMap() {
     const container = document.getElementById('curationMap');
@@ -79,6 +80,259 @@ async function fetchQueue() {
         renderQueue();
     } catch (err) {
         listEl.innerHTML = `<span class="badge failed">Failed to load: ${err.message}</span>`;
+    }
+}
+
+function setPipelineStatus(message, tone = 'idle') {
+    const statusEl = document.getElementById('pipelineStatus');
+    statusEl.textContent = message;
+    if (tone === 'running') {
+        statusEl.style.color = 'var(--warn)';
+    } else if (tone === 'success') {
+        statusEl.style.color = 'var(--ok)';
+    } else if (tone === 'error') {
+        statusEl.style.color = 'var(--danger)';
+    } else {
+        statusEl.style.color = 'var(--muted)';
+    }
+}
+
+function formatBytes(bytes) {
+    const value = Number(bytes);
+    if (!Number.isFinite(value) || value <= 0) {
+        return '0 B';
+    }
+
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let size = value;
+    let unitIndex = 0;
+    while (size >= 1024 && unitIndex < units.length - 1) {
+        size /= 1024;
+        unitIndex += 1;
+    }
+
+    const decimals = size >= 10 || unitIndex === 0 ? 0 : 1;
+    return `${size.toFixed(decimals)} ${units[unitIndex]}`;
+}
+
+function clampPercent(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) {
+        return 0;
+    }
+    if (num < 0) return 0;
+    if (num > 100) return 100;
+    return num;
+}
+
+function setProgressFill(element, percent, indeterminate = false) {
+    if (!element) return;
+    if (indeterminate) {
+        element.classList.add('indeterminate');
+        return;
+    }
+    element.classList.remove('indeterminate');
+    element.style.width = `${clampPercent(percent)}%`;
+}
+
+function hidePipelineProgress() {
+    const container = document.getElementById('pipelineProgress');
+    if (container) {
+        container.hidden = true;
+    }
+}
+
+function renderPipelineProgress(payload) {
+    const container = document.getElementById('pipelineProgress');
+    const stepBar = document.getElementById('pipelineStepBar');
+    const stepLabel = document.getElementById('pipelineStepLabel');
+    const stepValue = document.getElementById('pipelineStepValue');
+    const downloadRow = document.getElementById('pipelineDownloadRow');
+    const downloadLabel = document.getElementById('pipelineDownloadLabel');
+    const downloadValue = document.getElementById('pipelineDownloadValue');
+    const downloadBar = document.getElementById('pipelineDownloadBar');
+    if (!container || !stepBar || !stepLabel || !stepValue || !downloadRow || !downloadLabel || !downloadValue || !downloadBar) {
+        return;
+    }
+
+    const completed = Number(payload?.progress?.completed_steps || 0);
+    const total = Number(payload?.progress?.total_steps || 4);
+    const status = payload?.status || 'running';
+    const step = payload?.step || '';
+
+    container.hidden = false;
+    stepLabel.textContent = payload?.step_label || 'Pipeline progress';
+    stepValue.textContent = `${completed} / ${total}`;
+
+    let stepPercent = total > 0 ? (completed / total) * 100 : 0;
+    const downloadProgress = payload?.download_progress || payload?.checkpoint?.downloadProgress || null;
+
+    if (status === 'completed') {
+        stepPercent = 100;
+    } else if (status === 'running' && step === 'fetching_sources' && downloadProgress?.total_sources > 0) {
+        const sourceIndex = Number(downloadProgress.source_index || 0);
+        const totalSources = Number(downloadProgress.total_sources || 0);
+        const totalBytes = Number(downloadProgress.total_bytes || 0);
+        const downloadedBytes = Number(downloadProgress.downloaded_bytes || 0);
+
+        let sourceProgress = Math.max(0, sourceIndex - 1);
+        if (downloadProgress.stage === 'source_completed') {
+            sourceProgress = Math.max(sourceProgress, sourceIndex);
+        } else if (downloadProgress.stage === 'downloading' && totalBytes > 0) {
+            sourceProgress += Math.min(downloadedBytes / totalBytes, 1);
+        }
+
+        const stepFraction = Math.min(Math.max(sourceProgress / totalSources, 0), 1);
+        stepPercent = total > 0 ? ((completed + stepFraction) / total) * 100 : stepPercent;
+    }
+
+    setProgressFill(stepBar, stepPercent, status === 'running' && stepPercent === 0);
+
+    const showDownload = status === 'running' && step === 'fetching_sources';
+    downloadRow.hidden = !showDownload;
+    if (!showDownload) {
+        return;
+    }
+
+    const sourceId = downloadProgress?.source_id || 'source';
+    const sourceIndex = Number(downloadProgress?.source_index || 0);
+    const totalSources = Number(downloadProgress?.total_sources || 0);
+    const downloadedBytes = Number(downloadProgress?.downloaded_bytes || 0);
+    const totalBytes = Number(downloadProgress?.total_bytes || 0);
+
+    downloadLabel.textContent = `Download ${sourceIndex > 0 ? `${sourceIndex}/${totalSources || '?'}` : ''} ${sourceId}`.trim();
+    if (totalBytes > 0) {
+        const downloadPercent = clampPercent((downloadedBytes / totalBytes) * 100);
+        downloadValue.textContent = `${formatBytes(downloadedBytes)} / ${formatBytes(totalBytes)} (${downloadPercent.toFixed(0)}%)`;
+        setProgressFill(downloadBar, downloadPercent, false);
+    } else {
+        downloadValue.textContent = `${formatBytes(downloadedBytes)} downloaded`;
+        setProgressFill(downloadBar, 0, true);
+    }
+}
+
+function stopPipelinePolling() {
+    if (pipelinePollHandle) {
+        clearInterval(pipelinePollHandle);
+        pipelinePollHandle = null;
+    }
+}
+
+function setPipelineButtonState(isRunning) {
+    const button = document.getElementById('runPipelineBtn');
+    button.disabled = isRunning;
+    button.textContent = isRunning ? 'Running...' : 'Run Pipeline';
+}
+
+async function pollPipelineJob(jobId) {
+    try {
+        const res = await fetch(`/api/qa/jobs/${encodeURIComponent(jobId)}`);
+        let payload = null;
+        try {
+            payload = await res.json();
+        } catch {
+            payload = null;
+        }
+
+        if (!res.ok) {
+            const message = payload?.error || `HTTP error ${res.status}`;
+            throw new Error(message);
+        }
+
+        const stepLabel = payload.step_label || payload.step || 'Running';
+        const completed = payload.progress?.completed_steps || 0;
+        const total = payload.progress?.total_steps || 4;
+        renderPipelineProgress(payload);
+
+        if (payload.raw_status === 'queued') {
+            setPipelineStatus('Pipeline queued. Waiting for active run to finish...', 'running');
+            return;
+        }
+
+        if (payload.status === 'completed') {
+            stopPipelinePolling();
+            setPipelineButtonState(false);
+            setPipelineStatus('Pipeline finished successfully. Refreshing queue...', 'success');
+            await fetchQueue();
+            setPipelineStatus('Pipeline finished successfully.', 'success');
+            return;
+        }
+
+        if (payload.status === 'failed') {
+            stopPipelinePolling();
+            setPipelineButtonState(false);
+            const errorMessage = payload.error_message || 'Pipeline failed';
+            setPipelineStatus(`Pipeline failed: ${errorMessage}`, 'error');
+            alert(`Pipeline failed: ${errorMessage}`);
+            return;
+        }
+
+        setPipelineStatus(`Pipeline running: ${stepLabel} (${completed}/${total})`, 'running');
+    } catch (err) {
+        stopPipelinePolling();
+        setPipelineButtonState(false);
+        setPipelineStatus(`Pipeline status check failed: ${err.message}`, 'error');
+        hidePipelineProgress();
+    }
+}
+
+function startPipelinePolling(jobId) {
+    stopPipelinePolling();
+    pollPipelineJob(jobId);
+    pipelinePollHandle = setInterval(() => {
+        pollPipelineJob(jobId);
+    }, 3000);
+}
+
+async function runPipelineRefresh() {
+    setPipelineButtonState(true);
+    setPipelineStatus('Starting pipeline...', 'running');
+    renderPipelineProgress({
+        status: 'running',
+        step: 'starting',
+        step_label: 'Starting pipeline',
+        progress: { completed_steps: 0, total_steps: 4 }
+    });
+
+    const country = document.getElementById('countryFilter').value;
+    const payload = country ? { country } : {};
+
+    try {
+        const res = await fetch('/api/qa/jobs/refresh', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        let data = null;
+        try {
+            data = await res.json();
+        } catch {
+            data = null;
+        }
+
+        if (!res.ok) {
+            const message = data?.error || `HTTP error ${res.status}`;
+            throw new Error(message);
+        }
+
+        const jobId = data?.job_id || data?.job?.job_id;
+        if (!jobId) {
+            throw new Error('Missing job_id in response');
+        }
+
+        if (data.reused) {
+            setPipelineStatus('A refresh job is already running. Monitoring active job...', 'running');
+        } else {
+            setPipelineStatus('Pipeline started. Monitoring progress...', 'running');
+        }
+
+        startPipelinePolling(jobId);
+    } catch (err) {
+        setPipelineButtonState(false);
+        setPipelineStatus(`Pipeline start failed: ${err.message}`, 'error');
+        hidePipelineProgress();
+        alert(`Pipeline start failed: ${err.message}`);
     }
 }
 
@@ -210,9 +464,12 @@ document.getElementById('renameForm').addEventListener('submit', (e) => {
 });
 
 document.getElementById('refreshBtn').addEventListener('click', fetchQueue);
+document.getElementById('runPipelineBtn').addEventListener('click', runPipelineRefresh);
 document.getElementById('countryFilter').addEventListener('change', fetchQueue);
+window.addEventListener('beforeunload', stopPipelinePolling);
 
 document.addEventListener('DOMContentLoaded', () => {
+    hidePipelineProgress();
     initMap();
     fetchQueue();
 });

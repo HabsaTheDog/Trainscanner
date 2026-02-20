@@ -1,0 +1,11 @@
+{
+  "stage": "downloading",
+  "source_id": "de_delfi_sollfahrplandaten_netex",
+  "source_index": 1,
+  "total_sources": 3,
+  "file_name": "20260216_fahrplaene_gesamtdeutschland.zip",
+  "downloaded_bytes": 387399680,
+  "total_bytes": 2141359143,
+  "message": "Downloading '20260216_fahrplaene_gesamtdeutschland.zip'",
+  "updated_at": "2026-02-20T00:21:40Z"
+}

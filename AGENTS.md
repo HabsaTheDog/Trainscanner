@@ -12,38 +12,42 @@ Maintain and extend the MOTIS GTFS-switch MVP for fast dataset testing/debugging
 - `orchestrator/src/core/`: shared schema validation, errors, IDs, logging primitives
 - `orchestrator/src/domains/`: domain contracts/modules (`source-discovery|ingest|canonical|export|switch-runtime|routing|qa`)
 - `orchestrator/src/cli/`: thin CLI wrappers around tested modules
-- `frontend/`: static UI (no framework) with route summary + MapLibre map
+- `frontend/`: static UI (no framework) with route summary + MapLibre map + QA curation dashboard (`curation.html`)
 - `config/`: GTFS profile definitions
 - `config/dach-data-sources.json`: official DACH source registry
 - `config/ojp-endpoints.json`: OJP feeder endpoint/auth scaffolding
 - `config/ojp-endpoints.mock.json`: local OJP mock fixture config for deterministic checks
 - `scripts/data/`: DACH source fetch/verify + NeTEx ingest/canonical/QA/OJP/stitch scripts
 - `scripts/qa/`: canonical -> GTFS runtime export, validation, and fixture QA scripts
-- `db/migrations/`: PostGIS schema migrations for canonical station layer
+- `db/migrations/`: PostGIS schema migrations for canonical station layer + `system_state`
 - `.github/workflows/ojp-mock-feeder-check.yml`: CI smoke check for deterministic OJP mock probe
 - `.github/workflows/qa-export-check.yml`: lightweight canonical export determinism check
 - `.github/workflows/ci-pr.yml`: fast PR quality gates (lint/contracts/unit+integration)
 - `.github/workflows/ci-nightly.yml`: full/nightly integration + e2e + report artifacts
 - `docker-compose.yml`: optional `postgis` service (`dach-data` profile) with named volume persistence
-- `state/`: switch lock, status, and logs (Note: Planned migration to Postgres `system_state` table; see `docs/state_migration_prompt.md`)
+- Docker orchestrator build context is repo root so runtime image includes `orchestrator/`, `scripts/`, and `db/` paths used by QA refresh pipeline.
+- `state/`: switch lock, status, and logs (filesystem fallback when `system_state` DB persistence is unavailable)
 - `data/motis/`: generated MOTIS runtime data
 - `data/gtfs/runtime/`: generated deterministic GTFS runtime artifacts
 - `reports/qa/`: generated QA/regression reports
-- `docs/curation_tool_prompt.md`: planned frontend Curation Tool prompt
-- `docs/state_migration_prompt.md`: planned Postgres state migration prompt
+- `docs/curation_tool_prompt.md`: planned richer curation workflow prompt
+- `docs/state_migration_prompt.md`: migration notes for moving remaining state flows fully into Postgres
 
 ## Core behavior that must remain true
 
 - Frontend remains reachable while profile switching/restart is running.
 - Only one switch can run at a time (lock file).
 - Idempotent switch requests for the same in-flight/active profile return reused/noop semantics with `runId`.
-- Switch states are persisted (`idle|switching|importing|restarting|ready|failed`).
-- Active profile runtime marker is persisted in `state/active-gtfs.json` (legacy `config/active-gtfs.json` may exist).
+- Switch states are persisted (`idle|switching|importing|restarting|ready|failed`) primarily in PostGIS `system_state.gtfs_switch_status`, with filesystem fallback.
+- Active profile runtime marker is persisted primarily in PostGIS `system_state.active_gtfs`, with fallback in `state/active-gtfs.json` (legacy `config/active-gtfs.json` may exist).
 - Route endpoint is blocked unless system state is `ready`.
 - Station autocomplete comes from active GTFS profile.
 - Route station inputs are normalized before MOTIS call.
 - API error payloads expose machine-readable `errorCode`; responses carry `x-correlation-id`.
 - Static GTFS profiles keep working unchanged; runtime descriptor profiles must resolve deterministically to concrete artifacts before activation.
+- QA curation endpoints (`GET /api/qa/queue`, `POST /api/qa/overrides`, `POST /api/qa/jobs/refresh`, `GET /api/qa/jobs/:job_id`) remain separate from production routing flow.
+- Curation refresh job runs asynchronously and must not block the frontend; duplicate trigger requests should reuse the active `qa.refresh-pipeline` job.
+- Refresh job polling payloads should expose enough checkpoint metadata for live frontend progress (including source download bytes during `fetching_sources`).
 
 ## DACH data pipeline contract
 
@@ -70,7 +74,8 @@ Maintain and extend the MOTIS GTFS-switch MVP for fast dataset testing/debugging
 - Review queue generation must be deterministic per scope (`latest` or explicit `--as-of`).
 - Manual overrides must be auditable in DB (`canonical_station_overrides`) and applied explicitly.
 - Queue/report/override tooling must remain script-driven and reversible.
-- A Frontend Curation Tool is planned to replace manual CSV curation (see `docs/curation_tool_prompt.md`).
+- Frontend curation dashboard (`/curation.html`) must remain a thin client over `/api/qa/queue`, `/api/qa/overrides`, and refresh-job polling endpoints.
+- CSV/script workflows remain supported; planned richer curation flow is tracked in `docs/curation_tool_prompt.md`.
 
 ## OJP + stitching boundary
 

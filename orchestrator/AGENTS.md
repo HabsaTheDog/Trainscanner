@@ -20,10 +20,13 @@
 - `src/domains/`: domain boundaries (`source-discovery`, `ingest`, `canonical`, `export`, `switch-runtime`, `routing`, `qa`)
 - `src/cli/`: thin wrappers for config validation, profile runtime helpers, route regression, and DACH data flows
 - `src/core/pipeline-runner.js`: shared runId/logging wrapper for CLI-triggered pipeline commands
+- `src/data/postgis/system-state.js`: DB-backed `system_state` read/write helpers with graceful fallback behavior upstream
 - `src/domains/source-discovery/service.js`: service entrypoints for fetch/verify flows
 - `src/domains/ingest/service.js`: service entrypoint for NeTEx ingest flow
 - `src/domains/canonical/service.js`: service entrypoints for canonical build + review queue build
 - `src/domains/qa/service.js`: service entrypoint for review queue reporting
+- `src/domains/qa/api.js`: review queue/override handlers + async curation refresh pipeline job API
+- Container runtime expects repo-root layout (`/app/orchestrator`, `/app/scripts`, `/app/db`) for legacy script execution paths.
 
 ## API contracts
 
@@ -31,6 +34,10 @@
 - `POST /api/gtfs/activate` body `{ "profile": "..." }`
 - `GET /api/gtfs/status`
 - `GET /api/gtfs/stations`
+- `GET /api/qa/queue`
+- `POST /api/qa/overrides`
+- `POST /api/qa/jobs/refresh`
+- `GET /api/qa/jobs/:job_id`
 - `GET /health`
 - `GET /metrics`
 - `POST /api/routes`
@@ -51,8 +58,8 @@ Error contract:
 ## State machine contract
 
 - Valid states: `idle|switching|importing|restarting|ready|failed`.
-- Persist every transition to `state/gtfs-switch-status.json` (Note: Planned migration to Postgres `system_state` table; see `docs/state_migration_prompt.md`).
-- Persist active profile marker to `state/active-gtfs.json` (legacy config path auto-migrates) (Note: Planned migration to Postgres `system_state` table).
+- Persist every transition primarily to PostGIS `system_state.gtfs_switch_status`; fallback to `state/gtfs-switch-status.json` when DB persistence is unavailable.
+- Persist active profile marker primarily to PostGIS `system_state.active_gtfs`; fallback to `state/active-gtfs.json` (legacy config path auto-migrates).
 - Prevent concurrent switches with lock file and clear stale locks when safe.
 - Switch requests are idempotent for same in-flight/active profile (`reused`/`noop`, `runId`).
 - Keep static profile activation behavior backward-compatible while supporting runtime descriptor profiles (`runtime.mode=canonical-export`).
@@ -75,5 +82,7 @@ Error contract:
 - Per-`job_type` running limits come from `PIPELINE_JOB_MAX_CONCURRENT` and must be enforced atomically in DB claim logic.
 - Running-slot races while claiming `status=running` must be surfaced as `JOB_BACKPRESSURE`.
 - Do not couple DACH retrieval/ingest/canonical build into `/api/routes` or GTFS switch flow in this MVP slice.
-- Do not couple curation workflow, OJP feeder probing, or stitching prototype into `/api/routes` or GTFS switch flow in this MVP slice. (Note: A new Frontend Curation Tool is planned; see `docs/curation_tool_prompt.md`).
+- Keep curation endpoints (`/api/qa/queue`, `/api/qa/overrides`, `/api/qa/jobs/refresh`, `/api/qa/jobs/:job_id`) and curation dashboard concerns out of `/api/routes` and GTFS switch flow.
+- `GET /api/qa/jobs/:job_id` should include checkpoint-derived progress suitable for frontend UX, including live `download_progress` during `fetching_sources`.
+- Do not couple OJP feeder probing or stitching prototype into `/api/routes` or GTFS switch flow in this MVP slice.
 - Canonical -> GTFS runtime export is script-driven in `scripts/qa/`; orchestrator consumes produced artifacts only.

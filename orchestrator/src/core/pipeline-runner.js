@@ -92,11 +92,16 @@ async function runLegacyDataScript(options = {}) {
     args
   });
 
+  const envOverrides = options.env && typeof options.env === 'object' ? options.env : {};
+
   let result;
   try {
     result = await runCommand('bash', [scriptPath, ...args], {
       cwd: rootDir,
-      env: process.env
+      env: {
+        ...process.env,
+        ...envOverrides
+      }
     });
   } catch (err) {
     logger.error('pipeline command execution failed', {

@@ -8,6 +8,13 @@ AS_OF=""
 COUNTRY_FILTER=""
 SOURCE_ID_FILTER=""
 TEMP_FILES=()
+FETCH_PROGRESS_FILE="${FETCH_PROGRESS_FILE:-}"
+FETCH_PROGRESS_SOURCE_ID=""
+FETCH_PROGRESS_SOURCE_INDEX=0
+FETCH_PROGRESS_TOTAL_SOURCES=0
+FETCH_PROGRESS_FILE_NAME=""
+FETCH_PROGRESS_DOWNLOADED_BYTES=0
+FETCH_PROGRESS_TOTAL_BYTES=0
 
 cleanup_temp_files() {
   local f
@@ -16,6 +23,58 @@ cleanup_temp_files() {
   done
 }
 trap cleanup_temp_files EXIT
+
+write_fetch_progress() {
+  local stage="${1:-running}"
+  local source_id="${2:-$FETCH_PROGRESS_SOURCE_ID}"
+  local source_index="${3:-$FETCH_PROGRESS_SOURCE_INDEX}"
+  local total_sources="${4:-$FETCH_PROGRESS_TOTAL_SOURCES}"
+  local file_name="${5:-$FETCH_PROGRESS_FILE_NAME}"
+  local downloaded_bytes="${6:-$FETCH_PROGRESS_DOWNLOADED_BYTES}"
+  local total_bytes="${7:-$FETCH_PROGRESS_TOTAL_BYTES}"
+  local message="${8:-}"
+
+  [[ -n "$FETCH_PROGRESS_FILE" ]] || return 0
+  command -v jq >/dev/null 2>&1 || return 0
+
+  [[ "$source_index" =~ ^[0-9]+$ ]] || source_index=0
+  [[ "$total_sources" =~ ^[0-9]+$ ]] || total_sources=0
+  [[ "$downloaded_bytes" =~ ^[0-9]+$ ]] || downloaded_bytes=0
+  [[ "$total_bytes" =~ ^[0-9]+$ ]] || total_bytes=0
+
+  local updated_at tmp_progress_file
+  updated_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  tmp_progress_file="${FETCH_PROGRESS_FILE}.tmp.$$"
+
+  jq -n \
+    --arg stage "$stage" \
+    --arg sourceId "$source_id" \
+    --argjson sourceIndex "$source_index" \
+    --argjson totalSources "$total_sources" \
+    --arg fileName "$file_name" \
+    --argjson downloadedBytes "$downloaded_bytes" \
+    --argjson totalBytes "$total_bytes" \
+    --arg message "$message" \
+    --arg updatedAt "$updated_at" \
+    '{
+      stage: $stage,
+      source_id: (if $sourceId == "" then null else $sourceId end),
+      source_index: $sourceIndex,
+      total_sources: $totalSources,
+      file_name: (if $fileName == "" then null else $fileName end),
+      downloaded_bytes: $downloadedBytes,
+      total_bytes: $totalBytes,
+      message: (if $message == "" then null else $message end),
+      updated_at: $updatedAt
+    }' > "$tmp_progress_file" 2>/dev/null || {
+      rm -f "$tmp_progress_file" 2>/dev/null || true
+      return 0
+    }
+
+  mv "$tmp_progress_file" "$FETCH_PROGRESS_FILE" 2>/dev/null || {
+    rm -f "$tmp_progress_file" 2>/dev/null || true
+  }
+}
 
 usage() {
   cat <<USAGE
@@ -36,6 +95,14 @@ log() {
 }
 
 fail() {
+  write_fetch_progress "failed" \
+    "$FETCH_PROGRESS_SOURCE_ID" \
+    "$FETCH_PROGRESS_SOURCE_INDEX" \
+    "$FETCH_PROGRESS_TOTAL_SOURCES" \
+    "$FETCH_PROGRESS_FILE_NAME" \
+    "$FETCH_PROGRESS_DOWNLOADED_BYTES" \
+    "$FETCH_PROGRESS_TOTAL_BYTES" \
+    "$*" || true
   printf '[fetch-dach] ERROR: %s\n' "$*" >&2
   exit 1
 }
@@ -510,16 +577,36 @@ main() {
 
   [[ ${#selected_sources[@]} -gt 0 ]] || fail "No sources matched the provided filters"
 
+  FETCH_PROGRESS_TOTAL_SOURCES="${#selected_sources[@]}"
+  write_fetch_progress "starting" "" 0 "$FETCH_PROGRESS_TOTAL_SOURCES" "" 0 0 \
+    "Selected ${FETCH_PROGRESS_TOTAL_SOURCES} source(s)"
+
   log "Selected ${#selected_sources[@]} source(s); run_date=$run_date${AS_OF:+ (as-of mode)}"
 
-  local source_json
+  local source_json source_index
+  source_index=0
   for source_json in "${selected_sources[@]}"; do
+    source_index=$((source_index + 1))
     local source_id country provider format access_type
     source_id="$(jq -r '.id' <<<"$source_json")"
     country="$(jq -r '.country' <<<"$source_json")"
     provider="$(jq -r '.provider' <<<"$source_json")"
     format="$(jq -r '.format' <<<"$source_json")"
     access_type="$(jq -r '.accessType' <<<"$source_json")"
+
+    FETCH_PROGRESS_SOURCE_ID="$source_id"
+    FETCH_PROGRESS_SOURCE_INDEX="$source_index"
+    FETCH_PROGRESS_FILE_NAME=""
+    FETCH_PROGRESS_DOWNLOADED_BYTES=0
+    FETCH_PROGRESS_TOTAL_BYTES=0
+    write_fetch_progress "resolving" \
+      "$FETCH_PROGRESS_SOURCE_ID" \
+      "$FETCH_PROGRESS_SOURCE_INDEX" \
+      "$FETCH_PROGRESS_TOTAL_SOURCES" \
+      "" \
+      0 \
+      0 \
+      "Resolving source '$source_id'"
 
     log "Resolving source '$source_id' ($country/$format)"
     build_auth_args "$source_id" "$access_type" "$(jq -r '.downloadUrlOrEndpoint' <<<"$source_json")"
@@ -559,14 +646,61 @@ main() {
 
     out_file="${dest_dir}/${file_name}"
     tmp_file="${dest_dir}/.${file_name}.tmp.$$"
+    FETCH_PROGRESS_FILE_NAME="$file_name"
+
+    local expected_size
+    expected_size="$(printf '%s\n' "$head_headers" | awk -F': ' 'tolower($1)=="content-length"{print $2; exit}' | tr -d '\r' || true)"
+    [[ "$expected_size" =~ ^[0-9]+$ ]] || expected_size=0
+    FETCH_PROGRESS_TOTAL_BYTES="$expected_size"
+    FETCH_PROGRESS_DOWNLOADED_BYTES=0
+    write_fetch_progress "downloading" \
+      "$FETCH_PROGRESS_SOURCE_ID" \
+      "$FETCH_PROGRESS_SOURCE_INDEX" \
+      "$FETCH_PROGRESS_TOTAL_SOURCES" \
+      "$FETCH_PROGRESS_FILE_NAME" \
+      0 \
+      "$FETCH_PROGRESS_TOTAL_BYTES" \
+      "Downloading '$file_name'"
+
+    local progress_watcher_pid=""
+    if [[ -n "$FETCH_PROGRESS_FILE" ]]; then
+      (
+        while true; do
+          bytes=0
+          if [[ -f "$tmp_file" ]]; then
+            bytes="$(stat -c '%s' "$tmp_file" 2>/dev/null || printf '0')"
+          fi
+          [[ "$bytes" =~ ^[0-9]+$ ]] || bytes=0
+          write_fetch_progress \
+            "downloading" \
+            "$source_id" \
+            "$source_index" \
+            "$FETCH_PROGRESS_TOTAL_SOURCES" \
+            "$file_name" \
+            "$bytes" \
+            "$expected_size" \
+            "Downloading '$file_name'"
+          sleep 1
+        done
+      ) &
+      progress_watcher_pid="$!"
+    fi
 
     log "Downloading to $out_file"
     if ! curl -fSL "${AUTH_ARGS[@]}" "$resolved_url" -o "$tmp_file"; then
+      if [[ -n "$progress_watcher_pid" ]]; then
+        kill "$progress_watcher_pid" >/dev/null 2>&1 || true
+        wait "$progress_watcher_pid" >/dev/null 2>&1 || true
+      fi
       rm -f "$tmp_file"
       if [[ "$format" == "netex" ]]; then
         fail "NeTEx source '$source_id' download failed (hard failure): $resolved_url"
       fi
       fail "Download failed for source '$source_id'"
+    fi
+    if [[ -n "$progress_watcher_pid" ]]; then
+      kill "$progress_watcher_pid" >/dev/null 2>&1 || true
+      wait "$progress_watcher_pid" >/dev/null 2>&1 || true
     fi
 
     if ! check_format_match "$tmp_file" "$format" "$resolved_url"; then
@@ -580,6 +714,11 @@ main() {
     file_size="$(stat -c '%s' "$out_file")"
     sha256="$(sha256sum "$out_file" | awk '{print $1}')"
     version_hint="$(detect_version_hint "$resolved_url" "$head_headers")"
+    FETCH_PROGRESS_DOWNLOADED_BYTES="$file_size"
+    FETCH_PROGRESS_TOTAL_BYTES="${FETCH_PROGRESS_TOTAL_BYTES:-0}"
+    if [[ "$FETCH_PROGRESS_TOTAL_BYTES" -eq 0 ]]; then
+      FETCH_PROGRESS_TOTAL_BYTES="$file_size"
+    fi
 
     jq -n \
       --arg sourceId "$source_id" \
@@ -601,9 +740,20 @@ main() {
         requestedAsOf: (if $requestedAsOf == "" then null else $requestedAsOf end)
       }' > "${dest_dir}/manifest.json"
 
+    write_fetch_progress "source_completed" \
+      "$FETCH_PROGRESS_SOURCE_ID" \
+      "$FETCH_PROGRESS_SOURCE_INDEX" \
+      "$FETCH_PROGRESS_TOTAL_SOURCES" \
+      "$FETCH_PROGRESS_FILE_NAME" \
+      "$FETCH_PROGRESS_DOWNLOADED_BYTES" \
+      "$FETCH_PROGRESS_TOTAL_BYTES" \
+      "Completed '$source_id'"
+
     log "Completed '$source_id': size=${file_size} sha256=${sha256}"
   done
 
+  write_fetch_progress "completed" "" "$FETCH_PROGRESS_TOTAL_SOURCES" "$FETCH_PROGRESS_TOTAL_SOURCES" "" 0 0 \
+    "All selected sources fetched successfully."
   log "All selected sources fetched successfully."
 }
 
