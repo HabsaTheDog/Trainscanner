@@ -100,14 +100,24 @@ SELECT
   (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'canonical_station_overrides') AS has_overrides,
   (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'station_transfer_rules') AS has_transfer_rules,
   (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'ojp_stop_refs') AS has_ojp_refs,
-  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'pipeline_jobs') AS has_pipeline_jobs;
+  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'pipeline_jobs') AS has_pipeline_jobs,
+  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'qa_station_clusters_v2') AS has_clusters_v2,
+  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'qa_station_cluster_candidates_v2') AS has_cluster_candidates_v2,
+  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'qa_station_cluster_decisions_v2') AS has_cluster_decisions_v2,
+  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'qa_station_segments_v2') AS has_segments_v2,
+  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'canonical_line_identities_v2') AS has_lines_v2,
+  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'qa_station_groups_v2') AS has_groups_v2,
+  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'qa_curated_stations_v1') AS has_curated_stations_v1,
+  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'qa_curated_station_members_v1') AS has_curated_members_v1,
+  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'qa_curated_station_lineage_v1') AS has_curated_lineage_v1,
+  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'qa_curated_station_field_provenance_v1') AS has_curated_field_provenance_v1;
 ")"
 
-IFS='|' read -r has_postgis has_import_runs has_raw_snapshots has_staging has_canonical has_mappings has_review_queue has_overrides has_transfer_rules has_ojp_refs has_pipeline_jobs <<<"$validation"
+IFS='|' read -r has_postgis has_import_runs has_raw_snapshots has_staging has_canonical has_mappings has_review_queue has_overrides has_transfer_rules has_ojp_refs has_pipeline_jobs has_clusters_v2 has_cluster_candidates_v2 has_cluster_decisions_v2 has_segments_v2 has_lines_v2 has_groups_v2 has_curated_stations_v1 has_curated_members_v1 has_curated_lineage_v1 has_curated_field_provenance_v1 <<<"$validation"
 
-if [[ "$has_postgis" != "1" || "$has_import_runs" != "1" || "$has_raw_snapshots" != "1" || "$has_staging" != "1" || "$has_canonical" != "1" || "$has_mappings" != "1" || "$has_review_queue" != "1" || "$has_overrides" != "1" || "$has_transfer_rules" != "1" || "$has_ojp_refs" != "1" || "$has_pipeline_jobs" != "1" ]]; then
-  printf '[db-migrate] ERROR: validation failed (postgis=%s import_runs=%s raw_snapshots=%s staging=%s canonical=%s mappings=%s review_queue=%s overrides=%s transfer_rules=%s ojp_refs=%s pipeline_jobs=%s)\n' \
-    "$has_postgis" "$has_import_runs" "$has_raw_snapshots" "$has_staging" "$has_canonical" "$has_mappings" "$has_review_queue" "$has_overrides" "$has_transfer_rules" "$has_ojp_refs" "$has_pipeline_jobs" >&2
+if [[ "$has_postgis" != "1" || "$has_import_runs" != "1" || "$has_raw_snapshots" != "1" || "$has_staging" != "1" || "$has_canonical" != "1" || "$has_mappings" != "1" || "$has_review_queue" != "1" || "$has_overrides" != "1" || "$has_transfer_rules" != "1" || "$has_ojp_refs" != "1" || "$has_pipeline_jobs" != "1" || "$has_clusters_v2" != "1" || "$has_cluster_candidates_v2" != "1" || "$has_cluster_decisions_v2" != "1" || "$has_segments_v2" != "1" || "$has_lines_v2" != "1" || "$has_groups_v2" != "1" || "$has_curated_stations_v1" != "1" || "$has_curated_members_v1" != "1" || "$has_curated_lineage_v1" != "1" || "$has_curated_field_provenance_v1" != "1" ]]; then
+  printf '[db-migrate] ERROR: validation failed (postgis=%s import_runs=%s raw_snapshots=%s staging=%s canonical=%s mappings=%s review_queue=%s overrides=%s transfer_rules=%s ojp_refs=%s pipeline_jobs=%s clusters_v2=%s cluster_candidates_v2=%s cluster_decisions_v2=%s segments_v2=%s lines_v2=%s groups_v2=%s curated_stations_v1=%s curated_members_v1=%s curated_lineage_v1=%s curated_field_provenance_v1=%s)\n' \
+    "$has_postgis" "$has_import_runs" "$has_raw_snapshots" "$has_staging" "$has_canonical" "$has_mappings" "$has_review_queue" "$has_overrides" "$has_transfer_rules" "$has_ojp_refs" "$has_pipeline_jobs" "$has_clusters_v2" "$has_cluster_candidates_v2" "$has_cluster_decisions_v2" "$has_segments_v2" "$has_lines_v2" "$has_groups_v2" "$has_curated_stations_v1" "$has_curated_members_v1" "$has_curated_lineage_v1" "$has_curated_field_provenance_v1" >&2
   exit 1
 fi
 

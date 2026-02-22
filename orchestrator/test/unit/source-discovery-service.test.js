@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 
 const { createSourceDiscoveryService } = require('../../src/domains/source-discovery/service');
 
-test('fetchSources delegates to legacy fetch script with explicit error code', async () => {
+test('fetchSources delegates to fetch script with explicit error code', async () => {
   const calls = [];
   const service = createSourceDiscoveryService({
     runLegacyDataScript: async (options) => {
@@ -19,13 +19,13 @@ test('fetchSources delegates to legacy fetch script with explicit error code', a
   });
 
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].scriptFile, 'fetch-dach-sources.legacy.sh');
+  assert.equal(calls[0].scriptFile, 'fetch-dach-sources.impl.sh');
   assert.equal(calls[0].errorCode, 'SOURCE_FETCH_FAILED');
   assert.equal(calls[0].service, 'source-discovery.fetch');
   assert.deepEqual(calls[0].args, ['--as-of', '2026-02-19']);
 });
 
-test('verifySources delegates to legacy verify script with explicit error code', async () => {
+test('verifySources delegates to verify script with explicit error code', async () => {
   const calls = [];
   const service = createSourceDiscoveryService({
     runLegacyDataScript: async (options) => {
@@ -41,7 +41,7 @@ test('verifySources delegates to legacy verify script with explicit error code',
   });
 
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].scriptFile, 'verify-dach-sources.legacy.sh');
+  assert.equal(calls[0].scriptFile, 'verify-dach-sources.impl.sh');
   assert.equal(calls[0].errorCode, 'SOURCE_VERIFY_FAILED');
   assert.equal(calls[0].service, 'source-discovery.verify');
   assert.deepEqual(calls[0].args, ['--country', 'DE']);

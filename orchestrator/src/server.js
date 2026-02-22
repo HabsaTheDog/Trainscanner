@@ -26,8 +26,17 @@ const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.js': 'application/javascript; charset=utf-8',
+  '.mjs': 'application/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
-  '.txt': 'text/plain; charset=utf-8'
+  '.txt': 'text/plain; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf'
 };
 
 function sendJson(res, statusCode, payload) {
@@ -442,19 +451,50 @@ async function handleApi(req, res, url, requestLogger) {
     return;
   }
 
-  if (req.method === 'GET' && url.pathname === '/api/qa/queue') {
-    const { getReviewQueue } = require('./domains/qa/api');
-    const data = await getReviewQueue(url);
+  if (req.method === 'GET' && url.pathname === '/api/qa/v2/clusters') {
+    const { getReviewClustersV2 } = require('./domains/qa/api');
+    const data = await getReviewClustersV2(url);
     sendJson(res, 200, data);
     return;
   }
 
-  if (req.method === 'POST' && url.pathname === '/api/qa/overrides') {
-    const body = await parseJsonBody(req);
-    const { postOverride } = require('./domains/qa/api');
-    const result = await postOverride(body);
-    sendJson(res, 200, result);
+  if (req.method === 'GET' && url.pathname === '/api/qa/v2/curated-stations') {
+    const { getCuratedStationsV1 } = require('./domains/qa/api');
+    const data = await getCuratedStationsV1(url);
+    sendJson(res, 200, data);
     return;
+  }
+
+  if (req.method === 'GET') {
+    const clusterDetailMatch = url.pathname.match(/^\/api\/qa\/v2\/clusters\/([^/]+)$/);
+    if (clusterDetailMatch) {
+      const { getReviewClusterDetailV2 } = require('./domains/qa/api');
+      const clusterId = decodeURIComponent(clusterDetailMatch[1]);
+      const data = await getReviewClusterDetailV2(clusterId);
+      sendJson(res, 200, data);
+      return;
+    }
+
+    const curatedDetailMatch = url.pathname.match(/^\/api\/qa\/v2\/curated-stations\/([^/]+)$/);
+    if (curatedDetailMatch) {
+      const { getCuratedStationDetailV1 } = require('./domains/qa/api');
+      const curatedStationId = decodeURIComponent(curatedDetailMatch[1]);
+      const data = await getCuratedStationDetailV1(curatedStationId);
+      sendJson(res, 200, data);
+      return;
+    }
+  }
+
+  if (req.method === 'POST') {
+    const clusterDecisionMatch = url.pathname.match(/^\/api\/qa\/v2\/clusters\/([^/]+)\/decisions$/);
+    if (clusterDecisionMatch) {
+      const body = await parseJsonBody(req);
+      const { postReviewClusterDecisionV2 } = require('./domains/qa/api');
+      const clusterId = decodeURIComponent(clusterDecisionMatch[1]);
+      const data = await postReviewClusterDecisionV2(clusterId, body);
+      sendJson(res, 200, data);
+      return;
+    }
   }
 
   if (req.method === 'POST' && url.pathname === '/api/qa/jobs/refresh') {
@@ -754,6 +794,10 @@ async function ensureBootstrapFiles() {
     {
       file: config.motisActiveGtfsPath,
       hint: 'Run scripts/init-motis.sh --profile <name> to prepare active GTFS input.'
+    },
+    {
+      file: path.join(config.frontendDir, 'index.html'),
+      hint: 'Build frontend assets first: (cd frontend && npm ci && npm run build), or rebuild the orchestrator image.'
     }
   ];
 

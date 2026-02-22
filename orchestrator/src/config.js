@@ -92,7 +92,7 @@ function loadConfig() {
   const configDir = resolvePath(process.env.CONFIG_DIR, path.join(cwd, 'config'));
   const stateDir = resolvePath(process.env.STATE_DIR, path.join(cwd, 'state'));
   const dataDir = resolvePath(process.env.DATA_DIR, path.join(cwd, 'data'));
-  const frontendDir = resolvePath(process.env.FRONTEND_DIR, path.join(cwd, 'frontend'));
+  const frontendDir = resolvePath(process.env.FRONTEND_DIR, path.join(cwd, 'frontend', 'dist'));
 
   const config = {
     port: toInt(process.env.PORT, 3000),

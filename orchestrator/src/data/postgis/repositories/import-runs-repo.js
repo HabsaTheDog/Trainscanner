@@ -28,13 +28,13 @@ function normalizeRunRow(row) {
     runId: row.run_id || row.runid || row.runId,
     pipeline: row.pipeline,
     status: row.status,
-    sourceId: row.source_id || row.sourceid || row.sourceId || null,
-    country: row.country || null,
-    snapshotDate: row.snapshot_date || row.snapshotdate || row.snapshotDate || null,
-    startedAt: row.started_at || row.startedat || row.startedAt || null,
-    endedAt: row.ended_at || row.endedat || row.endedAt || null,
-    errorCode: row.error_code || row.errorcode || row.errorCode || null,
-    errorMessage: row.error_message || row.errormessage || row.errorMessage || null,
+    sourceId: row.source_id || row.sourceid || row.sourceId || '',
+    country: row.country || '',
+    snapshotDate: row.snapshot_date || row.snapshotdate || row.snapshotDate || '',
+    startedAt: row.started_at || row.startedat || row.startedAt || '',
+    endedAt: row.ended_at || row.endedat || row.endedAt || '',
+    errorCode: row.error_code || row.errorcode || row.errorCode || '',
+    errorMessage: row.error_message || row.errormessage || row.errorMessage || '',
     stats: row.stats && typeof row.stats === 'object' ? row.stats : {}
   };
 

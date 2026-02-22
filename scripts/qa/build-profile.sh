@@ -280,6 +280,121 @@ aggregated_stops AS (
    AND s.source_stop_id = sm.source_stop_id
    AND s.snapshot_date = sm.snapshot_date
   GROUP BY sm.canonical_station_id, sm.country, cs.canonical_name
+),
+active_groups AS (
+  SELECT
+    g.group_id,
+    g.cluster_id,
+    g.country,
+    g.display_name
+  FROM qa_station_groups_v2 g
+  WHERE g.is_active = true
+    AND (NULLIF('${COUNTRY_FILTER_ESC}', '') IS NULL OR g.country = NULLIF('${COUNTRY_FILTER_ESC}', '')::char(2))
+),
+group_sections AS (
+  SELECT
+    s.section_id,
+    s.group_id,
+    s.section_name,
+    s.section_type
+  FROM qa_station_group_sections_v2 s
+  JOIN active_groups g
+    ON g.group_id = s.group_id
+),
+section_members AS (
+  SELECT
+    gs.section_id,
+    gs.group_id,
+    gm.canonical_station_id
+  FROM group_sections gs
+  JOIN qa_station_group_section_members_v2 gm
+    ON gm.section_id = gs.section_id
+),
+group_member_ids AS (
+  SELECT DISTINCT canonical_station_id
+  FROM section_members
+),
+group_parent_rows AS (
+  SELECT
+    g.group_id AS stop_id,
+    g.display_name AS stop_name,
+    g.country,
+    ROUND(AVG(a.stop_lat)::numeric, 6) AS stop_lat,
+    ROUND(AVG(a.stop_lon)::numeric, 6) AS stop_lon,
+    ''::text AS location_type,
+    ''::text AS parent_station,
+    true AS is_user_facing,
+    '[]'::json AS walk_links_json,
+    ''::text AS section_type,
+    MIN(a.first_snapshot_date) AS first_snapshot_date,
+    MAX(a.last_snapshot_date) AS last_snapshot_date,
+    COUNT(*)::integer AS source_rows
+  FROM active_groups g
+  JOIN section_members sm
+    ON sm.group_id = g.group_id
+  JOIN aggregated_stops a
+    ON a.stop_id = sm.canonical_station_id
+  GROUP BY g.group_id, g.display_name, g.country
+),
+group_section_rows AS (
+  SELECT
+    gs.section_id AS stop_id,
+    gs.section_name AS stop_name,
+    g.country,
+    ROUND(AVG(a.stop_lat)::numeric, 6) AS stop_lat,
+    ROUND(AVG(a.stop_lon)::numeric, 6) AS stop_lon,
+    '0'::text AS location_type,
+    gs.group_id AS parent_station,
+    false AS is_user_facing,
+    COALESCE((
+      SELECT json_agg(json_build_object(
+        'to_stop_id', l.to_section_id,
+        'min_walk_minutes', l.min_walk_minutes
+      ) ORDER BY l.to_section_id)
+      FROM qa_station_group_section_links_v2 l
+      WHERE l.from_section_id = gs.section_id
+    ), '[]'::json) AS walk_links_json,
+    gs.section_type,
+    MIN(a.first_snapshot_date) AS first_snapshot_date,
+    MAX(a.last_snapshot_date) AS last_snapshot_date,
+    COUNT(*)::integer AS source_rows
+  FROM group_sections gs
+  JOIN active_groups g
+    ON g.group_id = gs.group_id
+  JOIN section_members sm
+    ON sm.section_id = gs.section_id
+  JOIN aggregated_stops a
+    ON a.stop_id = sm.canonical_station_id
+  GROUP BY gs.section_id, gs.group_id, gs.section_name, gs.section_type, g.country
+),
+ungrouped_rows AS (
+  SELECT
+    a.stop_id,
+    a.stop_name,
+    a.country,
+    a.stop_lat,
+    a.stop_lon,
+    ''::text AS location_type,
+    ''::text AS parent_station,
+    true AS is_user_facing,
+    '[]'::json AS walk_links_json,
+    ''::text AS section_type,
+    a.first_snapshot_date,
+    a.last_snapshot_date,
+    a.source_rows
+  FROM aggregated_stops a
+  WHERE NOT EXISTS (
+    SELECT 1
+    FROM group_member_ids gm
+    WHERE gm.canonical_station_id = a.stop_id
+  )
+),
+export_rows AS (
+  SELECT * FROM group_parent_rows
+  UNION ALL
+  SELECT * FROM group_section_rows
+  UNION ALL
+  SELECT * FROM ungrouped_rows
 )
 SELECT
   stop_id,
@@ -287,11 +402,16 @@ SELECT
   country,
   COALESCE(stop_lat::text, '') AS stop_lat,
   COALESCE(stop_lon::text, '') AS stop_lon,
+  location_type,
+  parent_station,
+  CASE WHEN is_user_facing THEN 'true' ELSE 'false' END AS is_user_facing,
+  walk_links_json::text AS walk_links_json,
+  section_type,
   first_snapshot_date,
   last_snapshot_date,
   source_rows
-FROM aggregated_stops
-ORDER BY country, stop_id
+FROM export_rows
+ORDER BY country, is_user_facing DESC, stop_id
 ) TO STDOUT WITH CSV HEADER" > "$STOPS_CSV"
 
 STOP_ROWS="$(($(wc -l < "$STOPS_CSV") - 1))"

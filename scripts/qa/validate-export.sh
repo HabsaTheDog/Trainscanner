@@ -90,6 +90,7 @@ required_columns = {
         "end_date",
     },
     "calendar_dates.txt": {"service_id", "date", "exception_type"},
+    "transfers.txt": {"from_stop_id", "to_stop_id", "transfer_type"},
 }
 
 
@@ -111,7 +112,7 @@ with zipfile.ZipFile(zip_path, "r") as zf:
         fail("missing service calendar file: require calendar.txt and/or calendar_dates.txt")
 
     table_rows = {}
-    for filename in required_files + ["calendar.txt", "calendar_dates.txt"]:
+    for filename in required_files + ["calendar.txt", "calendar_dates.txt", "transfers.txt"]:
         if filename not in names:
             continue
 
@@ -176,6 +177,15 @@ with zipfile.ZipFile(zip_path, "r") as zf:
     missing_stop_times = sorted(trips - seen_trip_stop_times)
     if missing_stop_times:
         fail(f"trip(s) without stop_times: {', '.join(missing_stop_times[:10])}")
+
+    if "transfers.txt" in table_rows:
+        for transfer in table_rows["transfers.txt"]:
+            from_stop_id = transfer.get("from_stop_id")
+            to_stop_id = transfer.get("to_stop_id")
+            if from_stop_id not in stops:
+                fail(f"transfers.txt references missing from_stop_id '{from_stop_id}'")
+            if to_stop_id not in stops:
+                fail(f"transfers.txt references missing to_stop_id '{to_stop_id}'")
 
 print("[validate-export] Core GTFS checks passed")
 PY

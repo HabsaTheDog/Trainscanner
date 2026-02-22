@@ -1,0 +1,17 @@
+{
+  "name": "trainscanner",
+  "private": true,
+  "scripts": {
+    "dev": "./scripts/run-test-env.sh",
+    "start": "./scripts/run-test-env.sh",
+    "stop": "./scripts/stop-test-env.sh",
+    "setup": "./scripts/setup.sh",
+    "up": "./scripts/up.sh",
+    "init": "./scripts/init-motis.sh",
+    "switch": "./scripts/switch-gtfs.sh",
+    "check:data": "./scripts/check-motis-data.sh",
+    "check:config": "./scripts/validate-config.sh",
+    "check:docs": "bash -lc \"test -f README.md && test -f AGENTS.md && test -f frontend/AGENTS.md && test -f orchestrator/AGENTS.md && test -f docs/AGENTS.md && test -f docs/documentation-standard.md && test -f tests/AGENTS.md\"",
+    "route:find": "./scripts/find-working-route.sh"
+  }
+}

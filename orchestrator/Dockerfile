@@ -13,6 +13,11 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+COPY frontend/package.json ./frontend/package.json
+COPY frontend/package-lock.json ./frontend/package-lock.json
+RUN cd frontend && npm ci
+COPY frontend ./frontend
+RUN cd frontend && npm run build
 COPY orchestrator ./orchestrator
 COPY scripts ./scripts
 COPY db ./db

@@ -1,0 +1,513 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - heading "Station Review" [level=2] [ref=e6]
+      - link "Back to Home" [ref=e7] [cursor=pointer]:
+        - /url: /
+    - paragraph [ref=e8]: Pick a cluster, stage merge/split/group edits locally, then resolve once.
+    - generic [ref=e9]:
+      - generic [ref=e10]: Country
+      - combobox "Country" [ref=e11]:
+        - option "All" [selected]
+        - option "DE"
+        - option "AT"
+        - option "CH"
+      - button "Refresh Clusters" [ref=e12] [cursor=pointer]
+    - generic [ref=e13]:
+      - generic [ref=e14]: Status
+      - combobox "Status" [ref=e15]:
+        - option "All" [selected]
+        - option "Open"
+        - option "In Review"
+        - option "Resolved"
+        - option "Dismissed"
+    - generic [ref=e16]:
+      - generic [ref=e17]: Scope
+      - combobox "Scope" [ref=e18]:
+        - option "Latest" [selected]
+        - option "All scopes"
+    - paragraph [ref=e19]: Showing 100 clusters (country=ALL, status=ALL, scope=latest) • open 99, in_review 0, resolved 1, dismissed 0
+    - generic [ref=e20]:
+      - generic [ref=e86] [cursor=pointer]:
+        - heading "Winterthur Töss" [level=3] [ref=e87]
+        - paragraph [ref=e88]: CH • low • resolved
+        - paragraph [ref=e89]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e90] [cursor=pointer]:
+        - heading "Grindelwald (Firstbahn)" [level=3] [ref=e91]
+        - paragraph [ref=e92]: CH • low • open
+        - paragraph [ref=e93]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e94] [cursor=pointer]:
+        - heading "Solothurn Allmend" [level=3] [ref=e95]
+        - paragraph [ref=e96]: CH • low • open
+        - paragraph [ref=e97]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e98] [cursor=pointer]:
+        - heading "La Tour-de-Trême Ronclina" [level=3] [ref=e99]
+        - paragraph [ref=e100]: CH • low • open
+        - paragraph [ref=e101]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e102] [cursor=pointer]:
+        - heading "Les Collons (Trabanta)" [level=3] [ref=e103]
+        - paragraph [ref=e104]: CH • low • open
+        - paragraph [ref=e105]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e106] [cursor=pointer]:
+        - heading "Zweisimmen (Talst. Rinderberg)" [level=3] [ref=e107]
+        - paragraph [ref=e108]: CH • low • open
+        - paragraph [ref=e109]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e110] [cursor=pointer]:
+        - heading "Ligerz Festi" [level=3] [ref=e111]
+        - paragraph [ref=e112]: CH • low • open
+        - paragraph [ref=e113]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e114] [cursor=pointer]:
+        - heading "Lenzerheide/Lai Val Sporz" [level=3] [ref=e115]
+        - paragraph [ref=e116]: CH • low • open
+        - paragraph [ref=e117]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e118] [cursor=pointer]:
+        - heading "Unterentfelden Post" [level=3] [ref=e119]
+        - paragraph [ref=e120]: CH • low • open
+        - paragraph [ref=e121]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e122] [cursor=pointer]:
+        - heading "Ferney, Avenue de Vessy" [level=3] [ref=e123]
+        - paragraph [ref=e124]: CH • low • open
+        - paragraph [ref=e125]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e126] [cursor=pointer]:
+        - heading "Chur Wiesental" [level=3] [ref=e127]
+        - paragraph [ref=e128]: CH • low • open
+        - paragraph [ref=e129]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e130] [cursor=pointer]:
+        - heading "Singen (Htw),Landesgartenschau" [level=3] [ref=e131]
+        - paragraph [ref=e132]: CH • low • open
+        - paragraph [ref=e133]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e134] [cursor=pointer]:
+        - heading "Schaffhausen (Schifflände)" [level=3] [ref=e135]
+        - paragraph [ref=e136]: CH • low • open
+        - paragraph [ref=e137]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e138] [cursor=pointer]:
+        - heading "Eischoll (Bergstation)" [level=3] [ref=e139]
+        - paragraph [ref=e140]: CH • low • open
+        - paragraph [ref=e141]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e142] [cursor=pointer]:
+        - heading "Hochdorf Schönau" [level=3] [ref=e143]
+        - paragraph [ref=e144]: CH • low • open
+        - paragraph [ref=e145]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e146] [cursor=pointer]:
+        - heading "St. Gallen Birnbäumen" [level=3] [ref=e147]
+        - paragraph [ref=e148]: CH • low • open
+        - paragraph [ref=e149]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e150] [cursor=pointer]:
+        - heading "Monthey, hôpital" [level=3] [ref=e151]
+        - paragraph [ref=e152]: CH • low • open
+        - paragraph [ref=e153]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e154] [cursor=pointer]:
+        - heading "Brusino Arsizio (funivia)" [level=3] [ref=e155]
+        - paragraph [ref=e156]: CH • low • open
+        - paragraph [ref=e157]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e158] [cursor=pointer]:
+        - heading "Büsingen (Schifflände)" [level=3] [ref=e159]
+        - paragraph [ref=e160]: CH • low • open
+        - paragraph [ref=e161]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e162] [cursor=pointer]:
+        - heading "Unterentfelden Oberdorf" [level=3] [ref=e163]
+        - paragraph [ref=e164]: CH • low • open
+        - paragraph [ref=e165]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e166] [cursor=pointer]:
+        - heading "St. Gallen Riethüsli" [level=3] [ref=e167]
+        - paragraph [ref=e168]: CH • low • open
+        - paragraph [ref=e169]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e170] [cursor=pointer]:
+        - heading "Gryon Bois-Gentil" [level=3] [ref=e171]
+        - paragraph [ref=e172]: CH • low • open
+        - paragraph [ref=e173]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e174] [cursor=pointer]:
+        - heading "St. Gallen Schülerhaus" [level=3] [ref=e175]
+        - paragraph [ref=e176]: CH • low • open
+        - paragraph [ref=e177]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e178] [cursor=pointer]:
+        - heading "Champsec Téléphérique" [level=3] [ref=e179]
+        - paragraph [ref=e180]: CH • low • open
+        - paragraph [ref=e181]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e182] [cursor=pointer]:
+        - heading "Zürich Seebach" [level=3] [ref=e183]
+        - paragraph [ref=e184]: CH • low • open
+        - paragraph [ref=e185]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e186] [cursor=pointer]:
+        - heading "Bex Pont-Neuf" [level=3] [ref=e187]
+        - paragraph [ref=e188]: CH • low • open
+        - paragraph [ref=e189]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e190] [cursor=pointer]:
+        - heading "Basel Dreispitz" [level=3] [ref=e191]
+        - paragraph [ref=e192]: CH • low • open
+        - paragraph [ref=e193]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e194] [cursor=pointer]:
+        - heading "Zürich Saalsporthalle" [level=3] [ref=e195]
+        - paragraph [ref=e196]: CH • low • open
+        - paragraph [ref=e197]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e198] [cursor=pointer]:
+        - heading "Kriens Mattenhof" [level=3] [ref=e199]
+        - paragraph [ref=e200]: CH • low • open
+        - paragraph [ref=e201]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e202] [cursor=pointer]:
+        - heading "Bettmeralp Talstation (Seilb.)" [level=3] [ref=e203]
+        - paragraph [ref=e204]: CH • low • open
+        - paragraph [ref=e205]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e206] [cursor=pointer]:
+        - heading "Meiringen (Luftseilbahn)" [level=3] [ref=e207]
+        - paragraph [ref=e208]: CH • low • open
+        - paragraph [ref=e209]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e210] [cursor=pointer]:
+        - heading "Dieni (pendicularas)" [level=3] [ref=e211]
+        - paragraph [ref=e212]: CH • low • open
+        - paragraph [ref=e213]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e214] [cursor=pointer]:
+        - heading "Zürich Binz" [level=3] [ref=e215]
+        - paragraph [ref=e216]: CH • low • open
+        - paragraph [ref=e217]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e218] [cursor=pointer]:
+        - heading "Yverdon William Barbey" [level=3] [ref=e219]
+        - paragraph [ref=e220]: CH • low • open
+        - paragraph [ref=e221]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e222] [cursor=pointer]:
+        - heading "Aigle, place du Marché" [level=3] [ref=e223]
+        - paragraph [ref=e224]: CH • low • open
+        - paragraph [ref=e225]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e226] [cursor=pointer]:
+        - heading "Davos Platz Schatzalpbahn" [level=3] [ref=e227]
+        - paragraph [ref=e228]: CH • low • open
+        - paragraph [ref=e229]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e230] [cursor=pointer]:
+        - heading "Collombey, village" [level=3] [ref=e231]
+        - paragraph [ref=e232]: CH • low • open
+        - paragraph [ref=e233]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e234] [cursor=pointer]:
+        - heading "Inzlingen Zoll" [level=3] [ref=e235]
+        - paragraph [ref=e236]: CH • low • open
+        - paragraph [ref=e237]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e238] [cursor=pointer]:
+        - heading "Crans-Montana gare" [level=3] [ref=e239]
+        - paragraph [ref=e240]: CH • low • open
+        - paragraph [ref=e241]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e242] [cursor=pointer]:
+        - heading "Hünenberg Zythus" [level=3] [ref=e243]
+        - paragraph [ref=e244]: CH • low • open
+        - paragraph [ref=e245]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e246] [cursor=pointer]:
+        - heading "Lausanne, Flon" [level=3] [ref=e247]
+        - paragraph [ref=e248]: CH • low • open
+        - paragraph [ref=e249]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e250] [cursor=pointer]:
+        - heading "Grindelwald (Pfingsteggbahn)" [level=3] [ref=e251]
+        - paragraph [ref=e252]: CH • low • open
+        - paragraph [ref=e253]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e254] [cursor=pointer]:
+        - heading "Zug Schutzengel" [level=3] [ref=e255]
+        - paragraph [ref=e256]: CH • low • open
+        - paragraph [ref=e257]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e258] [cursor=pointer]:
+        - heading "Oberentfelden Uerkenbrücke" [level=3] [ref=e259]
+        - paragraph [ref=e260]: CH • low • open
+        - paragraph [ref=e261]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e262] [cursor=pointer]:
+        - heading "Zürich Friesenberg" [level=3] [ref=e263]
+        - paragraph [ref=e264]: CH • low • open
+        - paragraph [ref=e265]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e266] [cursor=pointer]:
+        - heading "Kölliken Oberdorf" [level=3] [ref=e267]
+        - paragraph [ref=e268]: CH • low • open
+        - paragraph [ref=e269]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e270] [cursor=pointer]:
+        - heading "Herisau Wilen" [level=3] [ref=e271]
+        - paragraph [ref=e272]: CH • low • open
+        - paragraph [ref=e273]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e274] [cursor=pointer]:
+        - heading "Wabern (Gurtenbahn)" [level=3] [ref=e275]
+        - paragraph [ref=e276]: CH • low • open
+        - paragraph [ref=e277]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e278] [cursor=pointer]:
+        - heading "Basel St. Jakob" [level=3] [ref=e279]
+        - paragraph [ref=e280]: CH • low • open
+        - paragraph [ref=e281]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e282] [cursor=pointer]:
+        - heading "Linthal Braunwaldbahn" [level=3] [ref=e283]
+        - paragraph [ref=e284]: CH • low • open
+        - paragraph [ref=e285]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e286] [cursor=pointer]:
+        - heading "Andermatt (Gemsstockbahn)" [level=3] [ref=e287]
+        - paragraph [ref=e288]: CH • low • open
+        - paragraph [ref=e289]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e290] [cursor=pointer]:
+        - heading "Villars-sur-Ollon (télécabine)" [level=3] [ref=e291]
+        - paragraph [ref=e292]: CH • low • open
+        - paragraph [ref=e293]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e294] [cursor=pointer]:
+        - heading "Zürich Triemli" [level=3] [ref=e295]
+        - paragraph [ref=e296]: CH • low • open
+        - paragraph [ref=e297]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e298] [cursor=pointer]:
+        - heading "Innertkirchen Grimseltor" [level=3] [ref=e299]
+        - paragraph [ref=e300]: CH • low • open
+        - paragraph [ref=e301]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e302] [cursor=pointer]:
+        - heading "St. Gallen Notkersegg" [level=3] [ref=e303]
+        - paragraph [ref=e304]: CH • low • open
+        - paragraph [ref=e305]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e306] [cursor=pointer]:
+        - heading "Uster (See)" [level=3] [ref=e307]
+        - paragraph [ref=e308]: CH • low • open
+        - paragraph [ref=e309]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e310] [cursor=pointer]:
+        - heading "Chandolin (télésiège)" [level=3] [ref=e311]
+        - paragraph [ref=e312]: CH • low • open
+        - paragraph [ref=e313]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e314] [cursor=pointer]:
+        - heading "Weesen (See)" [level=3] [ref=e315]
+        - paragraph [ref=e316]: CH • low • open
+        - paragraph [ref=e317]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e318] [cursor=pointer]:
+        - heading "Singen (Htw) Industriegebiet" [level=3] [ref=e319]
+        - paragraph [ref=e320]: CH • low • open
+        - paragraph [ref=e321]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e322] [cursor=pointer]:
+        - heading "Brülisau (Kastenbahn)" [level=3] [ref=e323]
+        - paragraph [ref=e324]: CH • low • open
+        - paragraph [ref=e325]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e326] [cursor=pointer]:
+        - heading "Dorénaz (téléphérique)" [level=3] [ref=e327]
+        - paragraph [ref=e328]: CH • low • open
+        - paragraph [ref=e329]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e330] [cursor=pointer]:
+        - heading "Davos Dorf (Parsennbahn)" [level=3] [ref=e331]
+        - paragraph [ref=e332]: CH • low • open
+        - paragraph [ref=e333]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e334] [cursor=pointer]:
+        - heading "Interlaken (Heimwehfluhbahn)" [level=3] [ref=e335]
+        - paragraph [ref=e336]: CH • low • open
+        - paragraph [ref=e337]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e338] [cursor=pointer]:
+        - heading "Konstanz, Fürstenberg" [level=3] [ref=e339]
+        - paragraph [ref=e340]: CH • low • open
+        - paragraph [ref=e341]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e342] [cursor=pointer]:
+        - heading "Charmey (Gruyère) (télécabine)" [level=3] [ref=e343]
+        - paragraph [ref=e344]: CH • low • open
+        - paragraph [ref=e345]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e346] [cursor=pointer]:
+        - heading "Trélex dépôt" [level=3] [ref=e347]
+        - paragraph [ref=e348]: CH • low • open
+        - paragraph [ref=e349]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e350] [cursor=pointer]:
+        - heading "Winterthur Wülflingen" [level=3] [ref=e351]
+        - paragraph [ref=e352]: CH • low • open
+        - paragraph [ref=e353]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e354] [cursor=pointer]:
+        - heading "Solothurn Baseltor" [level=3] [ref=e355]
+        - paragraph [ref=e356]: CH • low • open
+        - paragraph [ref=e357]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e358] [cursor=pointer]:
+        - heading "St. Gallen Bruggen" [level=3] [ref=e359]
+        - paragraph [ref=e360]: CH • low • open
+        - paragraph [ref=e361]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e362] [cursor=pointer]:
+        - heading "Grindelwald Terminal" [level=3] [ref=e363]
+        - paragraph [ref=e364]: CH • low • open
+        - paragraph [ref=e365]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e366] [cursor=pointer]:
+        - heading "Stechelberg (Schilthornbahn)" [level=3] [ref=e367]
+        - paragraph [ref=e368]: CH • low • open
+        - paragraph [ref=e369]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e370] [cursor=pointer]:
+        - heading "Spiez Schiffstation" [level=3] [ref=e371]
+        - paragraph [ref=e372]: CH • low • open
+        - paragraph [ref=e373]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e374] [cursor=pointer]:
+        - heading "Gex, Vertes Campagnes" [level=3] [ref=e375]
+        - paragraph [ref=e376]: CH • low • open
+        - paragraph [ref=e377]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e378] [cursor=pointer]:
+        - heading "Pranzaira (Albigna)" [level=3] [ref=e379]
+        - paragraph [ref=e380]: CH • low • open
+        - paragraph [ref=e381]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e382] [cursor=pointer]:
+        - heading "Luzern Allmend/Messe" [level=3] [ref=e383]
+        - paragraph [ref=e384]: CH • low • open
+        - paragraph [ref=e385]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e386] [cursor=pointer]:
+        - heading "Zürich Schweighof" [level=3] [ref=e387]
+        - paragraph [ref=e388]: CH • low • open
+        - paragraph [ref=e389]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e390] [cursor=pointer]:
+        - heading "Riehen Niederholz" [level=3] [ref=e391]
+        - paragraph [ref=e392]: CH • low • open
+        - paragraph [ref=e393]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e394] [cursor=pointer]:
+        - heading "Frauenfeld Marktplatz" [level=3] [ref=e395]
+        - paragraph [ref=e396]: CH • low • open
+        - paragraph [ref=e397]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e398] [cursor=pointer]:
+        - heading "Cham Alpenblick" [level=3] [ref=e399]
+        - paragraph [ref=e400]: CH • low • open
+        - paragraph [ref=e401]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e402] [cursor=pointer]:
+        - heading "Prilly, Chasseur" [level=3] [ref=e403]
+        - paragraph [ref=e404]: CH • low • open
+        - paragraph [ref=e405]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e406] [cursor=pointer]:
+        - heading "Langenthal Industrie Nord" [level=3] [ref=e407]
+        - paragraph [ref=e408]: CH • low • open
+        - paragraph [ref=e409]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e410] [cursor=pointer]:
+        - heading "Teufen AR Stofel" [level=3] [ref=e411]
+        - paragraph [ref=e412]: CH • low • open
+        - paragraph [ref=e413]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e414] [cursor=pointer]:
+        - heading "Ftan Baraigla" [level=3] [ref=e415]
+        - paragraph [ref=e416]: CH • low • open
+        - paragraph [ref=e417]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e418] [cursor=pointer]:
+        - heading "Niederbipp Dorf" [level=3] [ref=e419]
+        - paragraph [ref=e420]: CH • low • open
+        - paragraph [ref=e421]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e422] [cursor=pointer]:
+        - heading "Gränichen Töndler" [level=3] [ref=e423]
+        - paragraph [ref=e424]: CH • low • open
+        - paragraph [ref=e425]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e426] [cursor=pointer]:
+        - heading "Punt Muragl (Talstation)" [level=3] [ref=e427]
+        - paragraph [ref=e428]: CH • low • open
+        - paragraph [ref=e429]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e430] [cursor=pointer]:
+        - heading "Niederweningen Dorf" [level=3] [ref=e431]
+        - paragraph [ref=e432]: CH • low • open
+        - paragraph [ref=e433]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e434] [cursor=pointer]:
+        - heading "Walchwil Hörndli" [level=3] [ref=e435]
+        - paragraph [ref=e436]: CH • low • open
+        - paragraph [ref=e437]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e438] [cursor=pointer]:
+        - heading "Montreux, Les Planches" [level=3] [ref=e439]
+        - paragraph [ref=e440]: CH • low • open
+        - paragraph [ref=e441]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e442] [cursor=pointer]:
+        - heading "Unterbäch (Bergstation)" [level=3] [ref=e443]
+        - paragraph [ref=e444]: CH • low • open
+        - paragraph [ref=e445]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e446] [cursor=pointer]:
+        - heading "Flumserberg Tannenboden" [level=3] [ref=e447]
+        - paragraph [ref=e448]: CH • low • open
+        - paragraph [ref=e449]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e450] [cursor=pointer]:
+        - heading "St. Gallen Winkeln" [level=3] [ref=e451]
+        - paragraph [ref=e452]: CH • low • open
+        - paragraph [ref=e453]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e454] [cursor=pointer]:
+        - heading "Schwägalp (Säntis-Schwebebahn)" [level=3] [ref=e455]
+        - paragraph [ref=e456]: CH • low • open
+        - paragraph [ref=e457]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e458] [cursor=pointer]:
+        - heading "Oberentfelden Engelplatz" [level=3] [ref=e459]
+        - paragraph [ref=e460]: CH • low • open
+        - paragraph [ref=e461]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e462] [cursor=pointer]:
+        - heading "Tramelan, Dessous" [level=3] [ref=e463]
+        - paragraph [ref=e464]: CH • low • open
+        - paragraph [ref=e465]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e466] [cursor=pointer]:
+        - heading "Lausanne, Chauderon" [level=3] [ref=e467]
+        - paragraph [ref=e468]: CH • low • open
+        - paragraph [ref=e469]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e470] [cursor=pointer]:
+        - heading "St. Moritz Bad (Signalbahn)" [level=3] [ref=e471]
+        - paragraph [ref=e472]: CH • low • open
+        - paragraph [ref=e473]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e474] [cursor=pointer]:
+        - heading "Solothurn Sternen" [level=3] [ref=e475]
+        - paragraph [ref=e476]: CH • low • open
+        - paragraph [ref=e477]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e478] [cursor=pointer]:
+        - heading "Zug Chollermüli" [level=3] [ref=e479]
+        - paragraph [ref=e480]: CH • low • open
+        - paragraph [ref=e481]: 2 candidates • 1 issues • scope latest
+      - generic [ref=e482] [cursor=pointer]:
+        - heading "Haute-Nendaz (télécabine)" [level=3] [ref=e483]
+        - paragraph [ref=e484]: CH • low • open
+        - paragraph [ref=e485]: 2 candidates • 1 issues • scope latest
+  - main [ref=e21]:
+    - generic [ref=e22]:
+      - generic [ref=e23]: No candidate coordinates available for this cluster.
+      - group "Map mode" [ref=e24]:
+        - button "Default" [ref=e25] [cursor=pointer]
+        - button "Satellite" [ref=e26] [cursor=pointer]
+    - generic "Curation map" [ref=e27]:
+      - region "Map" [ref=e28]
+      - generic:
+        - generic [ref=e29]:
+          - button "Zoom in" [ref=e30] [cursor=pointer]
+          - button "Zoom out" [ref=e32] [cursor=pointer]
+          - button "Drag to rotate map, click to reset north" [ref=e34]
+        - group [ref=e36]:
+          - generic "Toggle attribution" [ref=e37] [cursor=pointer]
+          - generic [ref=e38]:
+            - link "MapLibre" [ref=e83] [cursor=pointer]:
+              - /url: https://maplibre.org/
+            - text: "| ©"
+            - link "CARTO" [ref=e84] [cursor=pointer]:
+              - /url: https://carto.com/about-carto/
+            - text: ", ©"
+            - link "OpenStreetMap" [ref=e85] [cursor=pointer]:
+              - /url: http://www.openstreetmap.org/about/
+            - text: contributors
+    - generic [ref=e40]:
+      - generic [ref=e41]:
+        - generic [ref=e42]:
+          - heading "Staged Conflict Editor" [level=4] [ref=e43]
+          - button "Resolve Conflict" [ref=e44] [cursor=pointer]
+        - paragraph [ref=e45]: Stage local edits, then submit one final decision payload.
+        - group "Conflict tools" [ref=e46]:
+          - button "Merge" [disabled] [ref=e47]
+          - button "Split" [disabled] [ref=e48]
+          - button "Group" [disabled] [ref=e49]
+        - paragraph [ref=e50]: Merge needs 2+ • Split needs 2+ • Group select entries
+        - generic [ref=e51]:
+          - text: Merged station display name
+          - textbox "Merged station display name" [ref=e52]:
+            - /placeholder: "Example: Winterthur Main Station"
+            - text: Winterthur Töss
+          - button "Stage Merge" [ref=e54] [cursor=pointer]
+        - text: Decision note (optional)
+        - textbox "Decision note (optional)" [ref=e55]:
+          - /placeholder: Why this resolution is correct
+        - generic [ref=e56]: Stage at least one merge or group before resolving.
+        - group [ref=e57]:
+          - generic "Resolve payload preview" [ref=e58] [cursor=pointer]
+      - heading "Winterthur Töss" [level=3] [ref=e486]
+      - paragraph [ref=e60]: CH • low • resolved • scope latest
+      - generic [ref=e61]:
+        - generic [ref=e62]:
+          - heading "Candidates" [level=4] [ref=e63]
+          - button "Select All" [ref=e64] [cursor=pointer]
+          - button "Clear" [ref=e65] [cursor=pointer]
+        - paragraph [ref=e66]: No candidates selected.
+        - generic [ref=e487]:
+          - paragraph [ref=e488]: 1 merged/grouped candidate(s) derived from already-applied decisions in this cluster.
+          - group [ref=e489]:
+            - generic "Winterthur Töss merge curst_678da077f2d97e3a412d" [ref=e490] [cursor=pointer]:
+              - strong [ref=e491]: Winterthur Töss
+              - generic [ref=e492]: merge
+              - generic [ref=e493]: curst_678da077f2d97e3a412d
+            - paragraph [ref=e494]: "Name source: manual_decision (curation_tool_v2)"
+            - group [ref=e495]:
+              - generic "Members (2)" [ref=e496] [cursor=pointer]
+          - paragraph [ref=e497]: No standalone candidates remain. Members are shown inside merged derived cards.
+      - generic [ref=e67]:
+        - heading "Selected Service Context" [level=4] [ref=e68]
+        - paragraph [ref=e69]: Incoming and outgoing service/trains for currently selected nodes.
+        - generic [ref=e70]:
+          - generic [ref=e71]:
+            - strong [ref=e72]: Incoming
+            - paragraph [ref=e498]: No incoming service context for selected nodes.
+          - generic [ref=e74]:
+            - strong [ref=e75]: Outgoing
+            - paragraph [ref=e499]: No outgoing service context for selected nodes.
+      - group [ref=e77]:
+        - generic "Evidence" [ref=e78]:
+          - strong [ref=e79]: Evidence
+      - group [ref=e80]:
+        - generic "Applied Edit History" [ref=e81]:
+          - strong [ref=e82]: Applied Edit History

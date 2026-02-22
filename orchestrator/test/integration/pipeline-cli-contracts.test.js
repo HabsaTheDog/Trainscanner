@@ -30,11 +30,15 @@ const cliCases = [
   {
     file: 'report-review-queue.js',
     expectedUsage: /Usage: scripts\/data\/report-review-queue\.sh/
+  },
+  {
+    file: 'refresh-station-review.js',
+    expectedUsage: /Usage: scripts\/data\/refresh-station-review\.sh/
   }
 ];
 
 for (const cliCase of cliCases) {
-  test(`${cliCase.file} forwards --help to legacy command contract`, async () => {
+  test(`${cliCase.file} exposes script wrapper --help contract`, async () => {
     const repoRoot = path.resolve(__dirname, '../../..');
     const cliPath = path.join(repoRoot, 'orchestrator', 'src', 'cli', cliCase.file);
 
@@ -57,6 +61,22 @@ test('pipeline CLI returns machine-readable error payload for invalid wrapper ar
     (err) => {
       assert.match(err.stderr, /errorCode=INVALID_REQUEST/);
       assert.match(err.stderr, /"errorCode":"INVALID_REQUEST"/);
+      return true;
+    }
+  );
+});
+
+test('refresh station review CLI validates selected steps', async () => {
+  const repoRoot = path.resolve(__dirname, '../../..');
+  const cliPath = path.join(repoRoot, 'orchestrator', 'src', 'cli', 'refresh-station-review.js');
+
+  await assert.rejects(
+    execFileAsync(process.execPath, [cliPath, '--root', repoRoot, '--only', 'bad-step'], {
+      cwd: repoRoot
+    }),
+    (err) => {
+      assert.match(err.stderr, /errorCode=INVALID_REQUEST/);
+      assert.match(err.stderr, /must be one of fetch\|ingest\|canonical\|review-queue/);
       return true;
     }
   );

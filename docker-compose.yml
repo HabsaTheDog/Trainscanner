@@ -44,7 +44,7 @@ services:
       CONFIG_DIR: /app/config
       STATE_DIR: /app/state
       DATA_DIR: /app/data
-      FRONTEND_DIR: /app/frontend
+      FRONTEND_DIR: /app/frontend/dist
       MOTIS_BASE_URL: http://motis:8080
       MOTIS_HEALTH_PATH: /health
       MOTIS_HEALTH_ACCEPT_404: "true"
@@ -64,7 +64,6 @@ services:
       CANONICAL_DB_PASSWORD: ${CANONICAL_DB_PASSWORD:-trainscanner}
       CANONICAL_DB_NAME: ${CANONICAL_DB_NAME:-trainscanner}
     volumes:
-      - ./frontend:/app/frontend:ro
       - ./config:/app/config
       - ./state:/app/state
       - ./data:/app/data

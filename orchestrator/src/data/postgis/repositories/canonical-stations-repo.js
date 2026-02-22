@@ -358,9 +358,9 @@ SELECT json_build_object(
   'updated', (SELECT updated FROM _summary),
   'merged', (SELECT merged FROM _summary),
   'conflicts', (SELECT conflicts FROM _summary),
-  'countryFilter', NULLIF(:'country_filter', ''),
-  'asOf', NULLIF(:'as_of', ''),
-  'sourceScope', NULLIF(:'source_id_scope', '')
+  'countryFilter', COALESCE(NULLIF(:'country_filter', ''), ''),
+  'asOf', COALESCE(NULLIF(:'as_of', ''), ''),
+  'sourceScope', COALESCE(NULLIF(:'source_id_scope', ''), '')
 )::text;
 
 COMMIT;

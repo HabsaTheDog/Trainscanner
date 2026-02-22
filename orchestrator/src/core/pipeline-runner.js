@@ -73,7 +73,7 @@ async function runLegacyDataScript(options = {}) {
   if (!fs.existsSync(scriptPath)) {
     throw new AppError({
       code: 'INVALID_CONFIG',
-      message: `Legacy script not found: ${scriptPath}`,
+      message: `Pipeline script not found: ${scriptPath}`,
       details: { runId, scriptFile }
     });
   }

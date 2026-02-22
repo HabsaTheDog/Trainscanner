@@ -264,8 +264,8 @@ WHERE :'close_missing' = 'true'
   );
 
 SELECT json_build_object(
-  'scopeCountry', NULLIF(:'country_filter', ''),
-  'scopeAsOf', NULLIF(:'as_of', ''),
+  'scopeCountry', COALESCE(NULLIF(:'country_filter', ''), ''),
+  'scopeAsOf', COALESCE(NULLIF(:'as_of', ''), ''),
   'scopeTag', (SELECT scope_tag FROM _scope),
   'detectedIssues', (SELECT COUNT(*) FROM _issues),
   'openItems', (
@@ -288,6 +288,10 @@ SELECT json_build_object(
     WHERE q.provenance_run_tag = (SELECT scope_tag FROM _scope)
       AND (NULLIF(:'country_filter', '') IS NULL OR q.country = NULLIF(:'country_filter', '')::char(2))
       AND q.status IN ('resolved', 'auto_resolved')
+  ),
+  'clustersV2', qa_rebuild_station_clusters_v2(
+    NULLIF(:'country_filter', ''),
+    NULLIF(:'as_of', '')::date
   )
 )::text;
 

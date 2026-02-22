@@ -10,19 +10,25 @@
 ## What works
 
 - MOTIS in Docker (`motis`)
-- Orchestrator API + static frontend (`orchestrator`)
+- Orchestrator API + React/Vite frontend (`frontend`, served by `orchestrator`)
 - Named GTFS profiles via `config/gtfs-profiles.json`
 - Active profile runtime state in PostGIS `system_state.active_gtfs` with filesystem fallback (`state/active-gtfs.json`, legacy `config/active-gtfs.json` auto-migration)
 - Switch state machine with lock + status persistence
 - Idempotent switch semantics with per-run IDs (`runId`) and deterministic status persistence
 - Route query endpoint with station-resolution and MOTIS adapter
 - Structured logs with correlation IDs and machine-readable API error codes (`errorCode`)
-- Frontend profile switcher, status badge, autocomplete, route summary, map, raw JSON, and QA curation dashboard (`/curation.html`)
+- Frontend profile switcher, status badge, autocomplete, route summary, map, raw JSON, and QA curation dashboard (`/curation.html`, cluster-first v2 workflow)
 - Schema-based config validation for GTFS profiles, DACH sources, and OJP endpoint configs
 
 ## Quickstart
 
 Main command (recommended):
+
+```bash
+npm run dev -- --profile sample_de
+```
+
+Direct script form (equivalent):
 
 ```bash
 scripts/run-test-env.sh --profile sample_de
@@ -34,6 +40,12 @@ Open:
 - MOTIS direct: `http://localhost:8080`
 
 Stop:
+
+```bash
+npm run stop
+```
+
+Direct script form:
 
 ```bash
 scripts/stop-test-env.sh
@@ -112,27 +124,113 @@ Autocomplete source from active profile:
 curl -s "http://localhost:3000/api/gtfs/stations?q=munchen&limit=20" | jq
 ```
 
-### `GET /api/qa/queue`
+### `GET /api/qa/v2/clusters`
 
-Review queue feed for curation dashboard (optional `country=DE|AT|CH` filter):
+Cluster-first curation feed (preferred for UI) with optional filters:
+
+- `country=<ISO alpha-2>`
+- `status=open|in_review|resolved|dismissed`
+- `scope_tag=<latest|YYYY-MM-DD>`
+- `limit=<1..200>`
+
+V2 curation filters are ISO alpha-2 ready (for Europe expansion) while DACH scripts remain the default operational pipeline.
 
 ```bash
-curl -s "http://localhost:3000/api/qa/queue?country=DE" | jq
+curl -s "http://localhost:3000/api/qa/v2/clusters?country=DE&status=open&limit=25" | jq
 ```
 
-### `POST /api/qa/overrides`
+### `GET /api/qa/v2/clusters/:cluster_id`
 
-Apply curation action for a queue item (`keep_separate|merge|rename`):
+Cluster detail payload includes candidate naming metadata, evidence links, real derived incoming/outgoing service context, segment context, and decision history:
 
 ```bash
-curl -s -X POST http://localhost:3000/api/qa/overrides \
+curl -s "http://localhost:3000/api/qa/v2/clusters/<cluster_id>" | jq
+```
+
+`service_context.completeness.status` is explicit:
+- `none`: no source payload rows were available for that candidate
+- `full`: incoming and outgoing service direction context could both be derived
+- `partial`: line/service fields were extracted, but not full directional coverage
+- `incomplete`: source rows exist but expected line/service keys were missing
+
+### `POST /api/qa/v2/clusters/:cluster_id/decisions`
+
+Submit one final cluster-level decision (`merge|split`) from the staged conflict editor workflow:
+
+```bash
+curl -s -X POST "http://localhost:3000/api/qa/v2/clusters/<cluster_id>/decisions" \
   -H 'Content-Type: application/json' \
-  -d '{"review_item_id":123,"operation":"keep_separate"}' | jq
+  -d '{
+    "operation":"merge",
+    "selected_station_ids":["cstn_a","cstn_b"],
+    "groups":[
+      {
+        "group_label":"merge-selected",
+        "member_station_ids":["cstn_a","cstn_b"],
+        "rename_to":"Winterthur Main Station",
+        "segment_action":{
+          "walk_links":[
+            {"from_segment_id":"seg_main","to_segment_id":"seg_bus","min_walk_minutes":4,"bidirectional":true}
+          ]
+        }
+      }
+    ],
+    "rename_targets":[
+      {"canonical_station_id":"cstn_a","rename_to":"Winterthur Main Concourse"}
+    ],
+    "note":"same logical station",
+    "line_decisions":{"future_line_groups":[]}
+  }' | jq
+```
+
+For `operation=merge`, a target station is not required in the payload. V2 merge decisions create a new curated entity (`qa_curated_*_v1`) and do not write legacy `canonical_station_overrides` rows.
+
+### `GET /api/qa/v2/curated-stations`
+
+Additive curated projection list (reviewer-confirmed entities) with optional filters:
+
+- `country=<ISO alpha-2>`
+- `status=active|superseded`
+- `cluster_id=<cluster_id>`
+- `limit=<1..200>`
+
+```bash
+curl -s "http://localhost:3000/api/qa/v2/curated-stations?cluster_id=<cluster_id>&status=active&limit=25" | jq
+```
+
+### `GET /api/qa/v2/curated-stations/:curated_station_id`
+
+Curated entity detail including members, field provenance, and lineage:
+
+```bash
+curl -s "http://localhost:3000/api/qa/v2/curated-stations/<curated_station_id>" | jq
+```
+
+### `scripts/data/run-station-review-pipeline.sh` (one command: migrate + refresh)
+
+Run the full station-review pipeline with explicit step logs and fail-fast diagnostics:
+
+```bash
+scripts/data/run-station-review-pipeline.sh
+scripts/data/run-station-review-pipeline.sh --country CH
+scripts/data/run-station-review-pipeline.sh --country DE --as-of 2026-02-20
+scripts/data/run-station-review-pipeline.sh --skip-migrate --from-step canonical
+```
+
+### `scripts/data/refresh-station-review.sh` (manual refresh/debug stages)
+
+Run the full station-review data refresh in the terminal with live logs:
+
+```bash
+scripts/data/refresh-station-review.sh
+scripts/data/refresh-station-review.sh --country DE --as-of 2026-02-20
+scripts/data/refresh-station-review.sh --source-id de_delfi_sollfahrplandaten_netex --only fetch,ingest
+scripts/data/refresh-station-review.sh --from-step canonical --to-step review-queue
 ```
 
 ### `POST /api/qa/jobs/refresh`
 
-Trigger the asynchronous refresh pipeline (`fetch -> ingest -> canonical -> review queue`):
+Trigger the asynchronous refresh pipeline (`fetch -> ingest -> canonical -> review queue`) via API automation:
 
 ```bash
 curl -s -X POST http://localhost:3000/api/qa/jobs/refresh \
@@ -141,6 +239,7 @@ curl -s -X POST http://localhost:3000/api/qa/jobs/refresh \
 ```
 
 The endpoint responds immediately with HTTP `202` and `job_id` (also mirrored in `job.job_id`).
+Frontend curation no longer starts pipeline jobs directly; use `scripts/data/run-station-review-pipeline.sh` for full local runs (or `scripts/data/refresh-station-review.sh` for step-level debugging).
 
 If you run via Docker Compose and just pulled code changes, rebuild the orchestrator service first:
 
@@ -194,6 +293,20 @@ curl -s http://localhost:3000/metrics
 
 ## Frontend
 
+Build/runtime:
+
+- Stack: **React + Vite** (multi-page: `/` and `/curation.html`)
+- Build output: `frontend/dist` (served by orchestrator static hosting)
+- Docker image build runs frontend build automatically.
+
+Local frontend build command:
+
+```bash
+cd frontend
+npm ci
+npm run build
+```
+
 ### Features
 
 - Profile dropdown + activate button
@@ -203,19 +316,29 @@ curl -s http://localhost:3000/metrics
 - Interactive map
 - Collapsible raw JSON response
 - QA curation dashboard at `http://localhost:3000/curation.html`
+- Curation list filters (`country`, `status`, `scope`) are for cluster browsing only (pipeline refresh runs via terminal command)
+- Fixed-top staged conflict editor with tools (`Merge`, `Split`, `Group`) and one-shot `Resolve Conflict`
+- Selected-node workflow is explicit on cards and map markers (selected/inactive/merged states)
+- Curated merged/grouped entities render inline in the **Candidates** list as expandable first-class cards with member provenance.
+- When a derived `merge` exists, its member candidates are hidden from standalone cards/markers and shown only inside the derived card `Members (N)` disclosure.
+- Resolve payload preview updates immediately from staged local draft state
+- Group workflow models one user-facing station with sections (`main|secondary|subway|bus|tram|other`) and optional custom section names
+- Group section walk links are auto-generated pairwise at 5 minutes by default and can be edited before `Resolve Conflict`
+- Candidate cards show source-feed provenance and coverage notes inline
 
 ### Map stack
 
 The frontend uses **MapLibre GL JS** and follows your planned stack direction.
 
 - Preferred style source: Protomaps (if key is configured)
-- Fallback style: OpenFreeMap style URL (when no key is set)
+- Fallback style: MapLibre-compatible public style URLs (when no key is set)
 
-Runtime config file: `frontend/config.js`
+Runtime config file: `frontend/public/config.js`
 
 ```js
 window.PROTOMAPS_API_KEY = '';
 window.MAP_STYLE_URL = '';
+window.SATELLITE_MAP_STYLE_URL = '';
 ```
 
 Behavior:
@@ -223,6 +346,7 @@ Behavior:
 - If `MAP_STYLE_URL` is set, it is used directly.
 - Else if `PROTOMAPS_API_KEY` is set, Protomaps style URL is used.
 - Else fallback style is used.
+- Curation view has a default/satellite basemap toggle and persists selected mode for the browser session.
 
 ## Script reference
 
@@ -232,6 +356,12 @@ Primary local dev/test command.
 
 ```bash
 scripts/run-test-env.sh --profile sample_de
+```
+
+NPM shortcut from repo root:
+
+```bash
+npm run dev -- --profile sample_de
 ```
 
 Useful options:
@@ -348,7 +478,10 @@ scripts/validate-config.sh --only ojp-mock
 
 ### `scripts/qa/build-profile.sh`
 
-Deterministic canonical -> GTFS runtime export builder.
+Deterministic canonical -> GTFS runtime export builder (group-aware):
+- grouped stations export as one user-facing stop
+- internal group sections remain exported as child stops
+- section walk links export to `transfers.txt`
 
 ```bash
 scripts/qa/build-profile.sh --profile canonical_de_runtime --as-of 2026-02-19
@@ -356,7 +489,7 @@ scripts/qa/build-profile.sh --profile canonical_de_runtime --as-of 2026-02-19
 
 ### `scripts/qa/validate-export.sh`
 
-GTFS artifact validation gate.
+GTFS artifact validation gate (core tables + optional transfer link integrity checks).
 
 ```bash
 scripts/qa/validate-export.sh --zip data/gtfs/runtime/canonical_de_runtime/2026-02-19/active-gtfs.zip
@@ -460,6 +593,7 @@ This slice is local-first and is now the source for canonical->GTFS runtime expo
   - `orchestrator/src/cli/ingest-netex.js`
   - `orchestrator/src/cli/build-canonical-stations.js`
   - `orchestrator/src/cli/build-review-queue.js`
+  - `orchestrator/src/cli/refresh-station-review.js`
   - `orchestrator/src/cli/report-review-queue.js`
 - Domain service modules:
   - `orchestrator/src/domains/ingest/service.js`
@@ -492,6 +626,19 @@ scripts/data/report-canonical.sh
 scripts/data/check-canonical-pipeline.sh --min-canonical 1
 ```
 
+Run the station-review refresh pipeline end-to-end with terminal logs:
+
+```bash
+scripts/data/run-station-review-pipeline.sh
+scripts/data/run-station-review-pipeline.sh --country CH --as-of 2026-02-19
+scripts/data/run-station-review-pipeline.sh --skip-migrate --from-step canonical
+
+scripts/data/refresh-station-review.sh
+scripts/data/refresh-station-review.sh --country CH --as-of 2026-02-19
+scripts/data/refresh-station-review.sh --source-id ch_opentransportdata_timetable_netex --only fetch,ingest
+scripts/data/refresh-station-review.sh --from-step canonical
+```
+
 ### Canonical -> GTFS runtime export (deterministic)
 
 Build deterministic runtime GTFS artifact from canonical data:
@@ -522,7 +669,7 @@ Fail-fast behavior:
 
 - Export fails when canonical scope has no snapshots/stops.
 - Export fails when coordinates are missing/invalid.
-- Export uses a clearly marked MVP bridge mode (`synthetic-journeys-from-canonical-stops`) and never emits empty required GTFS files.
+- Export uses a clearly marked MVP bridge mode (`group-aware-synthetic-journeys-from-canonical-stops`) and never emits empty required GTFS files.
 
 ### End-to-end workflow (raw -> canonical -> activated runtime)
 
@@ -549,45 +696,58 @@ scripts/switch-gtfs.sh --profile canonical_de_runtime --smoke-gate --smoke-stric
 
 ### Canonical station QA + manual curation workflow
 
-Manual confirmation is deterministic and DB-auditable through queue + overrides tables.
+Manual confirmation is deterministic and DB-auditable through v2 cluster tables plus additive curated projection tables.
 This workflow is separate from runtime `/api/routes`.
 
-- Queue table: `canonical_review_queue`
-- Override table: `canonical_station_overrides`
-- Frontend dashboard: `http://localhost:3000/curation.html` (uses `/api/qa/queue`, `/api/qa/overrides`, `/api/qa/jobs/refresh`, `/api/qa/jobs/:job_id`).
-- Dashboard includes `Run Pipeline` (async refresh with polling + step/download progress bars) and `Refresh Queue` (fetch queue rows only).
-- Planned next step: richer curation workflow is documented in `docs/curation_tool_prompt.md`.
+- Review queue table: `canonical_review_queue`
+- V2 cluster tables: `qa_station_clusters_v2`, `qa_station_cluster_candidates_v2`, `qa_station_cluster_evidence_v2`, `qa_station_cluster_decisions_v2`
+- V2 group modeling tables: `qa_station_groups_v2`, `qa_station_group_sections_v2`, `qa_station_group_section_members_v2`, `qa_station_group_section_links_v2`
+- V2 naming audit tables: `qa_station_display_names_v2`, `qa_station_naming_overrides_v2`
+- Segment/complex tables: `qa_station_complexes_v2`, `qa_station_segments_v2`, `qa_station_segment_links_v2`
+- Line dedup seam tables: `canonical_line_identities_v2`, `station_segment_line_links_v2`
+- Curated projection foundation tables (reviewer-confirmed entity layer): `qa_curated_stations_v1`, `qa_curated_station_members_v1`, `qa_curated_station_lineage_v1`, `qa_curated_station_field_provenance_v1`
+- Frontend dashboard: `http://localhost:3000/curation.html`
+  - Cluster list: `GET /api/qa/v2/clusters`
+    - Dashboard defaults cluster browsing to `scope_tag=latest` (switch to "All scopes" only when needed)
+  - Cluster detail: `GET /api/qa/v2/clusters/:cluster_id`
+  - Cluster decision submit: `POST /api/qa/v2/clusters/:cluster_id/decisions`
+  - Curated projection read path (merged/grouped results): `GET /api/qa/v2/curated-stations`, `GET /api/qa/v2/curated-stations/:curated_station_id`
+  - V2 decisions create curated station entities and do not write legacy `canonical_station_overrides`
+- Refresh/build command for review data (terminal-first):
+  - `scripts/data/run-station-review-pipeline.sh`
+  - `scripts/data/refresh-station-review.sh`
+  - Optional scope/debug flags: `--country <DE|AT|CH>`, `--as-of <YYYY-MM-DD>`, `--source-id <id>`, `--only <steps>`, `--from-step`, `--to-step`
+- Dashboard includes a map basemap toggle (default/satellite) with session persistence.
+- When multiple candidates share identical coordinates, the map keeps exact position and renders candidates as concentric selectable rings.
+- Dashboard UI is guided and reviewer-first:
+  - select candidates with `Select All`/`Clear`
+  - see merged/grouped results inline in the candidate list as expandable derived cards with composition/provenance
+  - merged member candidates are removed from the standalone list/map and remain visible only under each derived card `Members (N)` section
+  - merge tab assumes one resulting name and does not require a manual merge-target selector
+  - stage local edits with tools (`Merge`, `Split`, `Group`) and explicit selected-node visibility
+  - merge updates local draft state and can be renamed inline via pencil before resolve
+  - group workflow models one user-facing station with typed sections and optional custom names
+  - pairwise walk links default to 5 minutes and are editable before resolve
+  - advanced JSON fields are hidden behind optional disclosure
 
-Build review queue items from canonical data:
+Naming model in v2:
+
+- `canonical_station_id` remains the stable machine identifier.
+- Human-facing labels come from `qa_station_display_names_v2.display_name`.
+- Naming provenance (`strategy`, `reason`, source refs, aliases) is stored in `qa_station_display_names_v2` and surfaced in cluster candidate payloads.
+- Manual naming decisions are auditable in `qa_station_naming_overrides_v2` and linked to cluster decisions.
+
+Build review queue items:
 
 ```bash
 scripts/data/build-review-queue.sh
 scripts/data/build-review-queue.sh --country CH --as-of 2026-02-19
 ```
 
-Apply approved overrides (table-backed):
+Reset station-review tables (destructive; intended for local test environments):
 
 ```bash
-scripts/data/apply-station-overrides.sh
-scripts/data/apply-station-overrides.sh --country DE --as-of 2026-02-19
-```
-
-Import overrides from CSV and apply in one run:
-
-```bash
-scripts/data/apply-station-overrides.sh --csv /absolute/path/overrides.csv
-```
-
-CSV headers (required):
-
-```text
-operation,country,source_canonical_station_id,target_canonical_station_id,source_id,source_stop_id,new_canonical_name,reason,requested_by,approved_by,external_ref
-```
-
-Starter template CSV:
-
-```bash
-cat scripts/data/samples/overrides.example.csv
+scripts/data/reset-station-review-data.sh --yes
 ```
 
 Report queue coverage + open/resolved items:

@@ -26,7 +26,7 @@ function createIngestService(deps = {}) {
           runId,
           args,
           service: 'ingest.netex',
-          scriptFile: 'ingest-netex.legacy.sh',
+          scriptFile: 'ingest-netex.impl.sh',
           errorCode: 'INGEST_FAILED',
           runCommand: options.runCommand,
           logger: options.logger,
@@ -60,7 +60,7 @@ function createIngestService(deps = {}) {
           const result = await runScriptCall();
           await updateCheckpoint({
             completedAt: new Date().toISOString(),
-            script: 'ingest-netex.legacy.sh'
+            script: 'ingest-netex.impl.sh'
           });
           return result;
         }

@@ -1,0 +1,90 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - heading "Station Review" [level=2] [ref=e6]
+      - link "Back to Home" [ref=e7] [cursor=pointer]:
+        - /url: /
+    - paragraph [ref=e8]: Pick a cluster, review candidates on the map, then apply one edit.
+    - generic [ref=e9]:
+      - generic [ref=e10]: Country
+      - combobox "Country" [ref=e11]:
+        - option "All" [selected]
+        - option "DE"
+        - option "AT"
+        - option "CH"
+      - button "Refresh Clusters" [ref=e12] [cursor=pointer]
+    - generic [ref=e13]:
+      - generic [ref=e14]: Status
+      - combobox "Status" [ref=e15]:
+        - option "All" [selected]
+        - option "Open"
+        - option "In Review"
+        - option "Resolved"
+        - option "Dismissed"
+    - generic [ref=e16]:
+      - generic [ref=e17]: Scope
+      - combobox "Scope" [ref=e18]:
+        - option "Latest" [selected]
+        - option "All scopes"
+    - paragraph [ref=e19]: Loading cluster summary...
+    - generic [ref=e20]: Loading clusters...
+  - main [ref=e21]:
+    - generic [ref=e22]:
+      - generic [ref=e23]: Select a cluster to view candidates.
+      - group "Map mode" [ref=e24]:
+        - button "Default" [ref=e25] [cursor=pointer]
+        - button "Satellite" [ref=e26] [cursor=pointer]
+    - generic "Curation map" [ref=e27]:
+      - region "Map" [ref=e28]
+      - generic:
+        - generic [ref=e29]:
+          - button "Zoom in" [ref=e30] [cursor=pointer]
+          - button "Zoom out" [ref=e32] [cursor=pointer]
+          - button "Drag to rotate map, click to reset north" [ref=e34]
+        - group [ref=e36]:
+          - generic "Toggle attribution" [ref=e37] [cursor=pointer]
+          - link "MapLibre" [ref=e39] [cursor=pointer]:
+            - /url: https://maplibre.org/
+    - generic [ref=e40]:
+      - heading "Select a cluster" [level=3] [ref=e41]
+      - paragraph [ref=e42]: Cluster details will appear here.
+      - generic [ref=e43]:
+        - generic [ref=e44]:
+          - heading "Candidates" [level=4] [ref=e45]
+          - button "Select All" [ref=e46] [cursor=pointer]
+          - button "Clear" [ref=e47] [cursor=pointer]
+        - paragraph [ref=e48]: No candidates selected.
+      - generic [ref=e49]:
+        - heading "Selected Service Context" [level=4] [ref=e50]
+        - paragraph [ref=e51]: Incoming and outgoing service/trains for currently selected nodes.
+        - generic [ref=e52]:
+          - strong [ref=e54]: Incoming
+          - strong [ref=e57]: Outgoing
+      - generic [ref=e59]:
+        - heading "Edit" [level=4] [ref=e60]
+        - paragraph [ref=e61]: Use tabs to configure one edit and apply it directly.
+        - tablist "Edit operation tabs" [ref=e62]:
+          - button "Merge" [ref=e63] [cursor=pointer]
+          - button "Split" [ref=e64] [cursor=pointer]
+          - button "Group" [ref=e65] [cursor=pointer]
+          - button "Rename" [ref=e66] [cursor=pointer]
+          - button "Keep Separate" [ref=e67] [cursor=pointer]
+        - generic [ref=e68]:
+          - text: Resulting public name (assumed by default, editable)
+          - textbox "Resulting public name (assumed by default, editable)" [ref=e69]:
+            - /placeholder: "Example: Winterthur Main Station"
+        - text: Edit note (optional)
+        - textbox "Edit note (optional)" [ref=e70]:
+          - /placeholder: Why this edit is correct
+        - button "Apply Edit" [ref=e72] [cursor=pointer]
+        - group [ref=e74]:
+          - generic "Edit payload preview" [ref=e75] [cursor=pointer]
+      - group [ref=e76]:
+        - generic "Evidence" [ref=e77]:
+          - strong [ref=e78]: Evidence
+      - group [ref=e79]:
+        - generic "Linked Queue Items" [ref=e80]:
+          - strong [ref=e81]: Linked Queue Items
+      - group [ref=e82]:
+        - generic "Applied Edit History" [ref=e83]:
+          - strong [ref=e84]: Applied Edit History
