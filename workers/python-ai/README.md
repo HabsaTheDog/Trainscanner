@@ -27,6 +27,7 @@ pip install -r requirements.txt
 # Connects to Temporal on localhost:7233 by default
 export PORT=8080
 export TEMPORAL_ADDRESS=localhost:7233
+export DATABASE_URL="postgresql://trainscanner:trainscanner@localhost:5432/trainscanner"
 
 python main.py
 ```
