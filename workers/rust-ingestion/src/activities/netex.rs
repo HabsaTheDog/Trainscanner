@@ -5,6 +5,10 @@ use serde_json::json;
 use std::env;
 use std::io::Write;
 use temporal_sdk::ActContext;
+use quick_xml::events::Event;
+use quick_xml::Reader;
+use std::io::BufReader;
+use temporal_sdk::ActContext;
 
 fn compute_grid_id(country: &str, latitude: f64, longitude: f64) -> String {
     if (-90.0..=90.0).contains(&latitude) && (-180.0..=180.0).contains(&longitude) {
@@ -99,21 +103,109 @@ pub async fn extract_netex_stops(
 
     // (Simplified logic loop here indicating the rust rewrite of the 300+ line python parser for brevity)
     for entry_name in entries_to_scan {
-        let _entry = archive.by_name(&entry_name)?;
+        let entry = archive.by_name(&entry_name)?;
+        let mut reader = Reader::from_reader(BufReader::new(entry));
+        reader.config_mut().trim_text(true);
+        let mut buf = Vec::new();
 
-        // ... Deep SAX logic here ...
-        // We will output dummy/sample parsed data for now to finalize the integration bridge
+        let mut in_target_node = false;
+        let mut current_stop_id = String::new();
+        let mut current_name = String::new();
+        let mut current_lat = String::new();
+        let mut current_lon = String::new();
+        let mut current_text_tag = String::new();
 
-        let sample_lat = 52.52_f64;
-        let sample_lon = 13.40_f64;
-        let sample_grid_id = compute_grid_id(country, sample_lat, sample_lon);
-        let sample_csv_line = format!(
-            "\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"\",\"Sample Station\",\"52.52\",\"13.40\",\"{}\",\"\",\"\",\"\",\"{}\",\"{{}}\"\n",
-            run_id, source_id, country, provider_slug, snapshot_date, manifest_sha256,
-            "123456", sample_grid_id, entry_name
-        );
-        db_writer.write_all(sample_csv_line.as_bytes())?;
-        stop_places_written += 1;
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(ref e)) => {
+                    let name = e.name();
+                    let local_name = name.into_inner();
+                    let tag_name = String::from_utf8_lossy(local_name).into_owned();
+
+                    if tag_name.ends_with("StopPlace")
+                        || tag_name.ends_with("ScheduledStopPoint")
+                        || tag_name.ends_with("Site")
+                    {
+                        in_target_node = true;
+                        current_stop_id.clear();
+                        current_name.clear();
+                        current_lat.clear();
+                        current_lon.clear();
+
+                        for attr_res in e.attributes() {
+                            if let Ok(attr) = attr_res {
+                                if attr.key.into_inner() == b"id" {
+                                    if let Ok(val) = attr.decode_and_unescape_value(&reader) {
+                                        current_stop_id = val.into_owned();
+                                    }
+                                }
+                            }
+                        }
+                    } else if in_target_node {
+                        current_text_tag = tag_name;
+                    }
+                }
+                Ok(Event::Text(e)) => {
+                    if in_target_node {
+                        if let Ok(text) = e.unescape_and_decode(&reader) {
+                            match current_text_tag.as_str() {
+                                t if t.ends_with("Name") && current_name.is_empty() => {
+                                    current_name = text.trim().to_string();
+                                }
+                                t if t.ends_with("Longitude") => {
+                                    current_lon = text.trim().to_string();
+                                }
+                                t if t.ends_with("Latitude") => {
+                                    current_lat = text.trim().to_string();
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                Ok(Event::End(ref e)) => {
+                    let name = e.name();
+                    let local_name = name.into_inner();
+                    let tag_name = String::from_utf8_lossy(local_name).into_owned();
+
+                    if tag_name.ends_with("StopPlace")
+                        || tag_name.ends_with("ScheduledStopPoint")
+                        || tag_name.ends_with("Site")
+                    {
+                        in_target_node = false;
+
+                        if !current_stop_id.is_empty() && !current_lat.is_empty() && !current_lon.is_empty() {
+                            let safe_name = current_name.replace("\"", "\"\"");
+                            let safe_id = current_stop_id.replace("\"", "\"\"");
+
+                            let lat_f64 = current_lat.parse::<f64>().unwrap_or(0.0);
+                            let lon_f64 = current_lon.parse::<f64>().unwrap_or(0.0);
+                            let grid_id = compute_grid_id(country, lat_f64, lon_f64);
+
+                            let csv_line = format!(
+                                "\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"\",\"{}\",\"{}\",\"{}\",\"{}\",\"\",\"\",\"\",\"{}\",\"{{}}\"\n",
+                                run_id, source_id, country, provider_slug, snapshot_date, manifest_sha256,
+                                safe_id, safe_name, lat_f64, lon_f64, grid_id, entry_name
+                            );
+
+                            if let Err(err) = db_writer.write_all(csv_line.as_bytes()) {
+                                warn!("Failed to write to COPY stream: {}", err);
+                            } else {
+                                stop_places_written += 1;
+                            }
+                        }
+                    }
+                    current_text_tag.clear();
+                }
+                Ok(Event::Eof) => break,
+                Err(e) => {
+                    warn!("XML parsing error in {}: {:?}", entry_name, e);
+                    break;
+                }
+                _ => {}
+            }
+            buf.clear();
+        }
     }
 
     db_writer.finish()?;
@@ -124,4 +216,114 @@ pub async fn extract_netex_stops(
         "stopPlacesWritten": stop_places_written,
         "status": "success"
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use quick_xml::events::Event;
+    use quick_xml::Reader;
+
+    #[test]
+    fn test_xml_sax_parser() {
+        let xml_data = r#"
+            <StopPlace id="SP1">
+                <Name>Test Station</Name>
+                <Centroid>
+                    <Location>
+                        <Longitude>13.40</Longitude>
+                        <Latitude>52.52</Latitude>
+                    </Location>
+                </Centroid>
+            </StopPlace>
+        "#;
+
+        let mut reader = Reader::from_str(xml_data);
+        reader.config_mut().trim_text(true);
+        let mut buf = Vec::new();
+
+        let mut current_stop_id = String::new();
+        let mut current_name = String::new();
+        let mut current_lat = String::new();
+        let mut current_lon = String::new();
+
+        let mut in_target_node = false;
+        let mut current_text_tag = String::new();
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(ref e)) => {
+                    let name = e.name();
+                    let local_name = name.into_inner();
+                    let tag_name = String::from_utf8_lossy(local_name).into_owned();
+
+                    if tag_name.ends_with("StopPlace")
+                        || tag_name.ends_with("ScheduledStopPoint")
+                        || tag_name.ends_with("Site")
+                    {
+                        in_target_node = true;
+                        current_stop_id.clear();
+                        current_name.clear();
+                        current_lat.clear();
+                        current_lon.clear();
+
+                        for attr_res in e.attributes() {
+                            if let Ok(attr) = attr_res {
+                                if attr.key.into_inner() == b"id" {
+                                    if let Ok(val) = attr.decode_and_unescape_value(&reader) {
+                                        current_stop_id = val.into_owned();
+                                    }
+                                }
+                            }
+                        }
+                    } else if in_target_node {
+                        current_text_tag = tag_name;
+                    }
+                }
+                Ok(Event::Text(e)) => {
+                    if in_target_node {
+                        if let Ok(text) = e.unescape_and_decode(&reader) {
+                            match current_text_tag.as_str() {
+                                t if t.ends_with("Name") && current_name.is_empty() => {
+                                    current_name = text.trim().to_string();
+                                }
+                                t if t.ends_with("Longitude") => {
+                                    current_lon = text.trim().to_string();
+                                }
+                                t if t.ends_with("Latitude") => {
+                                    current_lat = text.trim().to_string();
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                Ok(Event::End(ref e)) => {
+                    let name = e.name();
+                    let local_name = name.into_inner();
+                    let tag_name = String::from_utf8_lossy(local_name).into_owned();
+
+                    if tag_name.ends_with("StopPlace")
+                        || tag_name.ends_with("ScheduledStopPoint")
+                        || tag_name.ends_with("Site")
+                    {
+                        in_target_node = false;
+                        println!("Found Stop: {} - {} ({}, {})", current_stop_id, current_name, current_lat, current_lon);
+                        assert_eq!(current_stop_id, "SP1");
+                        assert_eq!(current_name, "Test Station");
+                        assert_eq!(current_lat, "52.52");
+                        assert_eq!(current_lon, "13.40");
+                    }
+                    current_text_tag.clear();
+                }
+                Ok(Event::Eof) => break,
+                Err(e) => {
+                    println!("Error: {:?}", e);
+                    break;
+                }
+                _ => {}
+            }
+            buf.clear();
+        }
+    }
 }
