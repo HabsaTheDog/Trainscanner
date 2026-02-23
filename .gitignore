@@ -66,6 +66,7 @@ data/motis/osm.pbf
 data/motis/data/
 data/gtfs/*.zip
 data/gtfs/runtime/
+data/gtfs for testing (manualy downloaded)/
 
 # Rust
 target/
