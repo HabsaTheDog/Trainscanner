@@ -1,14 +1,19 @@
 #!/usr/bin/env node
 
-const fs = require('fs');
-const http = require('http');
-const path = require('path');
+const fs = require("node:fs");
+const http = require("node:http");
+const path = require("node:path");
 
 function parseArgs(argv) {
   const args = {
-    host: '127.0.0.1',
+    host: "127.0.0.1",
     port: 18080,
-    responseFile: path.resolve(__dirname, '..', 'samples', 'ojp-trip-response.mock.xml'),
+    responseFile: path.resolve(
+      __dirname,
+      "..",
+      "samples",
+      "ojp-trip-response.mock.xml",
+    ),
   };
 
   for (let i = 2; i < argv.length; i += 1) {
@@ -16,21 +21,23 @@ function parseArgs(argv) {
     const next = argv[i + 1];
 
     switch (key) {
-      case '--host':
-        args.host = next || '';
+      case "--host":
+        args.host = next || "";
         i += 1;
         break;
-      case '--port':
+      case "--port":
         args.port = Number(next);
         i += 1;
         break;
-      case '--response-file':
-        args.responseFile = path.resolve(next || '');
+      case "--response-file":
+        args.responseFile = path.resolve(next || "");
         i += 1;
         break;
-      case '-h':
-      case '--help':
-        process.stdout.write('Usage: node scripts/data/mock/mock-ojp-server.js [--host 127.0.0.1] [--port 18080] [--response-file FILE]\n');
+      case "-h":
+      case "--help":
+        process.stdout.write(
+          "Usage: node scripts/data/mock/mock-ojp-server.js [--host 127.0.0.1] [--port 18080] [--response-file FILE]\n",
+        );
         process.exit(0);
         break;
       default:
@@ -39,11 +46,11 @@ function parseArgs(argv) {
   }
 
   if (!Number.isInteger(args.port) || args.port < 1 || args.port > 65535) {
-    throw new Error('--port must be an integer between 1 and 65535');
+    throw new Error("--port must be an integer between 1 and 65535");
   }
 
   if (!args.host) {
-    throw new Error('--host must not be empty');
+    throw new Error("--host must not be empty");
   }
 
   return args;
@@ -51,43 +58,51 @@ function parseArgs(argv) {
 
 function main() {
   const args = parseArgs(process.argv);
-  const responseXml = fs.readFileSync(args.responseFile, 'utf8');
+  const responseXml = fs.readFileSync(args.responseFile, "utf8");
 
   const server = http.createServer((req, res) => {
-    if (req.method === 'GET' && req.url === '/health') {
-      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    if (req.method === "GET" && req.url === "/health") {
+      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
       res.end('{"ok":true}\n');
       return;
     }
 
-    if (req.method === 'POST' && req.url === '/ojp') {
-      let body = '';
-      req.setEncoding('utf8');
-      req.on('data', (chunk) => {
+    if (req.method === "POST" && req.url === "/ojp") {
+      let body = "";
+      req.setEncoding("utf8");
+      req.on("data", (chunk) => {
         body += chunk;
         if (body.length > 2_000_000) {
           req.socket.destroy();
         }
       });
-      req.on('end', () => {
-        if (!body.includes('<OJPTripRequest>')) {
-          res.writeHead(400, { 'content-type': 'application/xml; charset=utf-8' });
-          res.end('<?xml version="1.0" encoding="UTF-8"?><Error><ErrorText>Missing OJPTripRequest</ErrorText></Error>\n');
+      req.on("end", () => {
+        if (!body.includes("<OJPTripRequest>")) {
+          res.writeHead(400, {
+            "content-type": "application/xml; charset=utf-8",
+          });
+          res.end(
+            '<?xml version="1.0" encoding="UTF-8"?><Error><ErrorText>Missing OJPTripRequest</ErrorText></Error>\n',
+          );
           return;
         }
 
-        res.writeHead(200, { 'content-type': 'application/xml; charset=utf-8' });
-        res.end(responseXml.endsWith('\n') ? responseXml : `${responseXml}\n`);
+        res.writeHead(200, {
+          "content-type": "application/xml; charset=utf-8",
+        });
+        res.end(responseXml.endsWith("\n") ? responseXml : `${responseXml}\n`);
       });
       return;
     }
 
-    res.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
+    res.writeHead(404, { "content-type": "application/json; charset=utf-8" });
     res.end('{"ok":false,"error":"not_found"}\n');
   });
 
   server.listen(args.port, args.host, () => {
-    process.stdout.write(`[mock-ojp-server] listening on http://${args.host}:${args.port}\n`);
+    process.stdout.write(
+      `[mock-ojp-server] listening on http://${args.host}:${args.port}\n`,
+    );
   });
 
   function shutdown(signal) {
@@ -97,8 +112,8 @@ function main() {
     });
   }
 
-  process.on('SIGINT', () => shutdown('SIGINT'));
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
 }
 
 try {

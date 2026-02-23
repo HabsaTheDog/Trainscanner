@@ -1,41 +1,47 @@
 #!/usr/bin/env node
-const { AppError } = require('../core/errors');
-const { createPostgisClient } = require('../data/postgis/client');
-const { parsePipelineCliArgs, printCliError } = require('./pipeline-common');
+const { AppError } = require("../core/errors");
+const { createPostgisClient } = require("../data/postgis/client");
+const { parsePipelineCliArgs, printCliError } = require("./pipeline-common");
 
 function printUsage() {
-  process.stdout.write('Usage: scripts/data/reset-station-review-data.sh --yes\n');
-  process.stdout.write('\n');
-  process.stdout.write('Delete all station-review curation data, including legacy override rows.\n');
-  process.stdout.write('\n');
-  process.stdout.write('Options:\n');
-  process.stdout.write('  --yes              Confirm destructive reset\n');
-  process.stdout.write('  --root <path>      Repo root (default: cwd)\n');
-  process.stdout.write('  -h, --help         Show this help\n');
+  process.stdout.write(
+    "Usage: scripts/data/reset-station-review-data.sh --yes\n",
+  );
+  process.stdout.write("\n");
+  process.stdout.write(
+    "Delete all station-review curation data, including legacy override rows.\n",
+  );
+  process.stdout.write("\n");
+  process.stdout.write("Options:\n");
+  process.stdout.write("  --yes              Confirm destructive reset\n");
+  process.stdout.write("  --root <path>      Repo root (default: cwd)\n");
+  process.stdout.write("  -h, --help         Show this help\n");
 }
 
 function parseArgs(argv = []) {
   const parsed = parsePipelineCliArgs(argv);
-  const args = Array.isArray(parsed.passthroughArgs) ? parsed.passthroughArgs : [];
+  const args = Array.isArray(parsed.passthroughArgs)
+    ? parsed.passthroughArgs
+    : [];
 
   const options = {
     rootDir: parsed.rootDir,
     confirmed: false,
-    help: false
+    help: false,
   };
 
   for (const arg of args) {
-    if (arg === '--yes') {
+    if (arg === "--yes") {
       options.confirmed = true;
       continue;
     }
-    if (arg === '--help' || arg === '-h') {
+    if (arg === "--help" || arg === "-h") {
       options.help = true;
       continue;
     }
     throw new AppError({
-      code: 'INVALID_REQUEST',
-      message: `Unknown argument: ${arg}`
+      code: "INVALID_REQUEST",
+      message: `Unknown argument: ${arg}`,
     });
   }
 
@@ -50,8 +56,8 @@ async function run() {
   }
   if (!options.confirmed) {
     throw new AppError({
-      code: 'INVALID_REQUEST',
-      message: 'Refusing to reset station-review data without --yes'
+      code: "INVALID_REQUEST",
+      message: "Refusing to reset station-review data without --yes",
     });
   }
 
@@ -68,7 +74,7 @@ async function run() {
         (SELECT COUNT(*)::integer FROM qa_station_cluster_decisions_v2) AS decisions_v2,
         (SELECT COUNT(*)::integer FROM qa_station_groups_v2) AS groups_v2,
         (SELECT COUNT(*)::integer FROM qa_curated_stations_v1) AS curated_stations_v1
-      `
+      `,
     );
     return row || {};
   };
@@ -104,7 +110,7 @@ async function run() {
       canonical_review_queue
     RESTART IDENTITY CASCADE;
     COMMIT;
-    `
+    `,
   );
 
   const after = await countRows();
@@ -113,12 +119,16 @@ async function run() {
     `${JSON.stringify({
       ok: true,
       before,
-      after
-    })}\n`
+      after,
+    })}\n`,
   );
 }
 
 run().catch((err) => {
-  printCliError('reset-station-review-data', err, 'Station-review data reset failed');
+  printCliError(
+    "reset-station-review-data",
+    err,
+    "Station-review data reset failed",
+  );
   process.exit(1);
 });

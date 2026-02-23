@@ -433,13 +433,14 @@ ARTIFACT_SHA256="$(sha256_file "$OUTPUT_ZIP_PATH")"
 ROW_COUNTS_JSON="$(jq -c '.counts' "$SUMMARY_JSON")"
 BRIDGE_MODE="$(jq -r '.bridgeMode // "unknown"' "$SUMMARY_JSON")"
 GENERATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+MANIFEST_PATH_REL="$(realpath --relative-to "$ROOT_DIR" "$MANIFEST_PATH" 2>/dev/null || printf '%s' "$MANIFEST_PATH")"
 
 jq -n \
   --arg profile "$PROFILE" \
   --arg asOf "$AS_OF" \
   --arg countryScope "${COUNTRY_FILTER}" \
   --arg artifactPath "$(realpath --relative-to "$ROOT_DIR" "$OUTPUT_ZIP_PATH" 2>/dev/null || printf '%s' "$OUTPUT_ZIP_PATH")" \
-  --arg manifestPath "$(realpath --relative-to "$ROOT_DIR" "$MANIFEST_PATH" 2>/dev/null || printf '%s' "$MANIFEST_PATH")" \
+  --arg manifestPath "$MANIFEST_PATH_REL" \
   --arg bridgeMode "$BRIDGE_MODE" \
   --arg generationTimestamp "$GENERATED_AT" \
   --arg sha256 "$ARTIFACT_SHA256" \

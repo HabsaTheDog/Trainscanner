@@ -1,31 +1,31 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
+const test = require("node:test");
+const assert = require("node:assert/strict");
 
-const { buildKpiPayload } = require('../../src/domains/qa/pipeline-kpis');
+const { buildKpiPayload } = require("../../src/domains/qa/pipeline-kpis");
 
-test('buildKpiPayload computes throughput/failure/duration metrics', () => {
+test("buildKpiPayload computes throughput/failure/duration metrics", () => {
   const now = Date.now();
   const iso = (offsetMs) => new Date(now + offsetMs).toISOString();
 
   const payload = buildKpiPayload(
     [
       {
-        status: 'succeeded',
+        status: "succeeded",
         startedAt: iso(-5000),
-        endedAt: iso(-3000)
+        endedAt: iso(-3000),
       },
       {
-        status: 'failed',
+        status: "failed",
         startedAt: iso(-2000),
-        endedAt: iso(-1000)
+        endedAt: iso(-1000),
       },
       {
-        status: 'succeeded',
+        status: "succeeded",
         startedAt: iso(-1000),
-        endedAt: iso(-500)
-      }
+        endedAt: iso(-500),
+      },
     ],
-    { windowHours: 1 }
+    { windowHours: 1 },
   );
 
   assert.equal(payload.totalJobs, 3);

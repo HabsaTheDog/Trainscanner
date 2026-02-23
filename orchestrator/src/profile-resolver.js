@@ -1,53 +1,71 @@
-const fs = require('node:fs/promises');
-const path = require('node:path');
-const { AppError } = require('./core/errors');
-const { ISO_DATE_RE, validateGtfsProfilesConfig } = require('./domains/switch-runtime/contracts');
+const fs = require("node:fs/promises");
+const path = require("node:path");
+const { AppError } = require("./core/errors");
+const { isStrictIsoDate } = require("./core/date");
+const {
+  validateGtfsProfilesConfig,
+} = require("./domains/switch-runtime/contracts");
 
 function normalizeProfiles(raw) {
   const source = validateGtfsProfilesConfig(raw);
   const normalized = {};
 
   for (const [name, entry] of Object.entries(source)) {
-    if (typeof entry === 'string') {
+    if (typeof entry === "string") {
       normalized[name] = {
-        sourceType: 'static',
+        sourceType: "static",
         zipPath: entry,
-        description: ''
+        description: "",
       };
       continue;
     }
 
-    if (!entry || typeof entry !== 'object') {
+    if (!entry || typeof entry !== "object") {
       continue;
     }
 
-    const description = typeof entry.description === 'string' ? entry.description : '';
+    const description =
+      typeof entry.description === "string" ? entry.description : "";
 
-    if (entry.runtime && typeof entry.runtime === 'object') {
+    if (entry.runtime && typeof entry.runtime === "object") {
       normalized[name] = {
-        sourceType: 'runtime',
+        sourceType: "runtime",
         description,
         runtime: {
-          mode: String(entry.runtime.mode || entry.runtime.source || 'canonical-export').trim(),
-          profile: typeof entry.runtime.profile === 'string' ? entry.runtime.profile.trim() : '',
-          asOf: typeof entry.runtime.asOf === 'string' ? entry.runtime.asOf.trim() : 'latest',
-          country: typeof entry.runtime.country === 'string' ? entry.runtime.country.trim() : '',
-          artifactPath: typeof entry.runtime.artifactPath === 'string' ? entry.runtime.artifactPath.trim() : ''
-        }
+          mode: String(
+            entry.runtime.mode || entry.runtime.source || "canonical-export",
+          ).trim(),
+          profile:
+            typeof entry.runtime.profile === "string"
+              ? entry.runtime.profile.trim()
+              : "",
+          asOf:
+            typeof entry.runtime.asOf === "string"
+              ? entry.runtime.asOf.trim()
+              : "latest",
+          country:
+            typeof entry.runtime.country === "string"
+              ? entry.runtime.country.trim()
+              : "",
+          artifactPath:
+            typeof entry.runtime.artifactPath === "string"
+              ? entry.runtime.artifactPath.trim()
+              : "",
+        },
       };
       continue;
     }
 
     const zipPath =
-      (typeof entry.zipPath === 'string' && entry.zipPath) ||
-      (typeof entry.zip === 'string' && entry.zip) ||
-      '';
+      (typeof entry.zipPath === "string" && entry.zipPath) ||
+      (typeof entry.zip === "string" && entry.zip) ||
+      "";
 
     if (zipPath) {
       normalized[name] = {
-        sourceType: 'static',
+        sourceType: "static",
         zipPath,
-        description
+        description,
       };
     }
   }
@@ -56,11 +74,11 @@ function normalizeProfiles(raw) {
 }
 
 function normalizeRelPath(value) {
-  return value.split(path.sep).join('/');
+  return value.split(path.sep).join("/");
 }
 
 function projectRootFromDataDir(dataDir) {
-  return path.resolve(dataDir, '..');
+  return path.resolve(dataDir, "..");
 }
 
 function resolveAgainstProject(projectRoot, maybeRelative) {
@@ -72,7 +90,7 @@ function resolveAgainstProject(projectRoot, maybeRelative) {
 
 function toProjectRelativeOrAbsolute(projectRoot, absolutePath) {
   const rel = path.relative(projectRoot, absolutePath);
-  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+  if (rel.startsWith("..") || path.isAbsolute(rel)) {
     return absolutePath;
   }
   return normalizeRelPath(rel);
@@ -96,13 +114,13 @@ async function pickLatestRuntimeDate(runtimeRootAbs) {
   }
 
   const dateDirs = entries
-    .filter((entry) => entry.isDirectory() && ISO_DATE_RE.test(entry.name))
+    .filter((entry) => entry.isDirectory() && isStrictIsoDate(entry.name))
     .map((entry) => entry.name)
     .sort();
 
   for (let i = dateDirs.length - 1; i >= 0; i -= 1) {
     const dateDir = dateDirs[i];
-    const zipPath = path.join(runtimeRootAbs, dateDir, 'active-gtfs.zip');
+    const zipPath = path.join(runtimeRootAbs, dateDir, "active-gtfs.zip");
     if (await fileExists(zipPath)) {
       return dateDir;
     }
@@ -115,27 +133,27 @@ async function resolveProfileArtifact(profileName, profile, options = {}) {
   const allowMissing = Boolean(options.allowMissing);
   const dataDir = options.dataDir;
 
-  if (!dataDir || typeof dataDir !== 'string') {
+  if (!dataDir || typeof dataDir !== "string") {
     throw new AppError({
-      code: 'INVALID_CONFIG',
-      message: 'resolveProfileArtifact requires option dataDir'
+      code: "INVALID_CONFIG",
+      message: "resolveProfileArtifact requires option dataDir",
     });
   }
 
   const projectRoot = projectRootFromDataDir(dataDir);
 
-  if (!profile || typeof profile !== 'object') {
+  if (!profile || typeof profile !== "object") {
     throw new AppError({
-      code: 'INVALID_CONFIG',
-      message: `Invalid profile '${profileName}' definition`
+      code: "INVALID_CONFIG",
+      message: `Invalid profile '${profileName}' definition`,
     });
   }
 
-  if (profile.sourceType === 'static') {
-    if (!profile.zipPath || typeof profile.zipPath !== 'string') {
+  if (profile.sourceType === "static") {
+    if (!profile.zipPath || typeof profile.zipPath !== "string") {
       throw new AppError({
-        code: 'INVALID_CONFIG',
-        message: `Static profile '${profileName}' is missing zipPath`
+        code: "INVALID_CONFIG",
+        message: `Static profile '${profileName}' is missing zipPath`,
       });
     }
 
@@ -143,56 +161,65 @@ async function resolveProfileArtifact(profileName, profile, options = {}) {
     const exists = await fileExists(absolutePath);
     if (!exists && !allowMissing) {
       throw new AppError({
-        code: 'PROFILE_ARTIFACT_MISSING',
+        code: "PROFILE_ARTIFACT_MISSING",
         statusCode: 404,
-        message: `GTFS zip not found for profile '${profileName}': ${absolutePath}`
+        message: `GTFS zip not found for profile '${profileName}': ${absolutePath}`,
       });
     }
 
     return {
-      sourceType: 'static',
+      sourceType: "static",
       zipPath: profile.zipPath,
       absolutePath,
       exists,
-      runtime: null
+      runtime: null,
     };
   }
 
-  if (profile.sourceType !== 'runtime') {
+  if (profile.sourceType !== "runtime") {
     throw new AppError({
-      code: 'INVALID_CONFIG',
-      message: `Profile '${profileName}' has unsupported source type`
+      code: "INVALID_CONFIG",
+      message: `Profile '${profileName}' has unsupported source type`,
     });
   }
 
   const runtime = profile.runtime || {};
-  const mode = runtime.mode || 'canonical-export';
-  if (mode !== 'canonical-export') {
+  const mode = runtime.mode || "canonical-export";
+  if (mode !== "canonical-export") {
     throw new AppError({
-      code: 'INVALID_CONFIG',
-      message: `Profile '${profileName}' runtime mode '${mode}' is unsupported (expected canonical-export)`
+      code: "INVALID_CONFIG",
+      message: `Profile '${profileName}' runtime mode '${mode}' is unsupported (expected canonical-export)`,
     });
   }
 
-  let absolutePath = '';
-  let zipPath = '';
-  let resolvedAsOf = runtime.asOf || 'latest';
+  let absolutePath = "";
+  let zipPath = "";
+  let resolvedAsOf = runtime.asOf || "latest";
 
   if (runtime.artifactPath) {
     absolutePath = resolveAgainstProject(projectRoot, runtime.artifactPath);
     zipPath = runtime.artifactPath;
   } else {
     const runtimeProfile = runtime.profile || profileName;
-    const runtimeRootAbs = path.join(dataDir, 'gtfs', 'runtime', runtimeProfile);
-    const requestedAsOf = runtime.asOf || 'latest';
+    const runtimeRootAbs = path.join(
+      dataDir,
+      "gtfs",
+      "runtime",
+      runtimeProfile,
+    );
+    const requestedAsOf = runtime.asOf || "latest";
 
-    if (requestedAsOf === 'latest') {
+    if (requestedAsOf === "latest") {
       const latest = await pickLatestRuntimeDate(runtimeRootAbs);
       if (!latest) {
         if (allowMissing) {
-          const unresolved = path.join(runtimeRootAbs, '<latest>', 'active-gtfs.zip');
+          const unresolved = path.join(
+            runtimeRootAbs,
+            "<latest>",
+            "active-gtfs.zip",
+          );
           return {
-            sourceType: 'runtime',
+            sourceType: "runtime",
             zipPath: toProjectRelativeOrAbsolute(projectRoot, unresolved),
             absolutePath: unresolved,
             exists: false,
@@ -201,56 +228,56 @@ async function resolveProfileArtifact(profileName, profile, options = {}) {
               profile: runtimeProfile,
               requestedAsOf,
               resolvedAsOf: null,
-              country: runtime.country || ''
-            }
+              country: runtime.country || "",
+            },
           };
         }
         throw new AppError({
-          code: 'PROFILE_ARTIFACT_MISSING',
+          code: "PROFILE_ARTIFACT_MISSING",
           statusCode: 404,
-          message: `No runtime GTFS artifact found for profile '${profileName}' in ${runtimeRootAbs}. Run scripts/qa/build-profile.sh --profile ${runtimeProfile} --as-of <YYYY-MM-DD>.`
+          message: `No runtime GTFS artifact found for profile '${profileName}' in ${runtimeRootAbs}. Run scripts/qa/build-profile.sh --profile ${runtimeProfile} --as-of <YYYY-MM-DD>.`,
         });
       }
       resolvedAsOf = latest;
     } else {
-      if (!ISO_DATE_RE.test(requestedAsOf)) {
+      if (!isStrictIsoDate(requestedAsOf)) {
         throw new AppError({
-          code: 'INVALID_CONFIG',
-          message: `Profile '${profileName}' runtime.asOf must be 'latest' or YYYY-MM-DD`
+          code: "INVALID_CONFIG",
+          message: `Profile '${profileName}' runtime.asOf must be 'latest' or YYYY-MM-DD`,
         });
       }
       resolvedAsOf = requestedAsOf;
     }
 
-    absolutePath = path.join(runtimeRootAbs, resolvedAsOf, 'active-gtfs.zip');
+    absolutePath = path.join(runtimeRootAbs, resolvedAsOf, "active-gtfs.zip");
     zipPath = toProjectRelativeOrAbsolute(projectRoot, absolutePath);
   }
 
   const exists = await fileExists(absolutePath);
   if (!exists && !allowMissing) {
     throw new AppError({
-      code: 'PROFILE_ARTIFACT_MISSING',
+      code: "PROFILE_ARTIFACT_MISSING",
       statusCode: 404,
-      message: `Runtime GTFS artifact not found for profile '${profileName}': ${absolutePath}`
+      message: `Runtime GTFS artifact not found for profile '${profileName}': ${absolutePath}`,
     });
   }
 
   return {
-    sourceType: 'runtime',
+    sourceType: "runtime",
     zipPath,
     absolutePath,
     exists,
     runtime: {
       mode,
       profile: runtime.profile || profileName,
-      requestedAsOf: runtime.asOf || 'latest',
+      requestedAsOf: runtime.asOf || "latest",
       resolvedAsOf,
-      country: runtime.country || ''
-    }
+      country: runtime.country || "",
+    },
   };
 }
 
 module.exports = {
   normalizeProfiles,
-  resolveProfileArtifact
+  resolveProfileArtifact,
 };

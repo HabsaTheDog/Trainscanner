@@ -77,8 +77,10 @@ is_iso_date_time() {
 
 load_env() {
   if [[ -f "${ROOT_DIR}/.env" ]]; then
-    # shellcheck disable=SC1090
-    set -a; source "${ROOT_DIR}/.env"; set +a
+    set -a
+    # shellcheck disable=SC1091
+    source "${ROOT_DIR}/.env"
+    set +a
   fi
 }
 

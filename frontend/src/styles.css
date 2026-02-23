@@ -174,7 +174,7 @@ button:disabled {
   margin-top: 12px;
 }
 
-.raw-section>summary {
+.raw-section > summary {
   cursor: pointer;
   color: var(--muted);
   margin-bottom: 8px;
@@ -241,7 +241,9 @@ button:disabled {
   padding: 12px;
   margin-bottom: 10px;
   cursor: pointer;
-  transition: border-color 0.2s, background-color 0.2s;
+  transition:
+    border-color 0.2s,
+    background-color 0.2s;
 }
 
 .cluster-item:hover,
@@ -693,7 +695,10 @@ button:disabled {
   stroke-width: 2.8;
   vector-effect: non-scaling-stroke;
   cursor: pointer;
-  transition: fill 120ms ease, stroke 120ms ease, stroke-width 120ms ease;
+  transition:
+    fill 120ms ease,
+    stroke 120ms ease,
+    stroke-width 120ms ease;
 }
 
 .candidate-ring:hover,

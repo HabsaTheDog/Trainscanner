@@ -1,36 +1,43 @@
-const { AppError } = require('../../../core/errors');
-const { validateOrThrow } = require('../../../core/schema');
+const { AppError } = require("../../../core/errors");
+const { validateOrThrow } = require("../../../core/schema");
 
 const CANONICAL_SUMMARY_SCHEMA = {
-  type: 'object',
-  required: ['sourceRows', 'canonicalRows', 'inserted', 'updated', 'merged', 'conflicts'],
+  type: "object",
+  required: [
+    "sourceRows",
+    "canonicalRows",
+    "inserted",
+    "updated",
+    "merged",
+    "conflicts",
+  ],
   properties: {
-    sourceRows: { type: 'integer', minimum: 0 },
-    canonicalRows: { type: 'integer', minimum: 0 },
-    inserted: { type: 'integer', minimum: 0 },
-    updated: { type: 'integer', minimum: 0 },
-    merged: { type: 'integer', minimum: 0 },
-    conflicts: { type: 'integer', minimum: 0 },
-    countryFilter: { type: 'string' },
-    asOf: { type: 'string' },
-    sourceScope: { type: 'string' }
+    sourceRows: { type: "integer", minimum: 0 },
+    canonicalRows: { type: "integer", minimum: 0 },
+    inserted: { type: "integer", minimum: 0 },
+    updated: { type: "integer", minimum: 0 },
+    merged: { type: "integer", minimum: 0 },
+    conflicts: { type: "integer", minimum: 0 },
+    countryFilter: { type: "string" },
+    asOf: { type: "string" },
+    sourceScope: { type: "string" },
   },
-  additionalProperties: true
+  additionalProperties: true,
 };
 
 function extractJsonLine(stdout) {
-  const lines = String(stdout || '')
+  const lines = String(stdout || "")
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
 
   for (let i = lines.length - 1; i >= 0; i -= 1) {
-    if (lines[i].startsWith('{') && lines[i].endsWith('}')) {
+    if (lines[i].startsWith("{") && lines[i].endsWith("}")) {
       return lines[i];
     }
   }
 
-  return '';
+  return "";
 }
 
 const BUILD_CANONICAL_SQL = `
@@ -371,16 +378,16 @@ function createCanonicalStationsRepo(client) {
     async buildCanonicalStations(scope) {
       const result = await client.runScript(BUILD_CANONICAL_SQL, {
         run_id: scope.runId,
-        country_filter: scope.country || '',
-        as_of: scope.asOf || '',
-        source_id_scope: scope.sourceId || ''
+        country_filter: scope.country || "",
+        as_of: scope.asOf || "",
+        source_id_scope: scope.sourceId || "",
       });
 
       const line = extractJsonLine(result.stdout);
       if (!line) {
         throw new AppError({
-          code: 'CANONICAL_BUILD_FAILED',
-          message: 'Canonical build did not return summary JSON'
+          code: "CANONICAL_BUILD_FAILED",
+          message: "Canonical build did not return summary JSON",
         });
       }
 
@@ -389,24 +396,24 @@ function createCanonicalStationsRepo(client) {
         parsed = JSON.parse(line);
       } catch (err) {
         throw new AppError({
-          code: 'CANONICAL_BUILD_FAILED',
-          message: 'Canonical build returned invalid summary JSON',
-          cause: err
+          code: "CANONICAL_BUILD_FAILED",
+          message: "Canonical build returned invalid summary JSON",
+          cause: err,
         });
       }
 
       validateOrThrow(parsed, CANONICAL_SUMMARY_SCHEMA, {
-        code: 'CANONICAL_BUILD_FAILED',
-        message: 'Canonical build summary failed schema validation'
+        code: "CANONICAL_BUILD_FAILED",
+        message: "Canonical build summary failed schema validation",
       });
 
       return parsed;
-    }
+    },
   };
 }
 
 module.exports = {
   BUILD_CANONICAL_SQL,
   createCanonicalStationsRepo,
-  extractJsonLine
+  extractJsonLine,
 };

@@ -1,13 +1,22 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs/promises');
-const path = require('node:path');
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("node:fs/promises");
+const path = require("node:path");
 
-test('curation frontend includes staged conflict editor and map mode hooks', async () => {
-  const repoRoot = path.resolve(__dirname, '../../..');
-  const html = await fs.readFile(path.join(repoRoot, 'frontend', 'curation.html'), 'utf8');
-  const pageJsx = await fs.readFile(path.join(repoRoot, 'frontend', 'src', 'CurationPage.jsx'), 'utf8');
-  const logicJs = await fs.readFile(path.join(repoRoot, 'frontend', 'src', 'legacy', 'curation-logic.js'), 'utf8');
+test("curation frontend includes staged conflict editor and map mode hooks", async () => {
+  const repoRoot = path.resolve(__dirname, "../../..");
+  const html = await fs.readFile(
+    path.join(repoRoot, "frontend", "curation.html"),
+    "utf8",
+  );
+  const pageJsx = await fs.readFile(
+    path.join(repoRoot, "frontend", "src", "CurationPage.jsx"),
+    "utf8",
+  );
+  const logicJs = await fs.readFile(
+    path.join(repoRoot, "frontend", "src", "legacy", "curation-logic.js"),
+    "utf8",
+  );
 
   assert.match(html, /src="\/src\/main-curation\.jsx"/);
 

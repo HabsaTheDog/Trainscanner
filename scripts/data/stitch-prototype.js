@@ -1,48 +1,48 @@
 #!/usr/bin/env node
 
-const fs = require('fs');
-const path = require('path');
+const fs = require("node:fs");
+const path = require("node:path");
 
 function parseArgs(argv) {
   const args = {
     topN: 5,
-    country: '',
-    output: '',
-    ojp: '',
-    motis: '',
-    rules: '',
+    country: "",
+    output: "",
+    ojp: "",
+    motis: "",
+    rules: "",
   };
 
   for (let i = 2; i < argv.length; i += 1) {
     const key = argv[i];
     const next = argv[i + 1];
     switch (key) {
-      case '--ojp':
-        args.ojp = next || '';
+      case "--ojp":
+        args.ojp = next || "";
         i += 1;
         break;
-      case '--motis':
-        args.motis = next || '';
+      case "--motis":
+        args.motis = next || "";
         i += 1;
         break;
-      case '--rules':
-        args.rules = next || '';
+      case "--rules":
+        args.rules = next || "";
         i += 1;
         break;
-      case '--top-n':
+      case "--top-n":
         args.topN = Number(next);
         i += 1;
         break;
-      case '--country':
-        args.country = next || '';
+      case "--country":
+        args.country = next || "";
         i += 1;
         break;
-      case '--output':
-        args.output = next || '';
+      case "--output":
+        args.output = next || "";
         i += 1;
         break;
-      case '-h':
-      case '--help':
+      case "-h":
+      case "--help":
         printUsage();
         process.exit(0);
         break;
@@ -52,26 +52,34 @@ function parseArgs(argv) {
   }
 
   if (!args.ojp || !args.motis || !args.rules) {
-    throw new Error('Missing required args. Provide --ojp, --motis, and --rules.');
+    throw new Error(
+      "Missing required args. Provide --ojp, --motis, and --rules.",
+    );
   }
   if (!Number.isInteger(args.topN) || args.topN <= 0) {
-    throw new Error('--top-n must be a positive integer');
+    throw new Error("--top-n must be a positive integer");
   }
 
   return args;
 }
 
 function printUsage() {
-  process.stdout.write(`Usage: node scripts/data/stitch-prototype.js --ojp FILE --motis FILE --rules FILE [options]\n\n`);
+  process.stdout.write(
+    `Usage: node scripts/data/stitch-prototype.js --ojp FILE --motis FILE --rules FILE [options]\n\n`,
+  );
   process.stdout.write(`Options:\n`);
-  process.stdout.write(`  --top-n N       Keep top N stitched itineraries (default: 5)\n`);
-  process.stdout.write(`  --country C     Restrict to one country (DE|AT|CH)\n`);
+  process.stdout.write(
+    `  --top-n N       Keep top N stitched itineraries (default: 5)\n`,
+  );
+  process.stdout.write(
+    `  --country C     Restrict to one country (DE|AT|CH)\n`,
+  );
   process.stdout.write(`  --output FILE   Write full report to file\n`);
 }
 
 function readJson(filePath) {
   try {
-    const raw = fs.readFileSync(filePath, 'utf8');
+    const raw = fs.readFileSync(filePath, "utf8");
     return JSON.parse(raw);
   } catch (err) {
     throw new Error(`Failed to parse JSON '${filePath}': ${err.message}`);
@@ -79,9 +87,9 @@ function readJson(filePath) {
 }
 
 function toIso(ts) {
-  if (!ts) return '';
+  if (!ts) return "";
   const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return '';
+  if (Number.isNaN(d.getTime())) return "";
   return d.toISOString();
 }
 
@@ -94,76 +102,130 @@ function minutesBetween(startIso, endIso) {
 
 function firstNonEmpty(obj, keys) {
   for (const key of keys) {
-    if (obj[key] !== undefined && obj[key] !== null && String(obj[key]).trim() !== '') {
+    if (
+      obj[key] !== undefined &&
+      obj[key] !== null &&
+      String(obj[key]).trim() !== ""
+    ) {
       return String(obj[key]);
     }
   }
-  return '';
+  return "";
 }
 
 function normalizeFeederSegments(raw) {
   const source = Array.isArray(raw)
     ? raw
-    : (raw.feederSegments || raw.segments || raw.journeys || []);
+    : raw.feederSegments || raw.segments || raw.journeys || [];
 
-  return source.map((entry, idx) => {
-    const role = firstNonEmpty(entry, ['role', 'segmentRole']).toLowerCase() || 'access';
-    return {
-      segmentId: firstNonEmpty(entry, ['segmentId', 'id']) || `ojp-seg-${idx + 1}`,
-      role,
-      country: firstNonEmpty(entry, ['country']),
-      providerId: firstNonEmpty(entry, ['providerId', 'provider']),
-      originCanonicalStationId: firstNonEmpty(entry, ['originCanonicalStationId', 'originStationId', 'fromCanonicalStationId']),
-      destinationCanonicalStationId: firstNonEmpty(entry, ['destinationCanonicalStationId', 'destinationStationId', 'toCanonicalStationId']),
-      transferHub: firstNonEmpty(entry, ['transferHub', 'hub']),
-      departureTime: toIso(firstNonEmpty(entry, ['departureTime', 'departure', 'departureDateTime'])),
-      arrivalTime: toIso(firstNonEmpty(entry, ['arrivalTime', 'arrival', 'arrivalDateTime'])),
-      raw: entry,
-    };
-  }).filter((seg) =>
-    seg.originCanonicalStationId &&
-    seg.destinationCanonicalStationId &&
-    seg.departureTime &&
-    seg.arrivalTime
-  );
+  return source
+    .map((entry, idx) => {
+      const role =
+        firstNonEmpty(entry, ["role", "segmentRole"]).toLowerCase() || "access";
+      return {
+        segmentId:
+          firstNonEmpty(entry, ["segmentId", "id"]) || `ojp-seg-${idx + 1}`,
+        role,
+        country: firstNonEmpty(entry, ["country"]),
+        providerId: firstNonEmpty(entry, ["providerId", "provider"]),
+        originCanonicalStationId: firstNonEmpty(entry, [
+          "originCanonicalStationId",
+          "originStationId",
+          "fromCanonicalStationId",
+        ]),
+        destinationCanonicalStationId: firstNonEmpty(entry, [
+          "destinationCanonicalStationId",
+          "destinationStationId",
+          "toCanonicalStationId",
+        ]),
+        transferHub: firstNonEmpty(entry, ["transferHub", "hub"]),
+        departureTime: toIso(
+          firstNonEmpty(entry, [
+            "departureTime",
+            "departure",
+            "departureDateTime",
+          ]),
+        ),
+        arrivalTime: toIso(
+          firstNonEmpty(entry, ["arrivalTime", "arrival", "arrivalDateTime"]),
+        ),
+        raw: entry,
+      };
+    })
+    .filter(
+      (seg) =>
+        seg.originCanonicalStationId &&
+        seg.destinationCanonicalStationId &&
+        seg.departureTime &&
+        seg.arrivalTime,
+    );
 }
 
 function normalizeBackboneSegments(raw) {
   const source = Array.isArray(raw)
     ? raw
-    : (raw.backboneItineraries || raw.backbone || raw.connections || []);
+    : raw.backboneItineraries || raw.backbone || raw.connections || [];
 
-  return source.map((entry, idx) => ({
-    itineraryId: firstNonEmpty(entry, ['itineraryId', 'tripId', 'id']) || `motis-backbone-${idx + 1}`,
-    country: firstNonEmpty(entry, ['country']),
-    originCanonicalStationId: firstNonEmpty(entry, ['originCanonicalStationId', 'originStationId', 'fromCanonicalStationId']),
-    destinationCanonicalStationId: firstNonEmpty(entry, ['destinationCanonicalStationId', 'destinationStationId', 'toCanonicalStationId']),
-    transferHubFrom: firstNonEmpty(entry, ['transferHubFrom', 'originHub']),
-    transferHubTo: firstNonEmpty(entry, ['transferHubTo', 'destinationHub']),
-    departureTime: toIso(firstNonEmpty(entry, ['departureTime', 'departure', 'departureDateTime'])),
-    arrivalTime: toIso(firstNonEmpty(entry, ['arrivalTime', 'arrival', 'arrivalDateTime'])),
-    baseScore: Number(entry.baseScore || 0),
-    raw: entry,
-  })).filter((seg) =>
-    seg.originCanonicalStationId &&
-    seg.destinationCanonicalStationId &&
-    seg.departureTime &&
-    seg.arrivalTime
-  );
+  return source
+    .map((entry, idx) => ({
+      itineraryId:
+        firstNonEmpty(entry, ["itineraryId", "tripId", "id"]) ||
+        `motis-backbone-${idx + 1}`,
+      country: firstNonEmpty(entry, ["country"]),
+      originCanonicalStationId: firstNonEmpty(entry, [
+        "originCanonicalStationId",
+        "originStationId",
+        "fromCanonicalStationId",
+      ]),
+      destinationCanonicalStationId: firstNonEmpty(entry, [
+        "destinationCanonicalStationId",
+        "destinationStationId",
+        "toCanonicalStationId",
+      ]),
+      transferHubFrom: firstNonEmpty(entry, ["transferHubFrom", "originHub"]),
+      transferHubTo: firstNonEmpty(entry, ["transferHubTo", "destinationHub"]),
+      departureTime: toIso(
+        firstNonEmpty(entry, [
+          "departureTime",
+          "departure",
+          "departureDateTime",
+        ]),
+      ),
+      arrivalTime: toIso(
+        firstNonEmpty(entry, ["arrivalTime", "arrival", "arrivalDateTime"]),
+      ),
+      baseScore: Number(entry.baseScore || 0),
+      raw: entry,
+    }))
+    .filter(
+      (seg) =>
+        seg.originCanonicalStationId &&
+        seg.destinationCanonicalStationId &&
+        seg.departureTime &&
+        seg.arrivalTime,
+    );
 }
 
 function normalizeRules(raw) {
-  const source = Array.isArray(raw) ? raw : (raw.rules || []);
+  const source = Array.isArray(raw) ? raw : raw.rules || [];
   return source.map((rule) => ({
     ruleId: Number(rule.rule_id || rule.ruleId || 0),
-    ruleScope: String(rule.rule_scope || rule.ruleScope || '').toLowerCase(),
-    country: String(rule.country || ''),
-    canonicalStationId: String(rule.canonical_station_id || rule.canonicalStationId || ''),
-    hubName: String(rule.hub_name || rule.hubName || ''),
-    minTransferMinutes: Number(rule.min_transfer_minutes ?? rule.minTransferMinutes ?? 0),
-    longWaitMinutes: Number(rule.long_wait_minutes ?? rule.longWaitMinutes ?? 45),
+    ruleScope: String(rule.rule_scope || rule.ruleScope || "").toLowerCase(),
+    country: String(rule.country || ""),
+    canonicalStationId: String(
+      rule.canonical_station_id || rule.canonicalStationId || "",
+    ),
+    hubName: String(rule.hub_name || rule.hubName || ""),
+    minTransferMinutes: Number(
+      rule.min_transfer_minutes ?? rule.minTransferMinutes ?? 0,
+    ),
+    longWaitMinutes: Number(
+      rule.long_wait_minutes ?? rule.longWaitMinutes ?? 45,
+    ),
     priority: Number(rule.priority ?? 100),
-    sourceReference: String(rule.source_reference || rule.sourceReference || ''),
+    sourceReference: String(
+      rule.source_reference || rule.sourceReference || "",
+    ),
   }));
 }
 
@@ -175,34 +237,41 @@ function pickRule(rules, country, stationId, hubName) {
       return a.ruleId - b.ruleId;
     });
 
-  const stationRule = scoped.find((r) => r.ruleScope === 'station' && stationId && r.canonicalStationId === stationId);
+  const stationRule = scoped.find(
+    (r) =>
+      r.ruleScope === "station" &&
+      stationId &&
+      r.canonicalStationId === stationId,
+  );
   if (stationRule) return stationRule;
 
-  const hubRule = scoped.find((r) => r.ruleScope === 'hub' && hubName && r.hubName === hubName);
+  const hubRule = scoped.find(
+    (r) => r.ruleScope === "hub" && hubName && r.hubName === hubName,
+  );
   if (hubRule) return hubRule;
 
-  const countryDefault = scoped.find((r) => r.ruleScope === 'country_default');
+  const countryDefault = scoped.find((r) => r.ruleScope === "country_default");
   if (countryDefault) return countryDefault;
 
   return {
     ruleId: 0,
-    ruleScope: 'fallback_default',
+    ruleScope: "fallback_default",
     country,
-    canonicalStationId: '',
-    hubName: '',
+    canonicalStationId: "",
+    hubName: "",
     minTransferMinutes: 10,
     longWaitMinutes: 60,
     priority: 9999,
-    sourceReference: 'stitch-prototype-default',
+    sourceReference: "stitch-prototype-default",
   };
 }
 
 function isAccessRole(role) {
-  return role !== 'egress' && role !== 'post';
+  return role !== "egress" && role !== "post";
 }
 
 function isEgressRole(role) {
-  return role !== 'access' && role !== 'pre';
+  return role !== "access" && role !== "pre";
 }
 
 function buildItineraries(feeders, backbones, rules, topN, countryFilter) {
@@ -217,14 +286,16 @@ function buildItineraries(feeders, backbones, rules, topN, countryFilter) {
   const stitched = [];
 
   for (const backbone of filteredBackbones) {
-    const accessCandidates = filteredFeeders.filter((seg) =>
-      isAccessRole(seg.role) &&
-      seg.destinationCanonicalStationId === backbone.originCanonicalStationId
+    const accessCandidates = filteredFeeders.filter(
+      (seg) =>
+        isAccessRole(seg.role) &&
+        seg.destinationCanonicalStationId === backbone.originCanonicalStationId,
     );
 
-    const egressCandidates = filteredFeeders.filter((seg) =>
-      isEgressRole(seg.role) &&
-      seg.originCanonicalStationId === backbone.destinationCanonicalStationId
+    const egressCandidates = filteredFeeders.filter(
+      (seg) =>
+        isEgressRole(seg.role) &&
+        seg.originCanonicalStationId === backbone.destinationCanonicalStationId,
     );
 
     const accessPool = accessCandidates.length > 0 ? accessCandidates : [null];
@@ -232,51 +303,70 @@ function buildItineraries(feeders, backbones, rules, topN, countryFilter) {
 
     for (const access of accessPool) {
       for (const egress of egressPool) {
-        const startTime = access ? access.departureTime : backbone.departureTime;
+        const startTime = access
+          ? access.departureTime
+          : backbone.departureTime;
         const endTime = egress ? egress.arrivalTime : backbone.arrivalTime;
 
         const originRule = pickRule(
           rules,
           backbone.country || countryFilter,
           backbone.originCanonicalStationId,
-          backbone.transferHubFrom || (access ? access.transferHub : '')
+          backbone.transferHubFrom || (access ? access.transferHub : ""),
         );
 
         const destinationRule = pickRule(
           rules,
           backbone.country || countryFilter,
           backbone.destinationCanonicalStationId,
-          backbone.transferHubTo || (egress ? egress.transferHub : '')
+          backbone.transferHubTo || (egress ? egress.transferHub : ""),
         );
 
-        const transferInMinutes = access ? minutesBetween(access.arrivalTime, backbone.departureTime) : null;
-        const transferOutMinutes = egress ? minutesBetween(backbone.arrivalTime, egress.departureTime) : null;
+        const transferInMinutes = access
+          ? minutesBetween(access.arrivalTime, backbone.departureTime)
+          : null;
+        const transferOutMinutes = egress
+          ? minutesBetween(backbone.arrivalTime, egress.departureTime)
+          : null;
 
-        const tightIn = transferInMinutes !== null && transferInMinutes < originRule.minTransferMinutes;
-        const tightOut = transferOutMinutes !== null && transferOutMinutes < destinationRule.minTransferMinutes;
-        const longIn = transferInMinutes !== null && transferInMinutes > originRule.longWaitMinutes;
-        const longOut = transferOutMinutes !== null && transferOutMinutes > destinationRule.longWaitMinutes;
+        const tightIn =
+          transferInMinutes !== null &&
+          transferInMinutes < originRule.minTransferMinutes;
+        const tightOut =
+          transferOutMinutes !== null &&
+          transferOutMinutes < destinationRule.minTransferMinutes;
+        const longIn =
+          transferInMinutes !== null &&
+          transferInMinutes > originRule.longWaitMinutes;
+        const longOut =
+          transferOutMinutes !== null &&
+          transferOutMinutes > destinationRule.longWaitMinutes;
 
-        const timeOrderBroken = (
+        const timeOrderBroken =
           (transferInMinutes !== null && transferInMinutes < 0) ||
-          (transferOutMinutes !== null && transferOutMinutes < 0)
-        );
+          (transferOutMinutes !== null && transferOutMinutes < 0);
 
         const totalDurationMinutes = minutesBetween(startTime, endTime);
         const waitPenalty =
           (transferInMinutes && transferInMinutes > 0 ? transferInMinutes : 0) +
-          (transferOutMinutes && transferOutMinutes > 0 ? transferOutMinutes : 0);
+          (transferOutMinutes && transferOutMinutes > 0
+            ? transferOutMinutes
+            : 0);
 
         const riskPenalty =
           (tightIn || tightOut ? 100 : 0) +
           (longIn || longOut ? 20 : 0) +
           (timeOrderBroken ? 200 : 0);
 
-        const rankScore = (totalDurationMinutes ?? 999999) + waitPenalty + riskPenalty + backbone.baseScore;
+        const rankScore =
+          (totalDurationMinutes ?? 999999) +
+          waitPenalty +
+          riskPenalty +
+          backbone.baseScore;
 
         stitched.push({
-          itineraryId: `${backbone.itineraryId}|${access ? access.segmentId : 'no-access'}|${egress ? egress.segmentId : 'no-egress'}`,
-          country: backbone.country || countryFilter || '',
+          itineraryId: `${backbone.itineraryId}|${access ? access.segmentId : "no-access"}|${egress ? egress.segmentId : "no-egress"}`,
+          country: backbone.country || countryFilter || "",
           score: rankScore,
           totalDurationMinutes,
           flags: {
@@ -285,24 +375,28 @@ function buildItineraries(feeders, backbones, rules, topN, countryFilter) {
             invalid_time_order: timeOrderBroken,
           },
           transferChecks: {
-            inbound: access ? {
-              stationId: backbone.originCanonicalStationId,
-              transferMinutes: transferInMinutes,
-              requiredMinMinutes: originRule.minTransferMinutes,
-              longWaitMinutes: originRule.longWaitMinutes,
-              ruleScope: originRule.ruleScope,
-              ruleId: originRule.ruleId,
-              sourceReference: originRule.sourceReference,
-            } : null,
-            outbound: egress ? {
-              stationId: backbone.destinationCanonicalStationId,
-              transferMinutes: transferOutMinutes,
-              requiredMinMinutes: destinationRule.minTransferMinutes,
-              longWaitMinutes: destinationRule.longWaitMinutes,
-              ruleScope: destinationRule.ruleScope,
-              ruleId: destinationRule.ruleId,
-              sourceReference: destinationRule.sourceReference,
-            } : null,
+            inbound: access
+              ? {
+                  stationId: backbone.originCanonicalStationId,
+                  transferMinutes: transferInMinutes,
+                  requiredMinMinutes: originRule.minTransferMinutes,
+                  longWaitMinutes: originRule.longWaitMinutes,
+                  ruleScope: originRule.ruleScope,
+                  ruleId: originRule.ruleId,
+                  sourceReference: originRule.sourceReference,
+                }
+              : null,
+            outbound: egress
+              ? {
+                  stationId: backbone.destinationCanonicalStationId,
+                  transferMinutes: transferOutMinutes,
+                  requiredMinMinutes: destinationRule.minTransferMinutes,
+                  longWaitMinutes: destinationRule.longWaitMinutes,
+                  ruleScope: destinationRule.ruleScope,
+                  ruleId: destinationRule.ruleId,
+                  sourceReference: destinationRule.sourceReference,
+                }
+              : null,
           },
           stitchedSegments: {
             access: access,
@@ -335,13 +429,23 @@ function main() {
   const rules = normalizeRules(rulesRaw);
 
   if (feeders.length === 0) {
-    throw new Error('No usable feeder segments found in OJP input. Expected feederSegments/segments with canonical station ids and timestamps.');
+    throw new Error(
+      "No usable feeder segments found in OJP input. Expected feederSegments/segments with canonical station ids and timestamps.",
+    );
   }
   if (backbones.length === 0) {
-    throw new Error('No usable backbone segments found in MOTIS input. Expected backbone/backboneItineraries with canonical station ids and timestamps.');
+    throw new Error(
+      "No usable backbone segments found in MOTIS input. Expected backbone/backboneItineraries with canonical station ids and timestamps.",
+    );
   }
 
-  const ranked = buildItineraries(feeders, backbones, rules, args.topN, args.country);
+  const ranked = buildItineraries(
+    feeders,
+    backbones,
+    rules,
+    args.topN,
+    args.country,
+  );
 
   const report = {
     generatedAt: new Date().toISOString(),
@@ -360,7 +464,11 @@ function main() {
   if (args.output) {
     const outputDir = path.dirname(args.output);
     fs.mkdirSync(outputDir, { recursive: true });
-    fs.writeFileSync(args.output, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+    fs.writeFileSync(
+      args.output,
+      `${JSON.stringify(report, null, 2)}\n`,
+      "utf8",
+    );
   }
 
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);

@@ -1,7 +1,7 @@
 function foldText(value) {
-  return String(value || '')
-    .normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '')
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
     .toLowerCase()
     .trim();
 }
@@ -16,7 +16,7 @@ function parseLimit(raw, fallback, min, max) {
 
 function parseCsvLine(line) {
   const result = [];
-  let current = '';
+  let current = "";
   let quoted = false;
 
   for (let i = 0; i < line.length; i += 1) {
@@ -31,9 +31,9 @@ function parseCsvLine(line) {
       }
       continue;
     }
-    if (ch === ',' && !quoted) {
+    if (ch === "," && !quoted) {
       result.push(current);
-      current = '';
+      current = "";
       continue;
     }
     current += ch;
@@ -43,11 +43,16 @@ function parseCsvLine(line) {
 }
 
 function isFiniteCoordinate(lat, lon) {
-  return Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180;
+  return (
+    Number.isFinite(lat) &&
+    Number.isFinite(lon) &&
+    Math.abs(lat) <= 90 &&
+    Math.abs(lon) <= 180
+  );
 }
 
 function parseCoordinateToken(value) {
-  const input = String(value || '').trim();
+  const input = String(value || "").trim();
   if (!input) {
     return null;
   }
@@ -66,7 +71,7 @@ function parseCoordinateToken(value) {
 }
 
 function parseBracketId(value) {
-  const input = String(value || '').trim();
+  const input = String(value || "").trim();
   const match = input.match(/\[(.+?)\]\s*$/);
   if (!match) {
     return null;
@@ -75,10 +80,10 @@ function parseBracketId(value) {
 }
 
 function toTaggedStopId(tag, stopId) {
-  const cleanTag = String(tag || '').trim();
-  const cleanId = String(stopId || '').trim();
+  const cleanTag = String(tag || "").trim();
+  const cleanId = String(stopId || "").trim();
   if (!cleanId) {
-    return '';
+    return "";
   }
   if (!cleanTag) {
     return cleanId;
@@ -91,10 +96,10 @@ function toTaggedStopId(tag, stopId) {
 
 function stationRank(station) {
   let rank = 0;
-  if (station.locationType === '1') {
+  if (station.locationType === "1") {
     rank += 100;
   }
-  if (station.locationType === '' || station.locationType === '0') {
+  if (station.locationType === "" || station.locationType === "0") {
     rank += 20;
   }
   if (station.token) {
@@ -116,13 +121,13 @@ function pickPreferredStation(current, candidate) {
 }
 
 function resolveStationInput(inputValue, profileIndex, datasetTag) {
-  const input = String(inputValue || '').trim();
+  const input = String(inputValue || "").trim();
   if (!input) {
     return {
       input,
       resolved: input,
-      strategy: 'empty',
-      matched: null
+      strategy: "empty",
+      matched: null,
     };
   }
 
@@ -131,8 +136,8 @@ function resolveStationInput(inputValue, profileIndex, datasetTag) {
     return {
       input,
       resolved: coordinate,
-      strategy: 'coordinates',
-      matched: null
+      strategy: "coordinates",
+      matched: null,
     };
   }
 
@@ -140,8 +145,8 @@ function resolveStationInput(inputValue, profileIndex, datasetTag) {
     return {
       input,
       resolved: input,
-      strategy: 'tagged_stop_id',
-      matched: null
+      strategy: "tagged_stop_id",
+      matched: null,
     };
   }
 
@@ -155,18 +160,18 @@ function resolveStationInput(inputValue, profileIndex, datasetTag) {
     profileIndex.byNameFold.get(folded) ||
     null;
 
-  if (station && station.token) {
+  if (station?.token) {
     return {
       input,
       resolved: station.token,
-      strategy: 'station_lookup',
+      strategy: "station_lookup",
       matched: {
         id: station.id,
         name: station.name,
         value: station.value,
         token: station.token,
-        coordinateToken: station.coordinateToken
-      }
+        coordinateToken: station.coordinateToken,
+      },
     };
   }
 
@@ -174,8 +179,8 @@ function resolveStationInput(inputValue, profileIndex, datasetTag) {
     return {
       input,
       resolved: toTaggedStopId(datasetTag, bracketId),
-      strategy: 'bracket_id',
-      matched: null
+      strategy: "bracket_id",
+      matched: null,
     };
   }
 
@@ -183,24 +188,24 @@ function resolveStationInput(inputValue, profileIndex, datasetTag) {
     return {
       input,
       resolved: toTaggedStopId(datasetTag, idCandidate),
-      strategy: 'numeric_stop_id',
-      matched: null
+      strategy: "numeric_stop_id",
+      matched: null,
     };
   }
 
   return {
     input,
     resolved: input,
-    strategy: 'raw',
+    strategy: "raw",
     matched: station
       ? {
           id: station.id,
           name: station.name,
           value: station.value,
           token: station.token,
-          coordinateToken: station.coordinateToken
+          coordinateToken: station.coordinateToken,
         }
-      : null
+      : null,
   };
 }
 
@@ -213,5 +218,5 @@ module.exports = {
   parseBracketId,
   pickPreferredStation,
   resolveStationInput,
-  toTaggedStopId
+  toTaggedStopId,
 };

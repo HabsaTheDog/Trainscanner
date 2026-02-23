@@ -13,6 +13,9 @@ from pathlib import Path
 
 from lxml import etree
 
+MAX_XML_ENTRIES_TO_SCAN = 500
+MAX_XML_ENTRY_BYTES = 1_000_000_000  # 1GB uncompressed guardrail
+
 
 def local_name(tag: str) -> str:
     if "}" in tag:
@@ -153,6 +156,11 @@ def extract(zip_path: Path, writer: csv.DictWriter, args: argparse.Namespace) ->
             if any(token in Path(name).name.lower() for token in ("site", "stop", "station"))
         ]
         entries_to_scan = preferred_entries if preferred_entries else xml_entries
+        if len(entries_to_scan) > MAX_XML_ENTRIES_TO_SCAN:
+            raise RuntimeError(
+                f"Too many XML entries to scan ({len(entries_to_scan)}). "
+                f"Limit is {MAX_XML_ENTRIES_TO_SCAN}."
+            )
 
         if not preferred_entries:
             print(
@@ -164,8 +172,23 @@ def extract(zip_path: Path, writer: csv.DictWriter, args: argparse.Namespace) ->
         for entry in entries_to_scan:
             summary.xml_entries_scanned += 1
             try:
+                entry_info = archive.getinfo(entry)
+                if entry_info.file_size > MAX_XML_ENTRY_BYTES:
+                    raise RuntimeError(
+                        f"XML entry '{entry}' exceeds safety limit ({entry_info.file_size} bytes)"
+                    )
+
                 with archive.open(entry) as handle:
-                    context = etree.iterparse(handle, events=("end",), tag="{*}StopPlace", recover=False, huge_tree=True)
+                    context = etree.iterparse(
+                        handle,
+                        events=("end",),
+                        tag="{*}StopPlace",
+                        recover=False,
+                        huge_tree=True,
+                        resolve_entities=False,
+                        load_dtd=False,
+                        no_network=True,
+                    )
                     for _, elem in context:
                         summary.stop_places_found += 1
                         source_stop_id = clean_text(elem.attrib.get("id"))

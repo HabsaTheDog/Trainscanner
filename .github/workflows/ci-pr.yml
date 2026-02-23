@@ -20,17 +20,32 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Shell and Python syntax checks
         run: |
           bash -n scripts/*.sh scripts/ci/*.sh scripts/data/*.sh scripts/qa/*.sh
           python3 -m py_compile scripts/qa/export-canonical-gtfs.py scripts/data/netex_extract_stops.py
+
+      - name: Install Root Dependencies
+        run: npm ci
+
+      - name: Install Python Dependencies
+        run: pip install -r services/ai-scoring/requirements.txt
+
+      - name: Project Root Quality Checks
+        run: npm run check
+
+      - name: Dependency Security Auditing
+        run: |
+          npm audit --audit-level=high
+          cargo install cargo-audit
+          cargo audit --manifest-path workers/rust-ingestion/Cargo.toml
 
       - name: Validate config contracts
         run: scripts/validate-config.sh

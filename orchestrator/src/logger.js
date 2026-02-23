@@ -1,8 +1,8 @@
-const fs = require('node:fs');
-const path = require('node:path');
+const fs = require("node:fs");
+const path = require("node:path");
 
 function normalizeMeta(meta) {
-  if (!meta || typeof meta !== 'object') {
+  if (!meta || typeof meta !== "object") {
     return {};
   }
 
@@ -11,7 +11,7 @@ function normalizeMeta(meta) {
     if (value instanceof Error) {
       next[key] = {
         name: value.name,
-        message: value.message
+        message: value.message,
       };
       continue;
     }
@@ -26,7 +26,7 @@ function createLogger(logFilePath, baseMeta = {}) {
   function log(level, message, meta = {}) {
     const mergedMeta = {
       ...rootMeta,
-      ...normalizeMeta(meta)
+      ...normalizeMeta(meta),
     };
 
     const entry = {
@@ -38,13 +38,14 @@ function createLogger(logFilePath, baseMeta = {}) {
       correlationId: mergedMeta.correlationId || null,
       errorCode: mergedMeta.errorCode || null,
       latencyMs:
-        Number.isFinite(mergedMeta.latencyMs) || Number.isFinite(mergedMeta.latency)
+        Number.isFinite(mergedMeta.latencyMs) ||
+        Number.isFinite(mergedMeta.latency)
           ? Number(mergedMeta.latencyMs ?? mergedMeta.latency)
           : null,
-      ...mergedMeta
+      ...mergedMeta,
     };
     const line = JSON.stringify(entry);
-    if (level === 'error') {
+    if (level === "error") {
       console.error(line);
     } else {
       console.log(line);
@@ -52,27 +53,29 @@ function createLogger(logFilePath, baseMeta = {}) {
 
     try {
       fs.mkdirSync(path.dirname(logFilePath), { recursive: true });
-      fs.appendFileSync(logFilePath, line + '\n', 'utf8');
+      fs.appendFileSync(logFilePath, `${line}\n`, "utf8");
     } catch (err) {
-      console.error(JSON.stringify({
-        ts: new Date().toISOString(),
-        level: 'error',
-        message: 'failed to write log file',
-        error: err.message
-      }));
+      console.error(
+        JSON.stringify({
+          ts: new Date().toISOString(),
+          level: "error",
+          message: "failed to write log file",
+          error: err.message,
+        }),
+      );
     }
   }
 
   const logger = {
-    info: (message, meta) => log('info', message, meta),
-    warn: (message, meta) => log('warn', message, meta),
-    error: (message, meta) => log('error', message, meta),
+    info: (message, meta) => log("info", message, meta),
+    warn: (message, meta) => log("warn", message, meta),
+    error: (message, meta) => log("error", message, meta),
     child(meta = {}) {
       return createLogger(logFilePath, {
         ...rootMeta,
-        ...normalizeMeta(meta)
+        ...normalizeMeta(meta),
       });
-    }
+    },
   };
 
   return logger;

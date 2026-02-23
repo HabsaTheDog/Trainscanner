@@ -1,0 +1,10 @@
+/home/alvaroschroll/Dokumente/Development/Trainscanner/workers/rust-ingestion/target/debug/deps/fixedbitset-e6635f77ca715753.d: /home/alvaroschroll/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fixedbitset-0.5.7/src/lib.rs /home/alvaroschroll/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fixedbitset-0.5.7/src/block/mod.rs /home/alvaroschroll/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fixedbitset-0.5.7/src/block/sse2.rs /home/alvaroschroll/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fixedbitset-0.5.7/src/range.rs
+
+/home/alvaroschroll/Dokumente/Development/Trainscanner/workers/rust-ingestion/target/debug/deps/libfixedbitset-e6635f77ca715753.rlib: /home/alvaroschroll/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fixedbitset-0.5.7/src/lib.rs /home/alvaroschroll/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fixedbitset-0.5.7/src/block/mod.rs /home/alvaroschroll/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fixedbitset-0.5.7/src/block/sse2.rs /home/alvaroschroll/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fixedbitset-0.5.7/src/range.rs
+
+/home/alvaroschroll/Dokumente/Development/Trainscanner/workers/rust-ingestion/target/debug/deps/libfixedbitset-e6635f77ca715753.rmeta: /home/alvaroschroll/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fixedbitset-0.5.7/src/lib.rs /home/alvaroschroll/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fixedbitset-0.5.7/src/block/mod.rs /home/alvaroschroll/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fixedbitset-0.5.7/src/block/sse2.rs /home/alvaroschroll/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fixedbitset-0.5.7/src/range.rs
+
+/home/alvaroschroll/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fixedbitset-0.5.7/src/lib.rs:
+/home/alvaroschroll/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fixedbitset-0.5.7/src/block/mod.rs:
+/home/alvaroschroll/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fixedbitset-0.5.7/src/block/sse2.rs:
+/home/alvaroschroll/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fixedbitset-0.5.7/src/range.rs:

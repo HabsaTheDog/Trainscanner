@@ -40,8 +40,6 @@ done
 
 [[ "$AS_OF" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || fail "Invalid --as-of date: $AS_OF"
 
-RUN_INGEST_ID="11111111-1111-1111-1111-111111111111"
-RUN_CANONICAL_ID="22222222-2222-2222-2222-222222222222"
 SOURCE_ID="fixture_de_netex"
 COUNTRY="DE"
 PROVIDER="fixture_provider"

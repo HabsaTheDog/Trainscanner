@@ -3,24 +3,24 @@ name: Canonical Export QA Check
 on:
   push:
     paths:
-      - '.github/workflows/qa-export-check.yml'
-      - 'scripts/qa/**'
-      - 'scripts/data/lib-db.sh'
-      - 'scripts/data/db-migrate.sh'
-      - 'db/migrations/**'
-      - 'config/gtfs-profiles.json'
-      - 'orchestrator/src/**'
-      - 'orchestrator/package.json'
+      - ".github/workflows/qa-export-check.yml"
+      - "scripts/qa/**"
+      - "scripts/data/lib-db.sh"
+      - "scripts/data/db-migrate.sh"
+      - "db/migrations/**"
+      - "config/gtfs-profiles.json"
+      - "orchestrator/src/**"
+      - "orchestrator/package.json"
   pull_request:
     paths:
-      - '.github/workflows/qa-export-check.yml'
-      - 'scripts/qa/**'
-      - 'scripts/data/lib-db.sh'
-      - 'scripts/data/db-migrate.sh'
-      - 'db/migrations/**'
-      - 'config/gtfs-profiles.json'
-      - 'orchestrator/src/**'
-      - 'orchestrator/package.json'
+      - ".github/workflows/qa-export-check.yml"
+      - "scripts/qa/**"
+      - "scripts/data/lib-db.sh"
+      - "scripts/data/db-migrate.sh"
+      - "db/migrations/**"
+      - "config/gtfs-profiles.json"
+      - "orchestrator/src/**"
+      - "orchestrator/package.json"
   workflow_dispatch:
 
 jobs:
@@ -39,12 +39,12 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Script + syntax checks
         run: |

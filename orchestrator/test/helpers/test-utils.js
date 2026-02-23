@@ -1,11 +1,11 @@
-const fs = require('node:fs/promises');
-const fsSync = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const http = require('node:http');
-const { spawn } = require('node:child_process');
+const fs = require("node:fs/promises");
+const fsSync = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const http = require("node:http");
+const { spawn } = require("node:child_process");
 
-async function mkTempDir(prefix = 'trainscanner-test-') {
+async function mkTempDir(prefix = "trainscanner-test-") {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
 }
 
@@ -27,19 +27,19 @@ async function waitFor(checkFn, options = {}) {
 
 async function writeJson(filePath, payload) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, JSON.stringify(payload, null, 2) + '\n', 'utf8');
+  await fs.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
 }
 
 function startHttpServer(handler) {
   const server = http.createServer(handler);
   return new Promise((resolve, reject) => {
-    server.on('error', reject);
-    server.listen(0, '127.0.0.1', () => {
+    server.on("error", reject);
+    server.listen(0, "127.0.0.1", () => {
       const address = server.address();
       resolve({
         server,
         port: address.port,
-        baseUrl: `http://127.0.0.1:${address.port}`
+        baseUrl: `http://127.0.0.1:${address.port}`,
       });
     });
   });
@@ -57,18 +57,18 @@ function startNodeProcess(scriptPath, options = {}) {
     cwd: options.cwd,
     env: {
       ...process.env,
-      ...(options.env || {})
+      ...(options.env || {}),
     },
-    stdio: ['ignore', 'pipe', 'pipe']
+    stdio: ["ignore", "pipe", "pipe"],
   });
 
-  let stdout = '';
-  let stderr = '';
-  child.stdout.on('data', (chunk) => {
-    stdout += chunk.toString('utf8');
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk.toString("utf8");
   });
-  child.stderr.on('data', (chunk) => {
-    stderr += chunk.toString('utf8');
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk.toString("utf8");
   });
 
   return {
@@ -80,11 +80,11 @@ function startNodeProcess(scriptPath, options = {}) {
       if (child.exitCode !== null) {
         return;
       }
-      child.kill('SIGTERM');
+      child.kill("SIGTERM");
       await new Promise((resolve) => {
-        child.once('exit', () => resolve());
+        child.once("exit", () => resolve());
       });
-    }
+    },
   };
 }
 
@@ -102,7 +102,7 @@ async function httpJson(url, options = {}) {
   return {
     status: response.status,
     headers: response.headers,
-    body
+    body,
   };
 }
 
@@ -152,12 +152,14 @@ with zipfile.ZipFile(r'''${zipPath}''', 'w') as zf:
     zf.writestr(name, out.getvalue())
 `;
   await new Promise((resolve, reject) => {
-    const proc = spawn('python3', ['-c', script], { stdio: ['ignore', 'pipe', 'pipe'] });
-    let stderr = '';
-    proc.stderr.on('data', (chunk) => {
-      stderr += chunk.toString('utf8');
+    const proc = spawn("python3", ["-c", script], {
+      stdio: ["ignore", "pipe", "pipe"],
     });
-    proc.on('exit', (code) => {
+    let stderr = "";
+    proc.stderr.on("data", (chunk) => {
+      stderr += chunk.toString("utf8");
+    });
+    proc.on("exit", (code) => {
       if (code === 0 && fsSync.existsSync(zipPath)) {
         resolve();
       } else {
@@ -175,5 +177,5 @@ module.exports = {
   startNodeProcess,
   stopHttpServer,
   waitFor,
-  writeJson
+  writeJson,
 };

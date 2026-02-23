@@ -1,25 +1,27 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
+const test = require("node:test");
+const assert = require("node:assert/strict");
 
-const { deterministicObjectHash } = require('../../src/domains/export/contracts');
+const {
+  deterministicObjectHash,
+} = require("../../src/domains/export/contracts");
 
-test('deterministicObjectHash is stable for key order permutations', () => {
+test("deterministicObjectHash is stable for key order permutations", () => {
   const a = {
-    profile: 'p1',
+    profile: "p1",
     rowCounts: {
       stops: 2,
-      trips: 3
+      trips: 3,
     },
-    asOf: '2026-02-19'
+    asOf: "2026-02-19",
   };
 
   const b = {
-    asOf: '2026-02-19',
+    asOf: "2026-02-19",
     rowCounts: {
       trips: 3,
-      stops: 2
+      stops: 2,
     },
-    profile: 'p1'
+    profile: "p1",
   };
 
   assert.equal(deterministicObjectHash(a), deterministicObjectHash(b));

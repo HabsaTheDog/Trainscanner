@@ -1,36 +1,45 @@
-const { runLegacyDataScript, buildIdempotencyKey, createPipelineLogger } = require('../../core/pipeline-runner');
-const { createPostgisClient } = require('../../data/postgis/client');
-const { createPipelineJobsRepo } = require('../../data/postgis/repositories/pipeline-jobs-repo');
-const { createJobOrchestrator } = require('../../core/job-orchestrator');
+const {
+  runLegacyDataScript,
+  buildIdempotencyKey,
+  createPipelineLogger,
+} = require("../../core/pipeline-runner");
+const { createPostgisClient } = require("../../data/postgis/client");
+const {
+  createPipelineJobsRepo,
+} = require("../../data/postgis/repositories/pipeline-jobs-repo");
+const { createJobOrchestrator } = require("../../core/job-orchestrator");
 
 function createIngestService(deps = {}) {
   const runScript = deps.runLegacyDataScript || runLegacyDataScript;
   const createClient = deps.createPostgisClient || createPostgisClient;
   const createJobsRepo = deps.createPipelineJobsRepo || createPipelineJobsRepo;
-  const createOrchestrator = deps.createJobOrchestrator || createJobOrchestrator;
+  const createOrchestrator =
+    deps.createJobOrchestrator || createJobOrchestrator;
 
   return {
     async ingestNetex(options = {}) {
       const rootDir = options.rootDir || process.cwd();
       const args = Array.isArray(options.args) ? options.args : [];
-      const runId = options.runId || '';
+      const runId = options.runId || "";
       const jobOrchestrationEnabled =
         options.jobOrchestrationEnabled !== undefined
           ? Boolean(options.jobOrchestrationEnabled)
-          : String(process.env.PIPELINE_JOB_ORCHESTRATION_ENABLED || 'true').toLowerCase() !== 'false';
-      const helpRequested = args.includes('--help') || args.includes('-h');
+          : String(
+              process.env.PIPELINE_JOB_ORCHESTRATION_ENABLED || "true",
+            ).toLowerCase() !== "false";
+      const helpRequested = args.includes("--help") || args.includes("-h");
 
       const runScriptCall = () =>
         runScript({
           rootDir,
           runId,
           args,
-          service: 'ingest.netex',
-          scriptFile: 'ingest-netex.impl.sh',
-          errorCode: 'INGEST_FAILED',
+          service: "ingest.netex",
+          scriptFile: "ingest-netex.impl.sh",
+          errorCode: "INGEST_FAILED",
           runCommand: options.runCommand,
           logger: options.logger,
-          loggerFactory: options.loggerFactory
+          loggerFactory: options.loggerFactory,
         });
 
       if (!jobOrchestrationEnabled || helpRequested) {
@@ -42,30 +51,37 @@ function createIngestService(deps = {}) {
       const jobsRepo = createJobsRepo(client);
       const logger =
         options.logger ||
-        createPipelineLogger(rootDir, 'ingest.netex', runId || 'job');
+        createPipelineLogger(rootDir, "ingest.netex", runId || "job");
       const jobOrchestrator = createOrchestrator({
         jobsRepo,
-        logger
+        logger,
       });
 
       return jobOrchestrator.runJob({
-        jobType: 'ingest.netex',
-        idempotencyKey: options.idempotencyKey || buildIdempotencyKey('ingest.netex', args),
+        jobType: "ingest.netex",
+        idempotencyKey:
+          options.idempotencyKey || buildIdempotencyKey("ingest.netex", args),
         runContext: {
-          args
+          args,
         },
-        maxAttempts: Number.parseInt(process.env.PIPELINE_JOB_MAX_ATTEMPTS || '3', 10),
-        maxConcurrent: Number.parseInt(process.env.PIPELINE_JOB_MAX_CONCURRENT || '1', 10),
+        maxAttempts: Number.parseInt(
+          process.env.PIPELINE_JOB_MAX_ATTEMPTS || "3",
+          10,
+        ),
+        maxConcurrent: Number.parseInt(
+          process.env.PIPELINE_JOB_MAX_CONCURRENT || "1",
+          10,
+        ),
         execute: async ({ updateCheckpoint }) => {
           const result = await runScriptCall();
           await updateCheckpoint({
             completedAt: new Date().toISOString(),
-            script: 'ingest-netex.impl.sh'
+            script: "ingest-netex.impl.sh",
           });
           return result;
-        }
+        },
       });
-    }
+    },
   };
 }
 
@@ -77,5 +93,5 @@ function ingestNetex(options) {
 
 module.exports = {
   createIngestService,
-  ingestNetex
+  ingestNetex,
 };

@@ -1,20 +1,26 @@
-const { AppError } = require('../../../core/errors');
-const { validateOrThrow } = require('../../../core/schema');
-const { extractJsonLine } = require('./canonical-stations-repo');
+const { AppError } = require("../../../core/errors");
+const { validateOrThrow } = require("../../../core/schema");
+const { extractJsonLine } = require("./canonical-stations-repo");
 
 const REVIEW_QUEUE_SUMMARY_SCHEMA = {
-  type: 'object',
-  required: ['scopeTag', 'detectedIssues', 'openItems', 'confirmedItems', 'resolvedItems'],
+  type: "object",
+  required: [
+    "scopeTag",
+    "detectedIssues",
+    "openItems",
+    "confirmedItems",
+    "resolvedItems",
+  ],
   properties: {
-    scopeCountry: { type: 'string' },
-    scopeAsOf: { type: 'string' },
-    scopeTag: { type: 'string', minLength: 1 },
-    detectedIssues: { type: 'integer', minimum: 0 },
-    openItems: { type: 'integer', minimum: 0 },
-    confirmedItems: { type: 'integer', minimum: 0 },
-    resolvedItems: { type: 'integer', minimum: 0 }
+    scopeCountry: { type: "string" },
+    scopeAsOf: { type: "string" },
+    scopeTag: { type: "string", minLength: 1 },
+    detectedIssues: { type: "integer", minimum: 0 },
+    openItems: { type: "integer", minimum: 0 },
+    confirmedItems: { type: "integer", minimum: 0 },
+    resolvedItems: { type: "integer", minimum: 0 },
   },
-  additionalProperties: true
+  additionalProperties: true,
 };
 
 const BUILD_REVIEW_QUEUE_SQL = `
@@ -302,17 +308,17 @@ function createReviewQueueRepo(client) {
   return {
     async buildReviewQueue(scope) {
       const result = await client.runScript(BUILD_REVIEW_QUEUE_SQL, {
-        country_filter: scope.country || '',
-        as_of: scope.asOf || '',
+        country_filter: scope.country || "",
+        as_of: scope.asOf || "",
         geo_threshold_m: String(scope.geoThresholdMeters || 3000),
-        close_missing: scope.closeMissing === false ? 'false' : 'true'
+        close_missing: scope.closeMissing === false ? "false" : "true",
       });
 
       const line = extractJsonLine(result.stdout);
       if (!line) {
         throw new AppError({
-          code: 'REVIEW_QUEUE_BUILD_FAILED',
-          message: 'Review queue build did not return summary JSON'
+          code: "REVIEW_QUEUE_BUILD_FAILED",
+          message: "Review queue build did not return summary JSON",
         });
       }
 
@@ -321,15 +327,15 @@ function createReviewQueueRepo(client) {
         parsed = JSON.parse(line);
       } catch (err) {
         throw new AppError({
-          code: 'REVIEW_QUEUE_BUILD_FAILED',
-          message: 'Review queue build returned invalid summary JSON',
-          cause: err
+          code: "REVIEW_QUEUE_BUILD_FAILED",
+          message: "Review queue build returned invalid summary JSON",
+          cause: err,
         });
       }
 
       validateOrThrow(parsed, REVIEW_QUEUE_SUMMARY_SCHEMA, {
-        code: 'REVIEW_QUEUE_BUILD_FAILED',
-        message: 'Review queue build summary failed schema validation'
+        code: "REVIEW_QUEUE_BUILD_FAILED",
+        message: "Review queue build summary failed schema validation",
       });
 
       return parsed;
@@ -353,23 +359,31 @@ function createReviewQueueRepo(client) {
             );
         `,
         {
-          country: scope.country || '',
-          all_scopes: scope.allScopes ? 'true' : 'false',
-          scope_tag: scope.scopeTag || 'latest'
-        }
+          country: scope.country || "",
+          all_scopes: scope.allScopes ? "true" : "false",
+          scope_tag: scope.scopeTag || "latest",
+        },
       );
 
       const metrics = {
         totalItems: Number.parseInt(String(row?.total_items || 0), 10) || 0,
         openItems: Number.parseInt(String(row?.open_items || 0), 10) || 0,
-        confirmedItems: Number.parseInt(String(row?.confirmed_items || 0), 10) || 0,
-        dismissedItems: Number.parseInt(String(row?.dismissed_items || 0), 10) || 0,
-        resolvedItems: Number.parseInt(String(row?.resolved_items || 0), 10) || 0,
-        autoResolvedItems: Number.parseInt(String(row?.auto_resolved_items || 0), 10) || 0
+        confirmedItems:
+          Number.parseInt(String(row?.confirmed_items || 0), 10) || 0,
+        dismissedItems:
+          Number.parseInt(String(row?.dismissed_items || 0), 10) || 0,
+        resolvedItems:
+          Number.parseInt(String(row?.resolved_items || 0), 10) || 0,
+        autoResolvedItems:
+          Number.parseInt(String(row?.auto_resolved_items || 0), 10) || 0,
       };
 
-      const reviewed = metrics.dismissedItems + metrics.resolvedItems + metrics.autoResolvedItems;
-      metrics.reviewCoveragePercent = metrics.totalItems > 0 ? (reviewed / metrics.totalItems) * 100 : 0;
+      const reviewed =
+        metrics.dismissedItems +
+        metrics.resolvedItems +
+        metrics.autoResolvedItems;
+      metrics.reviewCoveragePercent =
+        metrics.totalItems > 0 ? (reviewed / metrics.totalItems) * 100 : 0;
       return metrics;
     },
 
@@ -387,10 +401,10 @@ function createReviewQueueRepo(client) {
           ORDER BY issue_type, status;
         `,
         {
-          country: scope.country || '',
-          all_scopes: scope.allScopes ? 'true' : 'false',
-          scope_tag: scope.scopeTag || 'latest'
-        }
+          country: scope.country || "",
+          all_scopes: scope.allScopes ? "true" : "false",
+          scope_tag: scope.scopeTag || "latest",
+        },
       );
     },
 
@@ -421,11 +435,11 @@ function createReviewQueueRepo(client) {
           LIMIT NULLIF(:'limit_rows', '')::integer;
         `,
         {
-          country: scope.country || '',
-          all_scopes: scope.allScopes ? 'true' : 'false',
-          scope_tag: scope.scopeTag || 'latest',
-          limit_rows: String(scope.limitRows || 20)
-        }
+          country: scope.country || "",
+          all_scopes: scope.allScopes ? "true" : "false",
+          scope_tag: scope.scopeTag || "latest",
+          limit_rows: String(scope.limitRows || 20),
+        },
       );
     },
 
@@ -453,17 +467,17 @@ function createReviewQueueRepo(client) {
           LIMIT NULLIF(:'limit_rows', '')::integer;
         `,
         {
-          country: scope.country || '',
-          all_scopes: scope.allScopes ? 'true' : 'false',
-          scope_tag: scope.scopeTag || 'latest',
-          limit_rows: String(scope.limitRows || 20)
-        }
+          country: scope.country || "",
+          all_scopes: scope.allScopes ? "true" : "false",
+          scope_tag: scope.scopeTag || "latest",
+          limit_rows: String(scope.limitRows || 20),
+        },
       );
-    }
+    },
   };
 }
 
 module.exports = {
   BUILD_REVIEW_QUEUE_SQL,
-  createReviewQueueRepo
+  createReviewQueueRepo,
 };

@@ -1,83 +1,112 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const path = require('node:path');
-const { execFile } = require('node:child_process');
-const { promisify } = require('node:util');
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const path = require("node:path");
+const { execFile } = require("node:child_process");
+const { promisify } = require("node:util");
 
 const execFileAsync = promisify(execFile);
 
 const cliCases = [
   {
-    file: 'fetch-dach-sources.js',
-    expectedUsage: /Usage: scripts\/data\/fetch-dach-sources\.sh/
+    file: "fetch-dach-sources.js",
+    expectedUsage: /Usage: scripts\/data\/fetch-dach-sources\.sh/,
   },
   {
-    file: 'verify-dach-sources.js',
-    expectedUsage: /Usage: scripts\/data\/verify-dach-sources\.sh/
+    file: "verify-dach-sources.js",
+    expectedUsage: /Usage: scripts\/data\/verify-dach-sources\.sh/,
   },
   {
-    file: 'ingest-netex.js',
-    expectedUsage: /Usage: scripts\/data\/ingest-netex\.sh/
+    file: "ingest-netex.js",
+    expectedUsage: /Usage: scripts\/data\/ingest-netex\.sh/,
   },
   {
-    file: 'build-canonical-stations.js',
-    expectedUsage: /Usage: scripts\/data\/build-canonical-stations\.sh/
+    file: "build-canonical-stations.js",
+    expectedUsage: /Usage: scripts\/data\/build-canonical-stations\.sh/,
   },
   {
-    file: 'build-review-queue.js',
-    expectedUsage: /Usage: scripts\/data\/build-review-queue\.sh/
+    file: "build-review-queue.js",
+    expectedUsage: /Usage: scripts\/data\/build-review-queue\.sh/,
   },
   {
-    file: 'report-review-queue.js',
-    expectedUsage: /Usage: scripts\/data\/report-review-queue\.sh/
+    file: "report-review-queue.js",
+    expectedUsage: /Usage: scripts\/data\/report-review-queue\.sh/,
   },
   {
-    file: 'refresh-station-review.js',
-    expectedUsage: /Usage: scripts\/data\/refresh-station-review\.sh/
-  }
+    file: "refresh-station-review.js",
+    expectedUsage: /Usage: scripts\/data\/refresh-station-review\.sh/,
+  },
 ];
 
 for (const cliCase of cliCases) {
   test(`${cliCase.file} exposes script wrapper --help contract`, async () => {
-    const repoRoot = path.resolve(__dirname, '../../..');
-    const cliPath = path.join(repoRoot, 'orchestrator', 'src', 'cli', cliCase.file);
+    const repoRoot = path.resolve(__dirname, "../../..");
+    const cliPath = path.join(
+      repoRoot,
+      "orchestrator",
+      "src",
+      "cli",
+      cliCase.file,
+    );
 
-    const result = await execFileAsync(process.execPath, [cliPath, '--root', repoRoot, '--help'], {
-      cwd: repoRoot
-    });
+    const result = await execFileAsync(
+      process.execPath,
+      [cliPath, "--root", repoRoot, "--help"],
+      {
+        cwd: repoRoot,
+      },
+    );
 
     assert.match(result.stdout, cliCase.expectedUsage);
   });
 }
 
-test('pipeline CLI returns machine-readable error payload for invalid wrapper args', async () => {
-  const repoRoot = path.resolve(__dirname, '../../..');
-  const cliPath = path.join(repoRoot, 'orchestrator', 'src', 'cli', 'fetch-dach-sources.js');
+test("pipeline CLI returns machine-readable error payload for invalid wrapper args", async () => {
+  const repoRoot = path.resolve(__dirname, "../../..");
+  const cliPath = path.join(
+    repoRoot,
+    "orchestrator",
+    "src",
+    "cli",
+    "fetch-dach-sources.js",
+  );
 
   await assert.rejects(
-    execFileAsync(process.execPath, [cliPath, '--root'], {
-      cwd: repoRoot
+    execFileAsync(process.execPath, [cliPath, "--root"], {
+      cwd: repoRoot,
     }),
     (err) => {
       assert.match(err.stderr, /errorCode=INVALID_REQUEST/);
       assert.match(err.stderr, /"errorCode":"INVALID_REQUEST"/);
       return true;
-    }
+    },
   );
 });
 
-test('refresh station review CLI validates selected steps', async () => {
-  const repoRoot = path.resolve(__dirname, '../../..');
-  const cliPath = path.join(repoRoot, 'orchestrator', 'src', 'cli', 'refresh-station-review.js');
+test("refresh station review CLI validates selected steps", async () => {
+  const repoRoot = path.resolve(__dirname, "../../..");
+  const cliPath = path.join(
+    repoRoot,
+    "orchestrator",
+    "src",
+    "cli",
+    "refresh-station-review.js",
+  );
 
   await assert.rejects(
-    execFileAsync(process.execPath, [cliPath, '--root', repoRoot, '--only', 'bad-step'], {
-      cwd: repoRoot
-    }),
+    execFileAsync(
+      process.execPath,
+      [cliPath, "--root", repoRoot, "--only", "bad-step"],
+      {
+        cwd: repoRoot,
+      },
+    ),
     (err) => {
       assert.match(err.stderr, /errorCode=INVALID_REQUEST/);
-      assert.match(err.stderr, /must be one of fetch\|ingest\|canonical\|review-queue/);
+      assert.match(
+        err.stderr,
+        /must be one of fetch\|ingest\|canonical\|review-queue/,
+      );
       return true;
-    }
+    },
   );
 });

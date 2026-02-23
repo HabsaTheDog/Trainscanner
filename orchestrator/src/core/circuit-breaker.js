@@ -1,9 +1,13 @@
-const { AppError } = require('./errors');
+const { AppError } = require("./errors");
 
 function createCircuitBreaker(options = {}) {
-  const name = String(options.name || 'circuit').trim();
-  const failureThreshold = Number.isFinite(options.failureThreshold) ? Math.max(1, options.failureThreshold) : 3;
-  const cooldownMs = Number.isFinite(options.cooldownMs) ? Math.max(100, options.cooldownMs) : 15_000;
+  const name = String(options.name || "circuit").trim();
+  const failureThreshold = Number.isFinite(options.failureThreshold)
+    ? Math.max(1, options.failureThreshold)
+    : 3;
+  const cooldownMs = Number.isFinite(options.cooldownMs)
+    ? Math.max(100, options.cooldownMs)
+    : 15_000;
 
   let failureCount = 0;
   let openUntil = 0;
@@ -15,14 +19,14 @@ function createCircuitBreaker(options = {}) {
   async function execute(fn) {
     if (isOpen()) {
       throw new AppError({
-        code: 'CIRCUIT_OPEN',
+        code: "CIRCUIT_OPEN",
         message: `Circuit '${name}' is open`,
         details: {
           circuit: name,
           openUntil: new Date(openUntil).toISOString(),
           failureThreshold,
-          cooldownMs
-        }
+          cooldownMs,
+        },
       });
     }
 
@@ -47,12 +51,12 @@ function createCircuitBreaker(options = {}) {
         name,
         failureCount,
         openUntil,
-        isOpen: isOpen()
+        isOpen: isOpen(),
       };
-    }
+    },
   };
 }
 
 module.exports = {
-  createCircuitBreaker
+  createCircuitBreaker,
 };

@@ -19,18 +19,20 @@ const ERROR_DEFINITIONS = {
   JOB_CONFLICT: { statusCode: 409 },
   JOB_BACKPRESSURE: { statusCode: 429 },
   CIRCUIT_OPEN: { statusCode: 503 },
-  INTERNAL_ERROR: { statusCode: 500 }
+  INTERNAL_ERROR: { statusCode: 500 },
 };
 
 class AppError extends Error {
   constructor({ code, message, statusCode, details, cause } = {}) {
-    super(message || 'Unknown error');
-    this.name = 'AppError';
-    this.code = code || 'INTERNAL_ERROR';
+    super(message || "Unknown error");
+    this.name = "AppError";
+    this.code = code || "INTERNAL_ERROR";
     this.statusCode =
       Number.isInteger(statusCode) && statusCode > 0
         ? statusCode
-        : (ERROR_DEFINITIONS[this.code] && ERROR_DEFINITIONS[this.code].statusCode) || 500;
+        : (ERROR_DEFINITIONS[this.code] &&
+            ERROR_DEFINITIONS[this.code].statusCode) ||
+          500;
     this.details = details || null;
     if (cause) {
       this.cause = cause;
@@ -40,21 +42,31 @@ class AppError extends Error {
 }
 
 function isAppError(err) {
-  return Boolean(err && typeof err === 'object' && err.name === 'AppError' && typeof err.code === 'string');
+  return Boolean(
+    err &&
+      typeof err === "object" &&
+      err.name === "AppError" &&
+      typeof err.code === "string",
+  );
 }
 
-function toAppError(err, fallbackCode = 'INTERNAL_ERROR', fallbackMessage = 'Internal server error') {
+function toAppError(
+  err,
+  fallbackCode = "INTERNAL_ERROR",
+  fallbackMessage = "Internal server error",
+) {
   if (isAppError(err)) {
     return err;
   }
 
-  const message = err && err.message ? err.message : fallbackMessage;
-  const statusCode = err && Number.isInteger(err.statusCode) ? err.statusCode : undefined;
+  const message = err?.message ? err.message : fallbackMessage;
+  const statusCode =
+    err && Number.isInteger(err.statusCode) ? err.statusCode : undefined;
   return new AppError({
     code: fallbackCode,
     message,
     statusCode,
-    cause: err
+    cause: err,
   });
 }
 
@@ -63,14 +75,18 @@ function errorToPayload(err, options = {}) {
   const appErr = toAppError(err);
   const payload = {
     error: appErr.message,
-    errorCode: appErr.code
+    errorCode: appErr.code,
   };
-  if (includeDetails && appErr.details !== null && appErr.details !== undefined) {
+  if (
+    includeDetails &&
+    appErr.details !== null &&
+    appErr.details !== undefined
+  ) {
     payload.details = appErr.details;
   }
   return {
     statusCode: appErr.statusCode,
-    payload
+    payload,
   };
 }
 
@@ -81,7 +97,9 @@ function assert(condition, errorLike) {
   if (errorLike instanceof Error) {
     throw errorLike;
   }
-  throw new AppError(errorLike || { code: 'INTERNAL_ERROR', message: 'Assertion failed' });
+  throw new AppError(
+    errorLike || { code: "INTERNAL_ERROR", message: "Assertion failed" },
+  );
 }
 
 module.exports = {
@@ -90,5 +108,5 @@ module.exports = {
   assert,
   errorToPayload,
   isAppError,
-  toAppError
+  toAppError,
 };

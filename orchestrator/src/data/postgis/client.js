@@ -1,26 +1,20 @@
-const { execFile } = require('node:child_process');
-const { promisify } = require('node:util');
-const path = require('node:path');
+const { Pool } = require("pg");
+const fs = require("node:fs");
+const { pipeline } = require("node:stream/promises");
+const { from: copyFrom } = require("pg-copy-streams");
+const path = require("node:path");
 
-const { AppError } = require('../../core/errors');
-
-const execFileAsync = promisify(execFile);
-
-function commandExists(cmd) {
-  return execFileAsync('bash', ['-lc', `command -v ${cmd}`], { maxBuffer: 1024 * 1024 })
-    .then(() => true)
-    .catch(() => false);
-}
+const { AppError } = require("../../core/errors");
 
 function parseBool(value, fallback) {
-  if (value === undefined || value === null || value === '') {
+  if (value === undefined || value === null || value === "") {
     return fallback;
   }
-  return String(value).toLowerCase() === 'true';
+  return String(value).toLowerCase() === "true";
 }
 
 function toInt(value, fallback) {
-  if (value === undefined || value === null || value === '') {
+  if (value === undefined || value === null || value === "") {
     return fallback;
   }
   const parsed = Number.parseInt(String(value), 10);
@@ -31,23 +25,29 @@ function resolveConnectionConfig(options = {}) {
   const env = { ...process.env, ...(options.env || {}) };
 
   const rootDir = path.resolve(options.rootDir || process.cwd());
-  const mode = String(options.mode || env.CANONICAL_DB_MODE || 'auto').trim();
+  const mode = String(options.mode || env.CANONICAL_DB_MODE || "auto").trim();
 
   const config = {
     rootDir,
     mode,
-    url: env.CANONICAL_DB_URL || env.DATABASE_URL || '',
-    host: env.CANONICAL_DB_HOST || env.PGHOST || 'localhost',
-    port: env.CANONICAL_DB_PORT || env.PGPORT || '5432',
-    user: env.CANONICAL_DB_USER || env.PGUSER || 'trainscanner',
-    database: env.CANONICAL_DB_NAME || env.PGDATABASE || 'trainscanner',
-    password: env.CANONICAL_DB_PASSWORD || env.PGPASSWORD || 'trainscanner',
-    dockerProfile: env.CANONICAL_DB_DOCKER_PROFILE || 'dach-data',
-    dockerService: env.CANONICAL_DB_DOCKER_SERVICE || 'postgis',
-    readyTimeoutSec: toInt(options.readyTimeoutSec || env.CANONICAL_DB_READY_TIMEOUT_SEC, 90),
-    connectTimeoutSec: toInt(options.connectTimeoutSec || env.CANONICAL_DB_CONNECT_TIMEOUT_SEC, 3),
+    url: env.CANONICAL_DB_URL || env.DATABASE_URL || "",
+    host: env.CANONICAL_DB_HOST || env.PGHOST || "localhost",
+    port: env.CANONICAL_DB_PORT || env.PGPORT || "5432",
+    user: env.CANONICAL_DB_USER || env.PGUSER || "trainscanner",
+    database: env.CANONICAL_DB_NAME || env.PGDATABASE || "trainscanner",
+    password: env.CANONICAL_DB_PASSWORD || env.PGPASSWORD || "trainscanner",
+    dockerProfile: env.CANONICAL_DB_DOCKER_PROFILE || "dach-data",
+    dockerService: env.CANONICAL_DB_DOCKER_SERVICE || "postgis",
+    readyTimeoutSec: toInt(
+      options.readyTimeoutSec || env.CANONICAL_DB_READY_TIMEOUT_SEC,
+      90,
+    ),
+    connectTimeoutSec: toInt(
+      options.connectTimeoutSec || env.CANONICAL_DB_CONNECT_TIMEOUT_SEC,
+      3,
+    ),
     maxBuffer: toInt(options.maxBuffer, 64 * 1024 * 1024),
-    useDockerTty: parseBool(options.useDockerTty, false)
+    useDockerTty: parseBool(options.useDockerTty, false),
   };
 
   config.hasExplicitDirectTarget = Boolean(
@@ -60,444 +60,242 @@ function resolveConnectionConfig(options = {}) {
       env.PGHOST ||
       env.PGPORT ||
       env.PGUSER ||
-      env.PGDATABASE
+      env.PGDATABASE,
   );
 
   return config;
 }
 
-function buildVariableArgs(params = {}) {
-  const args = ['-v', 'ON_ERROR_STOP=1'];
-  for (const [key, value] of Object.entries(params || {})) {
-    args.push('-v', `${key}=${value === undefined || value === null ? '' : String(value)}`);
-  }
-  return args;
-}
-
 function escapeRegex(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function toSqlStringLiteral(value) {
-  const raw = value === undefined || value === null ? '' : String(value);
-  return `'${raw.replace(/'/g, "''")}'`;
-}
-
+/**
+ * Converts named parameters (:'paramName') into Postgres positional parameters ($1, $2)
+ * and returns the parameterized SQL string and the ordered array of values.
+ */
 function interpolateSqlParams(sql, params = {}) {
-  let query = String(sql || '');
+  let query = String(sql || "");
+  const values = [];
+  let paramIndex = 1;
+
   const entries = Object.entries(params || {});
 
+  // Sort entries by length descending to prevent partial matches (e.g. replacing :id inside :idx)
+  entries.sort((a, b) => b[0].length - a[0].length);
+
   for (const [key, value] of entries) {
-    const token = new RegExp(`:'${escapeRegex(key)}'`, 'g');
-    query = query.replace(token, toSqlStringLiteral(value));
+    const token = new RegExp(`:'${escapeRegex(key)}'`, "g");
+    if (token.test(query)) {
+      query = query.replace(token, `$${paramIndex}`);
+      values.push(value);
+      paramIndex++;
+    }
   }
 
   const unresolved = query.match(/:'[A-Za-z_][A-Za-z0-9_]*'/g);
   if (unresolved && unresolved.length > 0) {
     throw new AppError({
-      code: 'INVALID_REQUEST',
-      message: `Missing SQL params for placeholders: ${Array.from(new Set(unresolved)).join(', ')}`
+      code: "INVALID_REQUEST",
+      message: `Missing SQL params for placeholders: ${Array.from(new Set(unresolved)).join(", ")}`,
     });
   }
 
-  return query;
-}
-
-function parseRowsFromJsonOutput(stdout) {
-  const text = String(stdout || '').trim();
-  if (!text) {
-    return [];
-  }
-
-  // Prefer parsing the full payload first because psql can wrap long JSON output
-  // across lines even in unaligned mode.
-  try {
-    const parsed = JSON.parse(text);
-    if (Array.isArray(parsed)) {
-      return parsed;
-    }
-    if (typeof parsed === 'string') {
-      const nested = JSON.parse(parsed);
-      if (Array.isArray(nested)) {
-        return nested;
-      }
-    }
-  } catch {
-    // Fall back to last-line parsing for mixed stdout payloads.
-  }
-
-  const lines = text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-  if (lines.length === 0) {
-    return [];
-  }
-
-  const last = lines[lines.length - 1];
-  try {
-    const parsed = JSON.parse(last);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-async function runExecFile(command, args, options = {}) {
-  try {
-    return await execFileAsync(command, args, {
-      cwd: options.cwd,
-      env: options.env,
-      maxBuffer: options.maxBuffer || 64 * 1024 * 1024
-    });
-  } catch (err) {
-    const stderr = (err && err.stderr ? String(err.stderr) : '').trim();
-    const stdout = (err && err.stdout ? String(err.stdout) : '').trim();
-
-    throw new AppError({
-      code: 'INTERNAL_ERROR',
-      message: stderr || stdout || err.message || `Command failed: ${command}`,
-      details: {
-        command,
-        args,
-        stderr,
-        stdout
-      },
-      cause: err
-    });
-  }
+  return { query, values };
 }
 
 function createPostgisClient(options = {}) {
   const config = resolveConnectionConfig(options);
 
-  let resolvedMode = '';
+  const poolConfig = config.url
+    ? {
+        connectionString: config.url,
+        connectionTimeoutMillis: config.connectTimeoutSec * 1000,
+      }
+    : {
+        host: config.host,
+        port: parseInt(config.port, 10),
+        user: config.user,
+        database: config.database,
+        password: config.password,
+        connectionTimeoutMillis: config.connectTimeoutSec * 1000,
+      };
 
-  async function buildDirectPsqlArgs(baseArgs = []) {
-    if (config.url) {
-      return [config.url, ...baseArgs];
-    }
-    return [
-      '-h',
-      config.host,
-      '-p',
-      String(config.port),
-      '-U',
-      config.user,
-      '-d',
-      config.database,
-      ...baseArgs
-    ];
-  }
+  const pool = new Pool(poolConfig);
 
-  async function probeDirectConnection() {
-    const baseArgs = ['-At', '-c', 'SELECT 1;'];
-    const args = await buildDirectPsqlArgs(baseArgs);
-    try {
-      await runExecFile('psql', args, {
-        cwd: config.rootDir,
-        env: {
-          ...process.env,
-          PGPASSWORD: config.password,
-          PGCONNECT_TIMEOUT: String(config.connectTimeoutSec)
-        },
-        maxBuffer: config.maxBuffer
-      });
-      return true;
-    } catch {
-      return false;
-    }
-  }
+  pool.on("error", (err) => {
+    console.error("Unexpected error on idle database client", err);
+  });
 
   async function resolveMode() {
-    if (resolvedMode) {
-      return resolvedMode;
-    }
-
-    if (config.mode === 'direct' || config.mode === 'docker-compose') {
-      resolvedMode = config.mode;
-      return resolvedMode;
-    }
-
-    if (config.mode !== 'auto') {
-      throw new AppError({
-        code: 'INVALID_CONFIG',
-        message: `Invalid CANONICAL_DB_MODE '${config.mode}' (expected auto, direct, docker-compose)`
-      });
-    }
-
-    const hasPsql = await commandExists('psql');
-    if (hasPsql) {
-      const directOk = await probeDirectConnection();
-      if (directOk) {
-        resolvedMode = 'direct';
-        return resolvedMode;
-      }
-
-      if (config.hasExplicitDirectTarget) {
-        throw new AppError({
-          code: 'INVALID_CONFIG',
-          message:
-            'Auto DB mode detected explicit direct DB config, but direct connection probe failed. Fix connectivity or set CANONICAL_DB_MODE=docker-compose.'
-        });
-      }
-    } else if (config.hasExplicitDirectTarget) {
-      throw new AppError({
-        code: 'INVALID_CONFIG',
-        message:
-          'Auto DB mode detected explicit direct DB config, but psql is not installed. Install psql or set CANONICAL_DB_MODE=docker-compose.'
-      });
-    }
-
-    const hasDocker = await commandExists('docker');
-    if (!hasDocker) {
-      throw new AppError({
-        code: 'INVALID_CONFIG',
-        message: 'docker is required for CANONICAL_DB_MODE=docker-compose'
-      });
-    }
-
-    resolvedMode = 'docker-compose';
-    return resolvedMode;
-  }
-
-  async function runPsql(baseArgs = [], extraOptions = {}) {
-    const mode = await resolveMode();
-    if (mode === 'docker-compose') {
-      const args = [
-        'compose',
-        '--profile',
-        config.dockerProfile,
-        'exec',
-        ...(config.useDockerTty ? [] : ['-T']),
-        config.dockerService,
-        'psql',
-        '-U',
-        config.user,
-        '-d',
-        config.database,
-        ...baseArgs
-      ];
-      return runExecFile('docker', args, {
-        cwd: config.rootDir,
-        env: process.env,
-        maxBuffer: extraOptions.maxBuffer || config.maxBuffer
-      });
-    }
-
-    const args = await buildDirectPsqlArgs(baseArgs);
-    return runExecFile('psql', args, {
-      cwd: config.rootDir,
-      env: {
-        ...process.env,
-        PGPASSWORD: config.password,
-        PGCONNECT_TIMEOUT: String(config.connectTimeoutSec)
-      },
-      maxBuffer: extraOptions.maxBuffer || config.maxBuffer
-    });
+    // Legacy support: mode is always resolved to 'direct' now that we use pg.Pool
+    return "direct";
   }
 
   async function ensureReady() {
     const started = Date.now();
 
-    if ((await resolveMode()) === 'docker-compose') {
-      await runExecFile(
-        'docker',
-        ['compose', '--profile', config.dockerProfile, 'up', '-d', config.dockerService],
-        {
-          cwd: config.rootDir,
-          env: process.env,
-          maxBuffer: config.maxBuffer
-        }
-      );
-    }
-
     while (Date.now() - started < config.readyTimeoutSec * 1000) {
       try {
-        await runPsql(['-At', '-v', 'ON_ERROR_STOP=1', '-c', 'SELECT 1;']);
+        const client = await pool.connect();
+        await client.query("SELECT 1;");
+        client.release();
         return;
-      } catch {
+      } catch (_err) {
         await new Promise((resolve) => setTimeout(resolve, 2000));
       }
     }
 
     throw new AppError({
-      code: 'INTERNAL_ERROR',
-      message: `Database did not become ready within ${config.readyTimeoutSec}s`
+      code: "INTERNAL_ERROR",
+      message: `Database did not become ready within ${config.readyTimeoutSec}s`,
     });
   }
 
-  async function runSql(sql, params = {}, options = {}) {
-    const query = String(sql || '').trim();
-    if (!query) {
+  async function runSql(sql, params = {}) {
+    const q = String(sql || "").trim();
+    if (!q) {
       throw new AppError({
-        code: 'INVALID_REQUEST',
-        message: 'SQL query is required'
+        code: "INVALID_REQUEST",
+        message: "SQL query is required",
       });
     }
-    const interpolatedQuery = interpolateSqlParams(query, params);
+    const { query, values } = interpolateSqlParams(q, params);
 
-    const args = [
-      '-X',
-      '-q',
-      ...(options.at === false ? [] : ['-At']),
-      ...buildVariableArgs(),
-      '-c',
-      interpolatedQuery
-    ];
-
-    return runPsql(args, { maxBuffer: options.maxBuffer });
-  }
-
-  async function runScript(sql, params = {}, options = {}) {
-    const query = String(sql || '').trim();
-    if (!query) {
+    try {
+      const result = await pool.query(query, values);
+      return result;
+    } catch (err) {
       throw new AppError({
-        code: 'INVALID_REQUEST',
-        message: 'SQL script is required'
+        code: "INTERNAL_ERROR",
+        message: err.message,
+        details: { query, values },
+        cause: err,
       });
     }
-    const interpolatedQuery = interpolateSqlParams(query, params);
-
-    const args = ['-X', ...(options.at === false ? [] : ['-At']), ...buildVariableArgs(), '-c', interpolatedQuery];
-    return runPsql(args, { maxBuffer: options.maxBuffer });
   }
 
-  async function exec(sql, params = {}, options = {}) {
-    const result = await runSql(sql, params, { ...options, at: options.at === undefined ? false : options.at });
-    return {
-      stdout: String(result.stdout || ''),
-      stderr: String(result.stderr || '')
-    };
+  async function runScript(sql, params = {}) {
+    return runSql(sql, params);
   }
 
-  async function queryRows(sql, params = {}, options = {}) {
-    const innerQuery = String(sql || '').trim().replace(/;+\s*$/, '');
-    const wrapped = `WITH __q AS (${innerQuery}) SELECT COALESCE(json_agg(__q), '[]'::json)::text FROM __q;`;
-    const result = await runSql(wrapped, params, { ...options, at: true });
-    return parseRowsFromJsonOutput(result.stdout);
+  async function exec(sql, params = {}) {
+    try {
+      await runSql(sql, params);
+      return { stdout: "OK", stderr: "" };
+    } catch (err) {
+      return { stdout: "", stderr: err.message };
+    }
   }
 
-  async function queryOne(sql, params = {}, options = {}) {
-    const rows = await queryRows(sql, params, options);
+  async function queryRows(sql, params = {}) {
+    const result = await runSql(sql, params);
+    return result.rows || [];
+  }
+
+  async function queryOne(sql, params = {}) {
+    const rows = await queryRows(sql, params);
     return rows[0] || null;
   }
 
-  async function withTransaction(sqlOrBuilder, params = {}, options = {}) {
-    if (typeof sqlOrBuilder === 'string') {
-      const script = `BEGIN;\n${sqlOrBuilder}\nCOMMIT;`;
-      return exec(script, params, options);
+  async function withTransaction(sqlOrBuilder, params = {}) {
+    if (typeof sqlOrBuilder === "string") {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const { query, values } = interpolateSqlParams(sqlOrBuilder, params);
+        await client.query(query, values);
+        await client.query("COMMIT");
+        return { stdout: "OK", stderr: "" };
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw new AppError({
+          code: "INTERNAL_ERROR",
+          message: err.message,
+          cause: err,
+        });
+      } finally {
+        client.release();
+      }
     }
 
-    if (typeof sqlOrBuilder === 'function') {
-      const statements = [];
-      const statementParams = {};
-      let statementIdx = 0;
+    if (typeof sqlOrBuilder === "function") {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
 
-      const tx = {
-        add(sql, localParams = {}) {
-          const keyPrefix = `tx_${statementIdx}`;
-          statementIdx += 1;
+        const statements = [];
+        const _statementIdx = 0;
 
-          let rewritten = String(sql || '');
-          for (const [key, value] of Object.entries(localParams || {})) {
-            const scopedKey = `${keyPrefix}_${key}`;
-            rewritten = rewritten.replace(new RegExp(`:'${key}'`, 'g'), `:'${scopedKey}'`);
-            rewritten = rewritten.replace(new RegExp(`:${key}(?![A-Za-z0-9_])`, 'g'), `:${scopedKey}`);
-            statementParams[scopedKey] = value;
-          }
+        const tx = {
+          add(sql, localParams = {}) {
+            statements.push({ sql, localParams });
+          },
+        };
 
-          statements.push(rewritten.trim().replace(/;+\s*$/, '') + ';');
+        await sqlOrBuilder(tx);
+
+        for (const stmt of statements) {
+          const mergedParams = {
+            ...(params || {}),
+            ...(stmt.localParams || {}),
+          };
+          const { query, values } = interpolateSqlParams(
+            stmt.sql,
+            mergedParams,
+          );
+          await client.query(query, values);
         }
-      };
 
-      await sqlOrBuilder(tx);
-      if (statements.length === 0) {
-        return { stdout: '', stderr: '' };
+        await client.query("COMMIT");
+        return { stdout: "OK", stderr: "" };
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw new AppError({
+          code: "INTERNAL_ERROR",
+          message: err.message,
+          cause: err,
+        });
+      } finally {
+        client.release();
       }
-
-      const script = ['BEGIN;', ...statements, 'COMMIT;'].join('\n');
-      return exec(script, { ...(params || {}), ...statementParams }, options);
     }
 
     throw new AppError({
-      code: 'INVALID_REQUEST',
-      message: 'withTransaction expects a SQL string or builder callback'
+      code: "INVALID_REQUEST",
+      message: "withTransaction expects a SQL string or builder callback",
     });
   }
 
   async function copyCsvFromFile(csvFilePath, copyTarget) {
-    const target = String(copyTarget || '').trim();
+    const target = String(copyTarget || "").trim();
     if (!target) {
       throw new AppError({
-        code: 'INVALID_REQUEST',
-        message: 'copy target is required'
+        code: "INVALID_REQUEST",
+        message: "copy target is required",
       });
     }
 
-    const mode = await resolveMode();
-    const copyCommand = `\\copy ${target} FROM STDIN WITH (FORMAT csv, HEADER true)`;
-
-    if (mode === 'docker-compose') {
-      await runExecFile(
-        'bash',
-        [
-          '-lc',
-          `cat ${JSON.stringify(csvFilePath)} | docker compose --profile ${JSON.stringify(
-            config.dockerProfile
-          )} exec -T ${JSON.stringify(config.dockerService)} psql -v ON_ERROR_STOP=1 -U ${JSON.stringify(
-            config.user
-          )} -d ${JSON.stringify(config.database)} -c ${JSON.stringify(copyCommand)}`
-        ],
-        {
-          cwd: config.rootDir,
-          env: process.env,
-          maxBuffer: config.maxBuffer
-        }
+    const client = await pool.connect();
+    try {
+      const stream = client.query(
+        copyFrom(`COPY ${target} FROM STDIN WITH (FORMAT csv, HEADER true)`),
       );
-      return;
+      const fileStream = fs.createReadStream(csvFilePath);
+      await pipeline(fileStream, stream);
+    } catch (err) {
+      throw new AppError({
+        code: "INTERNAL_ERROR",
+        message: err.message,
+        cause: err,
+      });
+    } finally {
+      client.release();
     }
+  }
 
-    if (config.url) {
-      await runExecFile(
-        'bash',
-        [
-          '-lc',
-          `cat ${JSON.stringify(csvFilePath)} | PGPASSWORD=${JSON.stringify(config.password)} psql ${JSON.stringify(
-            config.url
-          )} -v ON_ERROR_STOP=1 -c ${JSON.stringify(copyCommand)}`
-        ],
-        {
-          cwd: config.rootDir,
-          env: {
-            ...process.env,
-            PGPASSWORD: config.password
-          },
-          maxBuffer: config.maxBuffer
-        }
-      );
-      return;
-    }
-
-    await runExecFile(
-      'bash',
-      [
-        '-lc',
-        `cat ${JSON.stringify(csvFilePath)} | PGPASSWORD=${JSON.stringify(
-          config.password
-        )} psql -h ${JSON.stringify(config.host)} -p ${JSON.stringify(config.port)} -U ${JSON.stringify(
-          config.user
-        )} -d ${JSON.stringify(config.database)} -v ON_ERROR_STOP=1 -c ${JSON.stringify(copyCommand)}`
-      ],
-      {
-        cwd: config.rootDir,
-        env: {
-          ...process.env,
-          PGPASSWORD: config.password
-        },
-        maxBuffer: config.maxBuffer
-      }
-    );
+  async function end() {
+    await pool.end();
   }
 
   return {
@@ -510,13 +308,13 @@ function createPostgisClient(options = {}) {
     queryRows,
     queryOne,
     withTransaction,
-    copyCsvFromFile
+    copyCsvFromFile,
+    end,
   };
 }
 
 module.exports = {
   createPostgisClient,
   interpolateSqlParams,
-  parseRowsFromJsonOutput,
-  resolveConnectionConfig
+  resolveConnectionConfig,
 };

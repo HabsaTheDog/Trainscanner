@@ -1,7 +1,7 @@
 function escapeLabelValue(value) {
   return String(value)
-    .replace(/\\/g, '\\\\')
-    .replace(/\n/g, '\\n')
+    .replace(/\\/g, "\\\\")
+    .replace(/\n/g, "\\n")
     .replace(/"/g, '\\"');
 }
 
@@ -9,14 +9,14 @@ function labelsKey(labels = {}) {
   return Object.entries(labels)
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([k, v]) => `${k}=${v}`)
-    .join(',');
+    .join(",");
 }
 
 function labelsText(labels = {}) {
   const parts = Object.entries(labels)
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([k, v]) => `${k}="${escapeLabelValue(v)}"`);
-  return parts.length > 0 ? `{${parts.join(',')}}` : '';
+  return parts.length > 0 ? `{${parts.join(",")}}` : "";
 }
 
 class MetricsCollector {
@@ -38,7 +38,7 @@ class MetricsCollector {
     this.gauges.set(key, {
       name,
       labels,
-      value: Number(value) || 0
+      value: Number(value) || 0,
     });
   }
 
@@ -50,7 +50,7 @@ class MetricsCollector {
       count: 0,
       sum: 0,
       min: Number.POSITIVE_INFINITY,
-      max: Number.NEGATIVE_INFINITY
+      max: Number.NEGATIVE_INFINITY,
     };
 
     const numeric = Number(value) || 0;
@@ -83,12 +83,12 @@ class MetricsCollector {
       }
     }
 
-    return lines.join('\n') + (lines.length > 0 ? '\n' : '');
+    return lines.join("\n") + (lines.length > 0 ? "\n" : "");
   }
 }
 
 module.exports = {
   MetricsCollector,
   labelsKey,
-  labelsText
+  labelsText,
 };

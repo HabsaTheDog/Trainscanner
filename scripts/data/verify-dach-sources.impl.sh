@@ -109,8 +109,10 @@ parse_args() {
 
 load_env() {
   if [[ -f .env ]]; then
+    set -a
     # shellcheck disable=SC1091
-    set -a; source .env; set +a
+    source .env
+    set +a
   fi
 }
 

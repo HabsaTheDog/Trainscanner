@@ -1,31 +1,34 @@
 #!/usr/bin/env node
-const fs = require('node:fs');
-const path = require('node:path');
-const { normalizeProfiles, resolveProfileArtifact } = require('../profile-resolver');
+const fs = require("node:fs");
+const path = require("node:path");
+const {
+  normalizeProfiles,
+  resolveProfileArtifact,
+} = require("../profile-resolver");
 
 function parseArgs(argv) {
   const args = {
-    command: '',
+    command: "",
     root: process.cwd(),
-    profile: ''
+    profile: "",
   };
 
   const [command, ...rest] = argv;
-  args.command = command || '';
+  args.command = command || "";
 
   for (let i = 0; i < rest.length; i += 1) {
     const arg = rest[i];
-    if (arg === '--root') {
+    if (arg === "--root") {
       args.root = rest[i + 1] || args.root;
       i += 1;
       continue;
     }
-    if (arg === '--profile') {
-      args.profile = rest[i + 1] || '';
+    if (arg === "--profile") {
+      args.profile = rest[i + 1] || "";
       i += 1;
       continue;
     }
-    if (arg === '-h' || arg === '--help') {
+    if (arg === "-h" || arg === "--help") {
       printHelp();
       process.exit(0);
     }
@@ -36,21 +39,25 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  process.stdout.write('Usage:\n');
-  process.stdout.write('  node orchestrator/src/cli/profile-runtime.js resolve-artifact --profile <name> [--root <path>]\n');
-  process.stdout.write('  node orchestrator/src/cli/profile-runtime.js resolve-default-profile [--root <path>]\n');
+  process.stdout.write("Usage:\n");
+  process.stdout.write(
+    "  node orchestrator/src/cli/profile-runtime.js resolve-artifact --profile <name> [--root <path>]\n",
+  );
+  process.stdout.write(
+    "  node orchestrator/src/cli/profile-runtime.js resolve-default-profile [--root <path>]\n",
+  );
 }
 
 function readJson(filePath, fallback = null) {
   try {
-    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
   } catch {
     return fallback;
   }
 }
 
 async function resolveArtifact(rootDir, profileName) {
-  const profilesPath = path.join(rootDir, 'config', 'gtfs-profiles.json');
+  const profilesPath = path.join(rootDir, "config", "gtfs-profiles.json");
   const profilesRaw = readJson(profilesPath, null);
   if (!profilesRaw) {
     throw new Error(`Failed to read profiles: ${profilesPath}`);
@@ -63,8 +70,8 @@ async function resolveArtifact(rootDir, profileName) {
   }
 
   const resolved = await resolveProfileArtifact(profileName, selected, {
-    dataDir: path.join(rootDir, 'data'),
-    allowMissing: false
+    dataDir: path.join(rootDir, "data"),
+    allowMissing: false,
   });
 
   process.stdout.write(
@@ -73,17 +80,18 @@ async function resolveArtifact(rootDir, profileName) {
       sourceType: resolved.sourceType,
       zipPath: resolved.zipPath,
       absolutePath: resolved.absolutePath,
-      runtime: resolved.runtime || null
-    })
+      runtime: resolved.runtime || null,
+    }),
   );
 }
 
 function resolveDefaultProfile(rootDir) {
-  const activePath = path.join(rootDir, 'state', 'active-gtfs.json');
-  const legacyActivePath = path.join(rootDir, 'config', 'active-gtfs.json');
-  const profilesPath = path.join(rootDir, 'config', 'gtfs-profiles.json');
+  const activePath = path.join(rootDir, "state", "active-gtfs.json");
+  const legacyActivePath = path.join(rootDir, "config", "active-gtfs.json");
+  const profilesPath = path.join(rootDir, "config", "gtfs-profiles.json");
 
-  const activeState = readJson(activePath, null) || readJson(legacyActivePath, null) || {};
+  const activeState =
+    readJson(activePath, null) || readJson(legacyActivePath, null) || {};
   const profilesRaw = readJson(profilesPath, null);
   if (!profilesRaw) {
     throw new Error(`Failed to read profiles: ${profilesPath}`);
@@ -91,7 +99,10 @@ function resolveDefaultProfile(rootDir) {
 
   const profiles = normalizeProfiles(profilesRaw);
   const names = Object.keys(profiles);
-  const activeName = typeof activeState.activeProfile === 'string' ? activeState.activeProfile : '';
+  const activeName =
+    typeof activeState.activeProfile === "string"
+      ? activeState.activeProfile
+      : "";
 
   if (activeName && names.includes(activeName)) {
     process.stdout.write(activeName);
@@ -103,22 +114,22 @@ function resolveDefaultProfile(rootDir) {
     return;
   }
 
-  throw new Error('No profiles configured');
+  throw new Error("No profiles configured");
 }
 
 (async () => {
   const args = parseArgs(process.argv.slice(2));
   const rootDir = path.resolve(args.root);
 
-  if (args.command === 'resolve-artifact') {
+  if (args.command === "resolve-artifact") {
     if (!args.profile) {
-      throw new Error('resolve-artifact requires --profile');
+      throw new Error("resolve-artifact requires --profile");
     }
     await resolveArtifact(rootDir, args.profile);
     return;
   }
 
-  if (args.command === 'resolve-default-profile') {
+  if (args.command === "resolve-default-profile") {
     resolveDefaultProfile(rootDir);
     return;
   }

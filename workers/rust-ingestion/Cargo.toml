@@ -1,0 +1,22 @@
+[package]
+name = "rust-ingestion"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+temporal-worker = ["dep:temporal-sdk"]
+
+[dependencies]
+tokio = { version = "1.37.0", features = ["full", "rt"] }
+temporal-sdk = { package = "squads-temporal-sdk", version = "0.1.0-alpha.1", optional = true }
+quick-xml = "0.31.0"
+postgres = "0.19.7"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+zip = "0.6.6"
+uuid = { version = "1.8.0", features = ["v4"] }
+anyhow = "1.0.82"
+futures = "0.3.30"
+log = "0.4"
+env_logger = "0.11"

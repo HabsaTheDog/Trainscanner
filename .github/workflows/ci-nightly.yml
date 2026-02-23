@@ -2,7 +2,7 @@ name: CI Nightly Full
 
 on:
   schedule:
-    - cron: '15 2 * * *'
+    - cron: "15 2 * * *"
   workflow_dispatch:
 
 jobs:
@@ -13,7 +13,7 @@ jobs:
       CANONICAL_DB_MODE: docker-compose
       CANONICAL_DB_DOCKER_PROFILE: dach-data
       CANONICAL_DB_DOCKER_SERVICE: postgis
-      ENABLE_POSTGIS_TESTS: '1'
+      ENABLE_POSTGIS_TESTS: "1"
 
     steps:
       - name: Checkout
@@ -22,12 +22,12 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Syntax + config contract checks
         run: |

@@ -1,5 +1,5 @@
-const fs = require('node:fs/promises');
-const path = require('node:path');
+const fs = require("node:fs/promises");
+const path = require("node:path");
 
 function parseIso(value) {
   if (!value) {
@@ -10,7 +10,9 @@ function parseIso(value) {
 }
 
 function buildKpiPayload(jobs, options = {}) {
-  const windowHours = Number.isFinite(options.windowHours) ? options.windowHours : 24;
+  const windowHours = Number.isFinite(options.windowHours)
+    ? options.windowHours
+    : 24;
   const now = Date.now();
   const cutoff = now - windowHours * 60 * 60 * 1000;
 
@@ -22,10 +24,12 @@ function buildKpiPayload(jobs, options = {}) {
   });
 
   const total = scoped.length;
-  const succeeded = scoped.filter((job) => job.status === 'succeeded').length;
-  const failed = scoped.filter((job) => job.status === 'failed').length;
+  const succeeded = scoped.filter((job) => job.status === "succeeded").length;
+  const failed = scoped.filter((job) => job.status === "failed").length;
 
-  const completed = scoped.filter((job) => job.status === 'succeeded' || job.status === 'failed');
+  const completed = scoped.filter(
+    (job) => job.status === "succeeded" || job.status === "failed",
+  );
   const durationsMs = completed
     .map((job) => {
       const start = parseIso(job.startedAt);
@@ -44,7 +48,9 @@ function buildKpiPayload(jobs, options = {}) {
 
   const durationP95Ms =
     durationsMs.length > 0
-      ? [...durationsMs].sort((a, b) => a - b)[Math.max(0, Math.floor(durationsMs.length * 0.95) - 1)]
+      ? [...durationsMs].sort((a, b) => a - b)[
+          Math.max(0, Math.floor(durationsMs.length * 0.95) - 1)
+        ]
       : 0;
 
   const throughputPerHour = windowHours > 0 ? succeeded / windowHours : 0;
@@ -59,18 +65,22 @@ function buildKpiPayload(jobs, options = {}) {
     throughputPerHour,
     failureRatePercent,
     durationAvgMs,
-    durationP95Ms
+    durationP95Ms,
   };
 }
 
 async function writeKpiReport(reportDir, payload) {
   await fs.mkdir(reportDir, { recursive: true });
-  const reportPath = path.join(reportDir, 'pipeline-kpis.json');
-  await fs.writeFile(reportPath, JSON.stringify(payload, null, 2) + '\n', 'utf8');
+  const reportPath = path.join(reportDir, "pipeline-kpis.json");
+  await fs.writeFile(
+    reportPath,
+    `${JSON.stringify(payload, null, 2)}\n`,
+    "utf8",
+  );
   return reportPath;
 }
 
 module.exports = {
   buildKpiPayload,
-  writeKpiReport
+  writeKpiReport,
 };

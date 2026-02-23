@@ -1,25 +1,32 @@
-const { validateOrThrow } = require('../../../core/schema');
+const { validateOrThrow } = require("../../../core/schema");
 
 const RAW_SNAPSHOT_SCHEMA = {
-  type: 'object',
-  required: ['sourceId', 'country', 'format', 'snapshotDate', 'manifestPath', 'fileName'],
+  type: "object",
+  required: [
+    "sourceId",
+    "country",
+    "format",
+    "snapshotDate",
+    "manifestPath",
+    "fileName",
+  ],
   properties: {
-    sourceId: { type: 'string', minLength: 1 },
-    country: { type: 'string', enum: ['DE', 'AT', 'CH'] },
-    providerSlug: { type: 'string', minLength: 1 },
-    format: { type: 'string', minLength: 1 },
-    snapshotDate: { type: 'string', pattern: /^\d{4}-\d{2}-\d{2}$/ },
-    manifestPath: { type: 'string', minLength: 1 },
-    manifestSha256: { type: 'string' },
-    manifest: { type: 'object' },
-    resolvedDownloadUrl: { type: 'string' },
-    fileName: { type: 'string', minLength: 1 },
-    fileSizeBytes: { type: 'integer', minimum: 0 },
-    retrievalTimestamp: { type: 'string' },
-    detectedVersionOrDate: { type: 'string' },
-    requestedAsOf: { type: 'string' }
+    sourceId: { type: "string", minLength: 1 },
+    country: { type: "string", enum: ["DE", "AT", "CH"] },
+    providerSlug: { type: "string", minLength: 1 },
+    format: { type: "string", minLength: 1 },
+    snapshotDate: { type: "string", pattern: /^\d{4}-\d{2}-\d{2}$/ },
+    manifestPath: { type: "string", minLength: 1 },
+    manifestSha256: { type: "string" },
+    manifest: { type: "object" },
+    resolvedDownloadUrl: { type: "string" },
+    fileName: { type: "string", minLength: 1 },
+    fileSizeBytes: { type: "integer", minimum: 0 },
+    retrievalTimestamp: { type: "string" },
+    detectedVersionOrDate: { type: "string" },
+    requestedAsOf: { type: "string" },
   },
-  additionalProperties: true
+  additionalProperties: true,
 };
 
 function normalizeRow(row) {
@@ -34,20 +41,33 @@ function normalizeRow(row) {
     format: row.format,
     snapshotDate: row.snapshot_date || row.snapshotdate || row.snapshotDate,
     manifestPath: row.manifest_path || row.manifestpath || row.manifestPath,
-    manifestSha256: row.manifest_sha256 || row.manifestsha256 || row.manifestSha256 || null,
-    manifest: row.manifest && typeof row.manifest === 'object' ? row.manifest : {},
+    manifestSha256:
+      row.manifest_sha256 || row.manifestsha256 || row.manifestSha256 || null,
+    manifest:
+      row.manifest && typeof row.manifest === "object" ? row.manifest : {},
     resolvedDownloadUrl:
-      row.resolved_download_url || row.resolveddownloadurl || row.resolvedDownloadUrl || null,
+      row.resolved_download_url ||
+      row.resolveddownloadurl ||
+      row.resolvedDownloadUrl ||
+      null,
     fileName: row.file_name || row.filename || row.fileName,
     fileSizeBytes: Number.isFinite(row.file_size_bytes)
       ? row.file_size_bytes
       : Number.isFinite(row.fileSizeBytes)
-      ? row.fileSizeBytes
-      : null,
-    retrievalTimestamp: row.retrieval_timestamp || row.retrievaltimestamp || row.retrievalTimestamp || null,
+        ? row.fileSizeBytes
+        : null,
+    retrievalTimestamp:
+      row.retrieval_timestamp ||
+      row.retrievaltimestamp ||
+      row.retrievalTimestamp ||
+      null,
     detectedVersionOrDate:
-      row.detected_version_or_date || row.detectedversionordate || row.detectedVersionOrDate || null,
-    requestedAsOf: row.requested_as_of || row.requestedasof || row.requestedAsOf || null
+      row.detected_version_or_date ||
+      row.detectedversionordate ||
+      row.detectedVersionOrDate ||
+      null,
+    requestedAsOf:
+      row.requested_as_of || row.requestedasof || row.requestedAsOf || null,
   };
 
   if (out.fileSizeBytes === null || Number.isNaN(out.fileSizeBytes)) {
@@ -55,13 +75,13 @@ function normalizeRow(row) {
   }
 
   validateOrThrow(out, RAW_SNAPSHOT_SCHEMA, {
-    code: 'INVALID_CONFIG',
-    message: 'Invalid raw snapshot row returned from repository'
+    code: "INVALID_CONFIG",
+    message: "Invalid raw snapshot row returned from repository",
   });
 
   return {
     ...out,
-    fileSizeBytes: out.fileSizeBytes === undefined ? null : out.fileSizeBytes
+    fileSizeBytes: out.fileSizeBytes === undefined ? null : out.fileSizeBytes,
   };
 }
 
@@ -139,19 +159,21 @@ function createRawSnapshotsRepo(client) {
           source_id: input.sourceId,
           country: input.country,
           provider_slug: input.providerSlug,
-          format: input.format || 'netex',
+          format: input.format || "netex",
           snapshot_date: input.snapshotDate,
           manifest_path: input.manifestPath,
-          manifest_sha256: input.manifestSha256 || '',
+          manifest_sha256: input.manifestSha256 || "",
           manifest_json: JSON.stringify(input.manifest || {}),
-          resolved_download_url: input.resolvedDownloadUrl || '',
+          resolved_download_url: input.resolvedDownloadUrl || "",
           file_name: input.fileName,
           file_size_bytes:
-            input.fileSizeBytes === undefined || input.fileSizeBytes === null ? '' : String(input.fileSizeBytes),
-          retrieval_timestamp: input.retrievalTimestamp || '',
-          detected_version_or_date: input.detectedVersionOrDate || '',
-          requested_as_of: input.requestedAsOf || ''
-        }
+            input.fileSizeBytes === undefined || input.fileSizeBytes === null
+              ? ""
+              : String(input.fileSizeBytes),
+          retrieval_timestamp: input.retrievalTimestamp || "",
+          detected_version_or_date: input.detectedVersionOrDate || "",
+          requested_as_of: input.requestedAsOf || "",
+        },
       );
 
       return normalizeRow(row);
@@ -194,19 +216,19 @@ function createRawSnapshotsRepo(client) {
           ORDER BY rs.country, rs.source_id;
         `,
         {
-          format: scope.format || 'netex',
-          country: scope.country || '',
-          source_id: scope.sourceId || '',
-          as_of: scope.asOf || ''
-        }
+          format: scope.format || "netex",
+          country: scope.country || "",
+          source_id: scope.sourceId || "",
+          as_of: scope.asOf || "",
+        },
       );
 
       return rows.map((row) => normalizeRow(row));
-    }
+    },
   };
 }
 
 module.exports = {
   createRawSnapshotsRepo,
-  normalizeRow
+  normalizeRow,
 };

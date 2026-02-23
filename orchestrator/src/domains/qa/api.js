@@ -1,66 +1,75 @@
-const crypto = require('node:crypto');
-const fs = require('node:fs/promises');
-const path = require('node:path');
+const crypto = require("node:crypto");
+const fs = require("node:fs/promises");
+const path = require("node:path");
 
-const { createPostgisClient } = require('../../data/postgis/client');
-const { createPipelineJobsRepo } = require('../../data/postgis/repositories/pipeline-jobs-repo');
-const { createJobOrchestrator } = require('../../core/job-orchestrator');
-const { buildIdempotencyKey, createPipelineLogger } = require('../../core/pipeline-runner');
-const { fetchSources } = require('../source-discovery/service');
-const { ingestNetex } = require('../ingest/service');
-const { buildCanonicalStations, buildReviewQueue } = require('../canonical/service');
-const { AppError, toAppError } = require('../../core/errors');
+const { createPostgisClient } = require("../../data/postgis/client");
+const {
+  createPipelineJobsRepo,
+} = require("../../data/postgis/repositories/pipeline-jobs-repo");
+const { createJobOrchestrator } = require("../../core/job-orchestrator");
+const {
+  buildIdempotencyKey,
+  createPipelineLogger,
+} = require("../../core/pipeline-runner");
+const { fetchSources } = require("../source-discovery/service");
+const { ingestNetex } = require("../ingest/service");
+const {
+  buildCanonicalStations,
+  buildReviewQueue,
+} = require("../canonical/service");
+const { AppError, toAppError } = require("../../core/errors");
 const {
   normalizeClusterDecision,
-  normalizeIsoCountry
-} = require('./v2-contracts');
+  normalizeIsoCountry,
+} = require("./v2-contracts");
 const {
   buildCuratedProjectionRowsV1,
-  persistCuratedProjectionV1
-} = require('./curated-projection');
+  persistCuratedProjectionV1,
+} = require("./curated-projection");
+const { isStrictIsoDate } = require("../../core/date");
 
 let dbClient = null;
 const refreshWorkers = new Map();
 
-const REFRESH_JOB_TYPE = 'qa.refresh-pipeline';
-const ACTIVE_REFRESH_JOB_STATUSES = new Set(['queued', 'running', 'retry_wait']);
+const REFRESH_JOB_TYPE = "qa.refresh-pipeline";
+const ACTIVE_REFRESH_JOB_STATUSES = new Set([
+  "queued",
+  "running",
+  "retry_wait",
+]);
 const REFRESH_PIPELINE_STEP_COUNT = 4;
 const REFRESH_PROGRESS_POLL_MS = 1500;
 
-function isIsoDate(value) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return false;
-  }
-  const parsed = new Date(`${value}T00:00:00Z`);
-  return Number.isFinite(parsed.getTime());
-}
-
 function normalizeRefreshScope(input) {
-  const payload = input && typeof input === 'object' ? input : {};
-  const countryInput = String(payload.country || '').trim().toUpperCase();
-  const asOfInput = String(payload.asOf || payload.as_of || '').trim();
-  const sourceIdInput = String(payload.sourceId || payload.source_id || '').trim();
+  const payload = input && typeof input === "object" ? input : {};
+  const countryInput = String(payload.country || "")
+    .trim()
+    .toUpperCase();
+  const asOfInput = String(payload.asOf || payload.as_of || "").trim();
+  const sourceIdInput = String(
+    payload.sourceId || payload.source_id || "",
+  ).trim();
 
-  if (countryInput && !['DE', 'AT', 'CH'].includes(countryInput)) {
+  if (countryInput && !["DE", "AT", "CH"].includes(countryInput)) {
     throw new AppError({
-      code: 'INVALID_REQUEST',
+      code: "INVALID_REQUEST",
       statusCode: 400,
-      message: "country must be one of 'DE', 'AT', 'CH'"
+      message: "country must be one of 'DE', 'AT', 'CH'",
     });
   }
 
-  if (asOfInput && !isIsoDate(asOfInput)) {
+  if (asOfInput && !isStrictIsoDate(asOfInput)) {
     throw new AppError({
-      code: 'INVALID_REQUEST',
+      code: "INVALID_REQUEST",
       statusCode: 400,
-      message: 'asOf must be an ISO date in YYYY-MM-DD format'
+      message: "asOf must be an ISO date in YYYY-MM-DD format",
     });
   }
 
   return {
-    country: countryInput || '',
-    asOf: asOfInput || '',
-    sourceId: sourceIdInput || ''
+    country: countryInput || "",
+    asOf: asOfInput || "",
+    sourceId: sourceIdInput || "",
   };
 }
 
@@ -73,47 +82,47 @@ function appendArgIfSet(args, key, value) {
 
 function buildFetchArgs(scope) {
   const args = [];
-  appendArgIfSet(args, '--as-of', scope.asOf);
-  appendArgIfSet(args, '--country', scope.country);
-  appendArgIfSet(args, '--source-id', scope.sourceId);
+  appendArgIfSet(args, "--as-of", scope.asOf);
+  appendArgIfSet(args, "--country", scope.country);
+  appendArgIfSet(args, "--source-id", scope.sourceId);
   return args;
 }
 
 function buildIngestArgs(scope) {
   const args = [];
-  appendArgIfSet(args, '--as-of', scope.asOf);
-  appendArgIfSet(args, '--country', scope.country);
-  appendArgIfSet(args, '--source-id', scope.sourceId);
+  appendArgIfSet(args, "--as-of", scope.asOf);
+  appendArgIfSet(args, "--country", scope.country);
+  appendArgIfSet(args, "--source-id", scope.sourceId);
   return args;
 }
 
 function buildCanonicalArgs(scope) {
   const args = [];
-  appendArgIfSet(args, '--as-of', scope.asOf);
-  appendArgIfSet(args, '--country', scope.country);
-  appendArgIfSet(args, '--source-id', scope.sourceId);
+  appendArgIfSet(args, "--as-of", scope.asOf);
+  appendArgIfSet(args, "--country", scope.country);
+  appendArgIfSet(args, "--source-id", scope.sourceId);
   return args;
 }
 
 function buildReviewQueueArgs(scope) {
   const args = [];
-  appendArgIfSet(args, '--as-of', scope.asOf);
-  appendArgIfSet(args, '--country', scope.country);
+  appendArgIfSet(args, "--as-of", scope.asOf);
+  appendArgIfSet(args, "--country", scope.country);
   return args;
 }
 
 function mapRefreshJobStatus(status) {
-  if (status === 'succeeded') {
-    return 'completed';
+  if (status === "succeeded") {
+    return "completed";
   }
-  if (status === 'failed') {
-    return 'failed';
+  if (status === "failed") {
+    return "failed";
   }
-  return 'running';
+  return "running";
 }
 
 function toNonNegativeInt(value) {
-  const parsed = Number.parseInt(String(value ?? ''), 10);
+  const parsed = Number.parseInt(String(value ?? ""), 10);
   if (!Number.isFinite(parsed) || parsed < 0) {
     return 0;
   }
@@ -121,53 +130,85 @@ function toNonNegativeInt(value) {
 }
 
 function normalizeDownloadProgress(input) {
-  if (!input || typeof input !== 'object') {
+  if (!input || typeof input !== "object") {
     return null;
   }
 
-  const stage = String(input.stage || '').trim();
+  const stage = String(input.stage || "").trim();
   if (!stage) {
     return null;
   }
 
   return {
     stage,
-    source_id: String(input.source_id || '').trim() || null,
+    source_id: String(input.source_id || "").trim() || null,
     source_index: toNonNegativeInt(input.source_index),
     total_sources: toNonNegativeInt(input.total_sources),
-    file_name: String(input.file_name || '').trim() || null,
+    file_name: String(input.file_name || "").trim() || null,
     downloaded_bytes: toNonNegativeInt(input.downloaded_bytes),
     total_bytes: toNonNegativeInt(input.total_bytes),
-    message: String(input.message || '').trim() || null,
-    updated_at: String(input.updated_at || '').trim() || null
+    message: String(input.message || "").trim() || null,
+    updated_at: String(input.updated_at || "").trim() || null,
   };
 }
 
-async function readJsonObject(filePath) {
+async function readJsonObject(filePath, options = {}) {
+  const onError =
+    typeof options.onError === "function" ? options.onError : null;
   try {
-    const raw = await fs.readFile(filePath, 'utf8');
+    const raw = await fs.readFile(filePath, "utf8");
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') {
+    if (!parsed || typeof parsed !== "object") {
       return null;
     }
     return parsed;
   } catch (err) {
-    if (err && err.code === 'ENOENT') {
+    if (err?.code === "ENOENT") {
       return null;
     }
-    return null;
+
+    const appErr =
+      err instanceof SyntaxError
+        ? new AppError({
+            code: "INVALID_JSON",
+            statusCode: 400,
+            message: `Failed to parse JSON file '${filePath}'`,
+            details: { filePath },
+            cause: err,
+          })
+        : toAppError(
+            err,
+            "INTERNAL_ERROR",
+            `Failed to read JSON file '${filePath}'`,
+          );
+
+    if (onError) {
+      await onError(appErr);
+      return null;
+    }
+    throw appErr;
   }
 }
 
 function createProgressPoller(options = {}) {
-  const readProgress = typeof options.readProgress === 'function' ? options.readProgress : async () => null;
-  const onProgress = typeof options.onProgress === 'function' ? options.onProgress : async () => {};
-  const pollMs = Number.isFinite(options.pollMs) ? Math.max(250, options.pollMs) : REFRESH_PROGRESS_POLL_MS;
+  const readProgress =
+    typeof options.readProgress === "function"
+      ? options.readProgress
+      : async () => null;
+  const onProgress =
+    typeof options.onProgress === "function"
+      ? options.onProgress
+      : async () => {};
+  const onError =
+    typeof options.onError === "function" ? options.onError : async () => {};
+  const pollMs = Number.isFinite(options.pollMs)
+    ? Math.max(250, options.pollMs)
+    : REFRESH_PROGRESS_POLL_MS;
 
   let intervalHandle = null;
   let stopped = false;
   let inFlight = false;
-  let lastProgress = '';
+  let lastProgress = "";
 
   async function tick(force = false) {
     if ((!force && stopped) || inFlight) {
@@ -193,11 +234,23 @@ function createProgressPoller(options = {}) {
     }
   }
 
+  async function reportError(err) {
+    try {
+      await onError(err);
+    } catch {
+      // Deliberately suppress telemetry callback failures.
+    }
+  }
+
   intervalHandle = setInterval(() => {
-    tick(false).catch(() => {});
+    tick(false).catch((err) => {
+      reportError(err);
+    });
   }, pollMs);
 
-  tick(false).catch(() => {});
+  tick(false).catch((err) => {
+    reportError(err);
+  });
 
   return async () => {
     stopped = true;
@@ -205,29 +258,39 @@ function createProgressPoller(options = {}) {
       clearInterval(intervalHandle);
       intervalHandle = null;
     }
-    await tick(true).catch(() => {});
+    await tick(true).catch((err) => {
+      reportError(err);
+    });
   };
 }
 
 function toRefreshJobPayload(job) {
-  const checkpoint = job && job.checkpoint && typeof job.checkpoint === 'object' ? job.checkpoint : {};
-  const completedSteps = Array.isArray(checkpoint.completedSteps) ? checkpoint.completedSteps : [];
-  const downloadProgress = normalizeDownloadProgress(checkpoint.downloadProgress);
+  const checkpoint =
+    job?.checkpoint && typeof job.checkpoint === "object" ? job.checkpoint : {};
+  const completedSteps = Array.isArray(checkpoint.completedSteps)
+    ? checkpoint.completedSteps
+    : [];
+  const downloadProgress = normalizeDownloadProgress(
+    checkpoint.downloadProgress,
+  );
   const scope =
-    checkpoint.scope && typeof checkpoint.scope === 'object'
+    checkpoint.scope && typeof checkpoint.scope === "object"
       ? checkpoint.scope
-      : (job?.runContext?.scope && typeof job.runContext.scope === 'object' ? job.runContext.scope : {});
+      : job?.runContext?.scope && typeof job.runContext.scope === "object"
+        ? job.runContext.scope
+        : {};
 
   return {
     job_id: job.jobId,
     job_type: job.jobType,
     status: mapRefreshJobStatus(job.status),
     raw_status: job.status,
-    step: typeof checkpoint.step === 'string' ? checkpoint.step : null,
-    step_label: typeof checkpoint.stepLabel === 'string' ? checkpoint.stepLabel : null,
+    step: typeof checkpoint.step === "string" ? checkpoint.step : null,
+    step_label:
+      typeof checkpoint.stepLabel === "string" ? checkpoint.stepLabel : null,
     progress: {
       completed_steps: completedSteps.length,
-      total_steps: REFRESH_PIPELINE_STEP_COUNT
+      total_steps: REFRESH_PIPELINE_STEP_COUNT,
     },
     download_progress: downloadProgress,
     scope,
@@ -236,7 +299,7 @@ function toRefreshJobPayload(job) {
     error_code: job.errorCode || null,
     error_message: job.errorMessage || null,
     started_at: job.startedAt || null,
-    ended_at: job.endedAt || null
+    ended_at: job.endedAt || null,
   };
 }
 
@@ -244,7 +307,7 @@ async function updateRefreshCheckpoint(updateCheckpoint, state, patch) {
   const next = {
     ...state,
     ...patch,
-    updatedAt: new Date().toISOString()
+    updatedAt: new Date().toISOString(),
   };
   await updateCheckpoint(next);
   return next;
@@ -252,11 +315,17 @@ async function updateRefreshCheckpoint(updateCheckpoint, state, patch) {
 
 async function runRefreshPipelineSteps(input) {
   const rootDir = input.rootDir || process.cwd();
-  const runId = String(input.runId || '').trim() || crypto.randomUUID();
+  const runId = String(input.runId || "").trim() || crypto.randomUUID();
   const scope = normalizeRefreshScope(input.scope || {});
   const updateCheckpoint =
-    typeof input.updateCheckpoint === 'function' ? input.updateCheckpoint : async () => {};
-  const fetchProgressFile = path.join(rootDir, 'state', `qa-refresh-fetch-${runId}.json`);
+    typeof input.updateCheckpoint === "function"
+      ? input.updateCheckpoint
+      : async () => {};
+  const fetchProgressFile = path.join(
+    rootDir,
+    "state",
+    `qa-refresh-fetch-${runId}.json`,
+  );
 
   await fs.rm(fetchProgressFile, { force: true }).catch(() => {});
 
@@ -264,18 +333,22 @@ async function runRefreshPipelineSteps(input) {
   let checkpointUpdateLock = Promise.resolve();
   async function patchCheckpoint(patch) {
     checkpointUpdateLock = checkpointUpdateLock.then(async () => {
-      checkpoint = await updateRefreshCheckpoint(updateCheckpoint, checkpoint, patch);
+      checkpoint = await updateRefreshCheckpoint(
+        updateCheckpoint,
+        checkpoint,
+        patch,
+      );
     });
     await checkpointUpdateLock;
     return checkpoint;
   }
 
   await patchCheckpoint({
-    status: 'running',
-    step: 'starting',
-    stepLabel: 'Starting pipeline',
+    status: "running",
+    step: "starting",
+    stepLabel: "Starting pipeline",
     scope,
-    completedSteps: []
+    completedSteps: [],
   });
 
   const fetchArgs = buildFetchArgs(scope);
@@ -285,63 +358,72 @@ async function runRefreshPipelineSteps(input) {
 
   const steps = [
     {
-      id: 'fetching_sources',
-      label: 'Fetching DACH sources',
+      id: "fetching_sources",
+      label: "Fetching DACH sources",
       run: () =>
         fetchSources({
           rootDir,
           runId: `${runId}-fetch`,
           args: fetchArgs,
           env: {
-            FETCH_PROGRESS_FILE: fetchProgressFile
-          }
+            FETCH_PROGRESS_FILE: fetchProgressFile,
+          },
         }),
-      readProgress: async () => normalizeDownloadProgress(await readJsonObject(fetchProgressFile))
+      readProgress: async () =>
+        normalizeDownloadProgress(
+          await readJsonObject(fetchProgressFile, {
+            onError: async (err) => {
+              process.stderr.write(
+                `[qa-refresh] WARN: ${err.message} (errorCode=${err.code})\n`,
+              );
+            },
+          }),
+        ),
     },
     {
-      id: 'ingesting_netex',
-      label: 'Ingesting NeTEx snapshots',
+      id: "ingesting_netex",
+      label: "Ingesting NeTEx snapshots",
       run: () =>
         ingestNetex({
           rootDir,
           runId: `${runId}-ingest`,
           args: ingestArgs,
-          jobOrchestrationEnabled: false
-        })
+          jobOrchestrationEnabled: false,
+        }),
     },
     {
-      id: 'building_canonical',
-      label: 'Building canonical stations',
+      id: "building_canonical",
+      label: "Building canonical stations",
       run: () =>
         buildCanonicalStations({
           rootDir,
           runId: `${runId}-canonical`,
           args: canonicalArgs,
-          jobOrchestrationEnabled: false
-        })
+          jobOrchestrationEnabled: false,
+        }),
     },
     {
-      id: 'building_review_queue',
-      label: 'Building review queue',
+      id: "building_review_queue",
+      label: "Building review queue",
       run: () =>
         buildReviewQueue({
           rootDir,
           runId: `${runId}-queue`,
           args: queueArgs,
-          jobOrchestrationEnabled: false
-        })
-    }
+          jobOrchestrationEnabled: false,
+        }),
+    },
   ];
 
   for (const step of steps) {
     await patchCheckpoint({
       step: step.id,
       stepLabel: step.label,
-      downloadProgress: null
+      downloadProgress: null,
     });
 
     let stopProgressPoller = null;
-    if (typeof step.readProgress === 'function') {
+    if (typeof step.readProgress === "function") {
       stopProgressPoller = createProgressPoller({
         pollMs: REFRESH_PROGRESS_POLL_MS,
         readProgress: step.readProgress,
@@ -349,9 +431,22 @@ async function runRefreshPipelineSteps(input) {
           await patchCheckpoint({
             step: step.id,
             stepLabel: step.label,
-            downloadProgress: progress
+            downloadProgress: progress,
           });
-        }
+        },
+        onError: async (err) => {
+          process.stderr.write(
+            `[qa-refresh] WARN: Progress polling failed for step '${step.id}': ${err.message}\n`,
+          );
+          await patchCheckpoint({
+            progressWarning: {
+              step: step.id,
+              errorCode: err?.code || "INTERNAL_ERROR",
+              message: err?.message || "Progress polling failed",
+              at: new Date().toISOString(),
+            },
+          }).catch(() => {});
+        },
       });
     }
 
@@ -363,10 +458,10 @@ async function runRefreshPipelineSteps(input) {
       }
       const appErr = toAppError(err);
       await patchCheckpoint({
-        status: 'failed',
+        status: "failed",
         failedStep: step.id,
         errorCode: appErr.code,
-        errorMessage: appErr.message
+        errorMessage: appErr.message,
       }).catch(() => {});
       await fs.rm(fetchProgressFile, { force: true }).catch(() => {});
       throw err;
@@ -377,23 +472,28 @@ async function runRefreshPipelineSteps(input) {
     }
 
     await patchCheckpoint({
-      completedSteps: [...(Array.isArray(checkpoint.completedSteps) ? checkpoint.completedSteps : []), step.id]
+      completedSteps: [
+        ...(Array.isArray(checkpoint.completedSteps)
+          ? checkpoint.completedSteps
+          : []),
+        step.id,
+      ],
     });
   }
 
   await patchCheckpoint({
-    status: 'completed',
-    step: 'completed',
-    stepLabel: 'Pipeline completed',
+    status: "completed",
+    step: "completed",
+    stepLabel: "Pipeline completed",
     completedAt: new Date().toISOString(),
-    downloadProgress: null
+    downloadProgress: null,
   });
   await fs.rm(fetchProgressFile, { force: true }).catch(() => {});
 
   return {
     ok: true,
     runId,
-    scope
+    scope,
   };
 }
 
@@ -406,7 +506,7 @@ async function getDbClient() {
 }
 
 function toCleanString(value) {
-  return String(value || '').trim();
+  return String(value || "").trim();
 }
 
 function pushUnique(set, value) {
@@ -428,11 +528,48 @@ function addArrayValues(targetSet, value) {
 }
 
 function deriveServiceContextFromRawRows(rows) {
-  const lineKeys = ['line', 'route', 'service', 'trip', 'line_code', 'route_id', 'service_id'];
-  const lineArrayKeys = ['lines', 'routes', 'services', 'trips', 'line_codes', 'route_ids', 'service_ids'];
-  const incomingKeys = ['origin', 'from', 'arrives_from', 'arrival_from', 'previous_stop', 'previousStop', 'from_stop'];
-  const outgoingKeys = ['destination', 'to', 'towards', 'headsign', 'next_stop', 'nextStop', 'to_stop'];
-  const directionKeys = ['direction', 'travel_direction', 'direction_ref', 'directionRef'];
+  const lineKeys = [
+    "line",
+    "route",
+    "service",
+    "trip",
+    "line_code",
+    "route_id",
+    "service_id",
+  ];
+  const lineArrayKeys = [
+    "lines",
+    "routes",
+    "services",
+    "trips",
+    "line_codes",
+    "route_ids",
+    "service_ids",
+  ];
+  const incomingKeys = [
+    "origin",
+    "from",
+    "arrives_from",
+    "arrival_from",
+    "previous_stop",
+    "previousStop",
+    "from_stop",
+  ];
+  const outgoingKeys = [
+    "destination",
+    "to",
+    "towards",
+    "headsign",
+    "next_stop",
+    "nextStop",
+    "to_stop",
+  ];
+  const directionKeys = [
+    "direction",
+    "travel_direction",
+    "direction_ref",
+    "directionRef",
+  ];
 
   const lines = new Set();
   const incoming = new Set();
@@ -440,7 +577,8 @@ function deriveServiceContextFromRawRows(rows) {
 
   let sampledRows = 0;
   for (const row of rows) {
-    const payload = row && typeof row.raw_payload === 'object' ? row.raw_payload : null;
+    const payload =
+      row && typeof row.raw_payload === "object" ? row.raw_payload : null;
     if (!payload) {
       continue;
     }
@@ -460,9 +598,12 @@ function deriveServiceContextFromRawRows(rows) {
       pushUnique(outgoing, payload[key]);
     }
 
-    const nestedServiceContext = payload.service_context && typeof payload.service_context === 'object'
-      ? payload.service_context
-      : (payload.serviceContext && typeof payload.serviceContext === 'object' ? payload.serviceContext : {});
+    const nestedServiceContext =
+      payload.service_context && typeof payload.service_context === "object"
+        ? payload.service_context
+        : payload.serviceContext && typeof payload.serviceContext === "object"
+          ? payload.serviceContext
+          : {};
     addArrayValues(lines, nestedServiceContext.lines);
     addArrayValues(incoming, nestedServiceContext.incoming);
     addArrayValues(outgoing, nestedServiceContext.outgoing);
@@ -471,10 +612,22 @@ function deriveServiceContextFromRawRows(rows) {
       .map((key) => toCleanString(payload[key]).toLowerCase())
       .find((value) => Boolean(value));
     if (directionText) {
-      const label = toCleanString(payload.headsign || payload.destination || payload.to || payload.towards || directionText);
-      if (directionText.includes('inbound') || directionText.includes('incoming')) {
+      const label = toCleanString(
+        payload.headsign ||
+          payload.destination ||
+          payload.to ||
+          payload.towards ||
+          directionText,
+      );
+      if (
+        directionText.includes("inbound") ||
+        directionText.includes("incoming")
+      ) {
         pushUnique(incoming, label);
-      } else if (directionText.includes('outbound') || directionText.includes('outgoing')) {
+      } else if (
+        directionText.includes("outbound") ||
+        directionText.includes("outgoing")
+      ) {
         pushUnique(outgoing, label);
       }
     }
@@ -490,17 +643,22 @@ function deriveServiceContextFromRawRows(rows) {
   const outgoingList = Array.from(outgoing).sort((a, b) => a.localeCompare(b));
   const lineList = Array.from(lines).sort((a, b) => a.localeCompare(b));
 
-  let completenessStatus = 'none';
-  let completenessNotes = 'No source payload rows available for this candidate.';
+  let completenessStatus = "none";
+  let completenessNotes =
+    "No source payload rows available for this candidate.";
   if (sampledRows > 0 && (incomingList.length > 0 || outgoingList.length > 0)) {
-    completenessStatus = incomingList.length > 0 && outgoingList.length > 0 ? 'full' : 'partial';
-    completenessNotes = 'Incoming and outgoing service context derived from canonical source payload fields.';
+    completenessStatus =
+      incomingList.length > 0 && outgoingList.length > 0 ? "full" : "partial";
+    completenessNotes =
+      "Incoming and outgoing service context derived from canonical source payload fields.";
   } else if (sampledRows > 0 && lineList.length > 0) {
-    completenessStatus = 'partial';
-    completenessNotes = 'Line context derived from source payload rows; directional fields were incomplete.';
+    completenessStatus = "partial";
+    completenessNotes =
+      "Line context derived from source payload rows; directional fields were incomplete.";
   } else if (sampledRows > 0) {
-    completenessStatus = 'incomplete';
-    completenessNotes = 'Source rows exist but did not provide directional service keys.';
+    completenessStatus = "incomplete";
+    completenessNotes =
+      "Source rows exist but did not provide directional service keys.";
   }
 
   return {
@@ -510,8 +668,8 @@ function deriveServiceContextFromRawRows(rows) {
     completeness: {
       status: completenessStatus,
       sampled_rows: sampledRows,
-      notes: completenessNotes
-    }
+      notes: completenessNotes,
+    },
   };
 }
 
@@ -523,9 +681,9 @@ async function enrichCandidateServiceContext(client, candidates) {
   const stationIds = Array.from(
     new Set(
       candidates
-        .map((candidate) => toCleanString(candidate && candidate.canonical_station_id))
-        .filter(Boolean)
-    )
+        .map((candidate) => toCleanString(candidate?.canonical_station_id))
+        .filter(Boolean),
+    ),
   );
   if (stationIds.length === 0) {
     return candidates;
@@ -550,13 +708,13 @@ async function enrichCandidateServiceContext(client, candidates) {
     ORDER BY css.canonical_station_id, css.source_id, css.source_stop_id, css.snapshot_date
     `,
     {
-      station_ids: JSON.stringify(stationIds)
-    }
+      station_ids: JSON.stringify(stationIds),
+    },
   );
 
   const groupedRows = new Map();
   for (const row of rows) {
-    const stationId = toCleanString(row && row.canonical_station_id);
+    const stationId = toCleanString(row?.canonical_station_id);
     if (!stationId) {
       continue;
     }
@@ -567,11 +725,15 @@ async function enrichCandidateServiceContext(client, candidates) {
   }
 
   return candidates.map((candidate) => {
-    const stationId = toCleanString(candidate && candidate.canonical_station_id);
-    const derived = deriveServiceContextFromRawRows(groupedRows.get(stationId) || []);
-    const existingContext = candidate && candidate.service_context && typeof candidate.service_context === 'object'
-      ? candidate.service_context
-      : {};
+    const stationId = toCleanString(candidate?.canonical_station_id);
+    const derived = deriveServiceContextFromRawRows(
+      groupedRows.get(stationId) || [],
+    );
+    const existingContext =
+      candidate?.service_context &&
+      typeof candidate.service_context === "object"
+        ? candidate.service_context
+        : {};
     return {
       ...candidate,
       service_context: {
@@ -579,8 +741,8 @@ async function enrichCandidateServiceContext(client, candidates) {
         lines: derived.lines,
         incoming: derived.incoming,
         outgoing: derived.outgoing,
-        completeness: derived.completeness
-      }
+        completeness: derived.completeness,
+      },
     };
   });
 }
@@ -596,7 +758,7 @@ function gatherDecisionStationIds(decision) {
     }
   }
   for (const target of decision.renameTargets || []) {
-    if (target && target.canonicalStationId) {
+    if (target?.canonicalStationId) {
       stationIds.add(target.canonicalStationId);
     }
   }
@@ -610,14 +772,14 @@ async function loadClusterScope(client, clusterId) {
     FROM qa_station_clusters_v2 c
     WHERE c.cluster_id = :'cluster_id'
     `,
-    { cluster_id: clusterId }
+    { cluster_id: clusterId },
   );
 
   if (!cluster) {
     throw new AppError({
-      code: 'NOT_FOUND',
+      code: "NOT_FOUND",
       statusCode: 404,
-      message: 'Cluster not found'
+      message: "Cluster not found",
     });
   }
 
@@ -629,16 +791,18 @@ async function loadClusterScope(client, clusterId) {
     FROM qa_station_cluster_candidates_v2 cc
     WHERE cc.cluster_id = :'cluster_id'
     `,
-    { cluster_id: clusterId }
+    { cluster_id: clusterId },
   );
 
   const candidateSet = new Set(
-    clusterCandidates.map((row) => toCleanString(row && row.canonical_station_id)).filter(Boolean)
+    clusterCandidates
+      .map((row) => toCleanString(row?.canonical_station_id))
+      .filter(Boolean),
   );
   const stationToSegment = new Map();
   for (const row of clusterCandidates) {
-    const stationId = toCleanString(row && row.canonical_station_id);
-    const segmentId = toCleanString(row && row.segment_context && row.segment_context.segment_id);
+    const stationId = toCleanString(row?.canonical_station_id);
+    const segmentId = toCleanString(row?.segment_context?.segment_id);
     if (stationId && segmentId) {
       stationToSegment.set(stationId, segmentId);
     }
@@ -652,18 +816,20 @@ async function loadClusterScope(client, clusterId) {
       ON cc.canonical_station_id = seg.canonical_station_id
     WHERE cc.cluster_id = :'cluster_id'
     `,
-    { cluster_id: clusterId }
+    { cluster_id: clusterId },
   );
 
   const segmentSet = new Set(
-    clusterSegments.map((row) => toCleanString(row && row.segment_id)).filter(Boolean)
+    clusterSegments
+      .map((row) => toCleanString(row?.segment_id))
+      .filter(Boolean),
   );
 
   return {
     cluster,
     candidateSet,
     segmentSet,
-    stationToSegment
+    stationToSegment,
   };
 }
 
@@ -671,9 +837,9 @@ function validateClusterMembership(clusterId, stationIds, candidateSet) {
   for (const stationId of stationIds) {
     if (!candidateSet.has(stationId)) {
       throw new AppError({
-        code: 'INVALID_REQUEST',
+        code: "INVALID_REQUEST",
         statusCode: 400,
-        message: `Station '${stationId}' is not part of cluster '${clusterId}'`
+        message: `Station '${stationId}' is not part of cluster '${clusterId}'`,
       });
     }
   }
@@ -681,106 +847,170 @@ function validateClusterMembership(clusterId, stationIds, candidateSet) {
 
 function validateSegmentScope(segmentLinks, segmentSet) {
   for (const link of segmentLinks) {
-    if (!segmentSet.has(link.fromSegmentId) || !segmentSet.has(link.toSegmentId)) {
+    if (
+      !segmentSet.has(link.fromSegmentId) ||
+      !segmentSet.has(link.toSegmentId)
+    ) {
       throw new AppError({
-        code: 'INVALID_REQUEST',
+        code: "INVALID_REQUEST",
         statusCode: 400,
-        message: `Walking link segment is outside cluster scope ('${link.fromSegmentId}' -> '${link.toSegmentId}')`
+        message: `Walking link segment is outside cluster scope ('${link.fromSegmentId}' -> '${link.toSegmentId}')`,
       });
     }
   }
 }
 
 function hashStableId(prefix, input) {
-  const digest = crypto.createHash('sha1').update(String(input || '')).digest('hex').slice(0, 20);
+  const digest = crypto
+    .createHash("sha1")
+    .update(String(input || ""))
+    .digest("hex")
+    .slice(0, 20);
   return `${prefix}_${digest}`;
 }
 
 function inferSectionTypeFromLabel(label) {
-  const text = String(label || '').trim().toLowerCase();
+  const text = String(label || "")
+    .trim()
+    .toLowerCase();
   if (!text) {
-    return 'other';
+    return "other";
   }
-  if (text.includes('main') || text.includes('hbf') || text.includes('hauptbahnhof') || text.includes('rail')) {
-    return 'main';
+  if (
+    text.includes("main") ||
+    text.includes("hbf") ||
+    text.includes("hauptbahnhof") ||
+    text.includes("rail")
+  ) {
+    return "main";
   }
-  if (text.includes('secondary') || text.includes('aux') || text.includes('side')) {
-    return 'secondary';
+  if (
+    text.includes("secondary") ||
+    text.includes("aux") ||
+    text.includes("side")
+  ) {
+    return "secondary";
   }
-  if (text.includes('subway') || text.includes('metro') || text.includes('u-bahn') || text.includes('ubahn')) {
-    return 'subway';
+  if (
+    text.includes("subway") ||
+    text.includes("metro") ||
+    text.includes("u-bahn") ||
+    text.includes("ubahn")
+  ) {
+    return "subway";
   }
-  if (text.includes('bus')) {
-    return 'bus';
+  if (text.includes("bus")) {
+    return "bus";
   }
-  if (text.includes('tram') || text.includes('streetcar')) {
-    return 'tram';
+  if (text.includes("tram") || text.includes("streetcar")) {
+    return "tram";
   }
-  return 'other';
+  return "other";
 }
 
-function buildGroupModelFromDecision(clusterId, country, decision, stationToSegment = new Map()) {
-  if (!decision || decision.operation !== 'split' || !Array.isArray(decision.groups) || decision.groups.length < 2) {
+function buildGroupModelFromDecision(
+  clusterId,
+  country,
+  decision,
+  stationToSegment = new Map(),
+) {
+  if (
+    !decision ||
+    decision.operation !== "split" ||
+    !Array.isArray(decision.groups) ||
+    decision.groups.length < 2
+  ) {
     return null;
   }
 
-  const hasExplicitSections = decision.groups.some((group) => Boolean(group && group.hasSectionMetadata));
+  const hasExplicitSections = decision.groups.some((group) =>
+    Boolean(group?.hasSectionMetadata),
+  );
   if (!hasExplicitSections) {
     return null;
   }
 
-  const filteredGroups = decision.groups.filter((group) => Array.isArray(group.memberStationIds) && group.memberStationIds.length > 0);
+  const filteredGroups = decision.groups.filter(
+    (group) =>
+      Array.isArray(group.memberStationIds) &&
+      group.memberStationIds.length > 0,
+  );
   if (filteredGroups.length < 2) {
     return null;
   }
 
   const sectionSignature = filteredGroups
-    .map((group) => `${group.sectionType || inferSectionTypeFromLabel(group.groupLabel)}|${group.sectionName || group.groupLabel}|${group.memberStationIds.join(',')}`)
-    .join('|');
-  const groupId = hashStableId('grp', `${clusterId}|${sectionSignature}`);
+    .map(
+      (group) =>
+        `${group.sectionType || inferSectionTypeFromLabel(group.groupLabel)}|${group.sectionName || group.groupLabel}|${group.memberStationIds.join(",")}`,
+    )
+    .join("|");
+  const groupId = hashStableId("grp", `${clusterId}|${sectionSignature}`);
 
   const sectionToSegment = new Map();
   const segmentToSection = new Map();
   const sections = filteredGroups.map((group, index) => {
-      const sectionType = group.sectionType || inferSectionTypeFromLabel(group.groupLabel);
-      const sectionName = String(group.sectionName || group.groupLabel || `Section ${index + 1}`).trim() || `Section ${index + 1}`;
-      const sectionId = hashStableId('grpsec', `${groupId}|${index}|${sectionType}|${sectionName}|${group.memberStationIds.join(',')}`);
-      const mappedStation = group.memberStationIds.find((stationId) => stationToSegment.has(stationId));
-      const segmentId = mappedStation ? stationToSegment.get(mappedStation) : '';
-      if (segmentId) {
-        sectionToSegment.set(sectionId, segmentId);
-        if (!segmentToSection.has(segmentId)) {
-          segmentToSection.set(segmentId, sectionId);
-        }
+    const sectionType =
+      group.sectionType || inferSectionTypeFromLabel(group.groupLabel);
+    const sectionName =
+      String(
+        group.sectionName || group.groupLabel || `Section ${index + 1}`,
+      ).trim() || `Section ${index + 1}`;
+    const sectionId = hashStableId(
+      "grpsec",
+      `${groupId}|${index}|${sectionType}|${sectionName}|${group.memberStationIds.join(",")}`,
+    );
+    const mappedStation = group.memberStationIds.find((stationId) =>
+      stationToSegment.has(stationId),
+    );
+    const segmentId = mappedStation ? stationToSegment.get(mappedStation) : "";
+    if (segmentId) {
+      sectionToSegment.set(sectionId, segmentId);
+      if (!segmentToSection.has(segmentId)) {
+        segmentToSection.set(segmentId, sectionId);
       }
+    }
 
-      return {
-        sectionId,
-        sectionType,
-        sectionName,
-        memberStationIds: group.memberStationIds
-      };
-    });
+    return {
+      sectionId,
+      sectionType,
+      sectionName,
+      memberStationIds: group.memberStationIds,
+    };
+  });
 
   const links = [];
   const seen = new Set();
   for (const group of filteredGroups) {
-    const segmentAction = group && typeof group.segmentAction === 'object' ? group.segmentAction : {};
-    const walkLinks = Array.isArray(segmentAction.walk_links) ? segmentAction.walk_links : [];
+    const segmentAction =
+      group && typeof group.segmentAction === "object"
+        ? group.segmentAction
+        : {};
+    const walkLinks = Array.isArray(segmentAction.walk_links)
+      ? segmentAction.walk_links
+      : [];
     for (const link of walkLinks) {
-      const fromSegmentId = toCleanString(link && (link.from_segment_id || link.fromSegmentId));
-      const toSegmentId = toCleanString(link && (link.to_segment_id || link.toSegmentId));
+      const fromSegmentId = toCleanString(
+        link && (link.from_segment_id || link.fromSegmentId),
+      );
+      const toSegmentId = toCleanString(
+        link && (link.to_segment_id || link.toSegmentId),
+      );
       const fromSectionId = segmentToSection.get(fromSegmentId);
       const toSectionId = segmentToSection.get(toSegmentId);
       if (!fromSectionId || !toSectionId || fromSectionId === toSectionId) {
         continue;
       }
 
-      const minWalkMinutes = Math.max(0, Number.parseInt(String(
-        link && (link.min_walk_minutes ?? link.minWalkMinutes ?? 0)
-      ), 10) || 0);
-      const bidirectional = Boolean(link && link.bidirectional);
-      const key = `${fromSectionId}|${toSectionId}|${minWalkMinutes}|${bidirectional ? 'b' : 's'}`;
+      const minWalkMinutes = Math.max(
+        0,
+        Number.parseInt(
+          String(link && (link.min_walk_minutes ?? link.minWalkMinutes ?? 0)),
+          10,
+        ) || 0,
+      );
+      const bidirectional = Boolean(link?.bidirectional);
+      const key = `${fromSectionId}|${toSectionId}|${minWalkMinutes}|${bidirectional ? "b" : "s"}`;
       if (seen.has(key)) {
         continue;
       }
@@ -791,12 +1021,12 @@ function buildGroupModelFromDecision(clusterId, country, decision, stationToSegm
         minWalkMinutes,
         metadata: {
           ...(link.metadata || {}),
-          source: 'cluster_decision',
+          source: "cluster_decision",
           from_segment_id: fromSegmentId,
           to_segment_id: toSegmentId,
-          bidirectional
+          bidirectional,
         },
-        bidirectional
+        bidirectional,
       });
     }
   }
@@ -805,15 +1035,15 @@ function buildGroupModelFromDecision(clusterId, country, decision, stationToSegm
     groupId,
     clusterId,
     country,
-    displayName: decision.renameTo || 'Grouped station',
+    displayName: decision.renameTo || "Grouped station",
     requestedBy: decision.requestedBy,
     sections,
-    links
+    links,
   };
 }
 
 function parseListLimit(raw, fallback = 50, max = 200) {
-  const parsed = Number.parseInt(String(raw ?? ''), 10);
+  const parsed = Number.parseInt(String(raw ?? ""), 10);
   if (!Number.isFinite(parsed) || parsed <= 0) {
     return fallback;
   }
@@ -821,30 +1051,35 @@ function parseListLimit(raw, fallback = 50, max = 200) {
 }
 
 function normalizeClusterStatusFilter(raw) {
-  const value = String(raw || '').trim().toLowerCase();
+  const value = String(raw || "")
+    .trim()
+    .toLowerCase();
   if (!value) {
-    return '';
+    return "";
   }
-  if (!['open', 'in_review', 'resolved', 'dismissed'].includes(value)) {
+  if (!["open", "in_review", "resolved", "dismissed"].includes(value)) {
     throw new AppError({
-      code: 'INVALID_REQUEST',
+      code: "INVALID_REQUEST",
       statusCode: 400,
-      message: "status must be one of 'open', 'in_review', 'resolved', 'dismissed'"
+      message:
+        "status must be one of 'open', 'in_review', 'resolved', 'dismissed'",
     });
   }
   return value;
 }
 
 function normalizeCuratedStatusFilter(raw) {
-  const value = String(raw || '').trim().toLowerCase();
+  const value = String(raw || "")
+    .trim()
+    .toLowerCase();
   if (!value) {
-    return '';
+    return "";
   }
-  if (!['active', 'superseded'].includes(value)) {
+  if (!["active", "superseded"].includes(value)) {
     throw new AppError({
-      code: 'INVALID_REQUEST',
+      code: "INVALID_REQUEST",
       statusCode: 400,
-      message: "status must be one of 'active', 'superseded'"
+      message: "status must be one of 'active', 'superseded'",
     });
   }
   return value;
@@ -852,10 +1087,12 @@ function normalizeCuratedStatusFilter(raw) {
 
 async function getReviewClustersV2(url) {
   const client = await getDbClient();
-  const country = normalizeIsoCountry(url.searchParams.get('country'), { allowEmpty: true });
-  const status = normalizeClusterStatusFilter(url.searchParams.get('status'));
-  const scopeTag = String(url.searchParams.get('scope_tag') || '').trim();
-  const limit = parseListLimit(url.searchParams.get('limit'), 50, 200);
+  const country = normalizeIsoCountry(url.searchParams.get("country"), {
+    allowEmpty: true,
+  });
+  const status = normalizeClusterStatusFilter(url.searchParams.get("status"));
+  const scopeTag = String(url.searchParams.get("scope_tag") || "").trim();
+  const limit = parseListLimit(url.searchParams.get("limit"), 50, 200);
 
   const rows = await client.queryRows(
     `
@@ -897,8 +1134,8 @@ async function getReviewClustersV2(url) {
       country,
       status,
       scope_tag: scopeTag,
-      limit
-    }
+      limit,
+    },
   );
 
   return rows;
@@ -906,12 +1143,12 @@ async function getReviewClustersV2(url) {
 
 async function getReviewClusterDetailV2(clusterId) {
   const client = await getDbClient();
-  const cleanClusterId = String(clusterId || '').trim();
+  const cleanClusterId = String(clusterId || "").trim();
   if (!cleanClusterId) {
     throw new AppError({
-      code: 'INVALID_REQUEST',
+      code: "INVALID_REQUEST",
       statusCode: 400,
-      message: 'cluster_id is required'
+      message: "cluster_id is required",
     });
   }
 
@@ -937,14 +1174,14 @@ async function getReviewClusterDetailV2(clusterId) {
     FROM qa_station_clusters_v2 c
     WHERE c.cluster_id = :'cluster_id'
     `,
-    { cluster_id: cleanClusterId }
+    { cluster_id: cleanClusterId },
   );
 
   if (!cluster) {
     throw new AppError({
-      code: 'NOT_FOUND',
+      code: "NOT_FOUND",
       statusCode: 404,
-      message: 'Cluster not found'
+      message: "Cluster not found",
     });
   }
 
@@ -970,7 +1207,7 @@ async function getReviewClusterDetailV2(clusterId) {
       WHERE cc.cluster_id = :'cluster_id'
       ORDER BY cc.candidate_rank, cc.canonical_station_id
       `,
-      { cluster_id: cleanClusterId }
+      { cluster_id: cleanClusterId },
     ),
     client.queryRows(
       `
@@ -987,7 +1224,7 @@ async function getReviewClusterDetailV2(clusterId) {
       WHERE e.cluster_id = :'cluster_id'
       ORDER BY e.evidence_type, e.source_canonical_station_id, e.target_canonical_station_id, e.evidence_id
       `,
-      { cluster_id: cleanClusterId }
+      { cluster_id: cleanClusterId },
     ),
     client.queryRows(
       `
@@ -1014,27 +1251,32 @@ async function getReviewClusterDetailV2(clusterId) {
       WHERE d.cluster_id = :'cluster_id'
       ORDER BY d.created_at DESC, d.decision_id DESC
       `,
-      { cluster_id: cleanClusterId }
+      { cluster_id: cleanClusterId },
     ),
   ]);
 
-  const enrichedCandidates = await enrichCandidateServiceContext(client, candidates);
+  const enrichedCandidates = await enrichCandidateServiceContext(
+    client,
+    candidates,
+  );
 
   return {
     ...cluster,
     candidates: enrichedCandidates,
     evidence,
     decisions,
-    edit_history: []
+    edit_history: [],
   };
 }
 
 async function getCuratedStationsV1(url) {
   const client = await getDbClient();
-  const country = normalizeIsoCountry(url.searchParams.get('country'), { allowEmpty: true });
-  const status = normalizeCuratedStatusFilter(url.searchParams.get('status'));
-  const clusterId = String(url.searchParams.get('cluster_id') || '').trim();
-  const limit = parseListLimit(url.searchParams.get('limit'), 50, 200);
+  const country = normalizeIsoCountry(url.searchParams.get("country"), {
+    allowEmpty: true,
+  });
+  const status = normalizeCuratedStatusFilter(url.searchParams.get("status"));
+  const clusterId = String(url.searchParams.get("cluster_id") || "").trim();
+  const limit = parseListLimit(url.searchParams.get("limit"), 50, 200);
 
   const rows = await client.queryRows(
     `
@@ -1094,8 +1336,8 @@ async function getCuratedStationsV1(url) {
       country,
       status,
       cluster_id: clusterId,
-      limit
-    }
+      limit,
+    },
   );
 
   return rows;
@@ -1103,12 +1345,12 @@ async function getCuratedStationsV1(url) {
 
 async function getCuratedStationDetailV1(curatedStationId) {
   const client = await getDbClient();
-  const cleanCuratedStationId = String(curatedStationId || '').trim();
+  const cleanCuratedStationId = String(curatedStationId || "").trim();
   if (!cleanCuratedStationId) {
     throw new AppError({
-      code: 'INVALID_REQUEST',
+      code: "INVALID_REQUEST",
       statusCode: 400,
-      message: 'curated_station_id is required'
+      message: "curated_station_id is required",
     });
   }
 
@@ -1135,15 +1377,15 @@ async function getCuratedStationDetailV1(curatedStationId) {
     WHERE p.curated_station_id = :'curated_station_id'
     `,
     {
-      curated_station_id: cleanCuratedStationId
-    }
+      curated_station_id: cleanCuratedStationId,
+    },
   );
 
   if (!row) {
     throw new AppError({
-      code: 'NOT_FOUND',
+      code: "NOT_FOUND",
       statusCode: 404,
-      message: 'Curated station not found'
+      message: "Curated station not found",
     });
   }
 
@@ -1152,7 +1394,9 @@ async function getCuratedStationDetailV1(curatedStationId) {
 
 async function findActiveRefreshJob(jobsRepo) {
   const jobs = await jobsRepo.listRecentByType(REFRESH_JOB_TYPE, 50);
-  const active = jobs.filter((job) => ACTIVE_REFRESH_JOB_STATUSES.has(job.status));
+  const active = jobs.filter((job) =>
+    ACTIVE_REFRESH_JOB_STATUSES.has(job.status),
+  );
   if (active.length === 0) {
     return null;
   }
@@ -1161,7 +1405,7 @@ async function findActiveRefreshJob(jobsRepo) {
   const priority = {
     running: 0,
     retry_wait: 1,
-    queued: 2
+    queued: 2,
   };
 
   active.sort((a, b) => {
@@ -1170,7 +1414,7 @@ async function findActiveRefreshJob(jobsRepo) {
     if (pa !== pb) {
       return pa - pb;
     }
-    return String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
+    return String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
   });
 
   return active[0];
@@ -1190,10 +1434,12 @@ function startRefreshWorker(options = {}) {
     return existing;
   }
 
-  const logger = options.logger || createPipelineLogger(rootDir, REFRESH_JOB_TYPE, job.jobId);
+  const logger =
+    options.logger ||
+    createPipelineLogger(rootDir, REFRESH_JOB_TYPE, job.jobId);
   const jobOrchestrator = createJobOrchestrator({
     jobsRepo,
-    logger
+    logger,
   });
   const scope = normalizeRefreshScope(job?.runContext?.scope || {});
 
@@ -1203,25 +1449,30 @@ function startRefreshWorker(options = {}) {
       jobType: REFRESH_JOB_TYPE,
       idempotencyKey: job.idempotencyKey,
       runContext: {
-        ...(job.runContext && typeof job.runContext === 'object' ? job.runContext : {}),
-        scope
+        ...(job.runContext && typeof job.runContext === "object"
+          ? job.runContext
+          : {}),
+        scope,
       },
-      maxAttempts: Number.parseInt(process.env.PIPELINE_JOB_MAX_ATTEMPTS || '3', 10),
+      maxAttempts: Number.parseInt(
+        process.env.PIPELINE_JOB_MAX_ATTEMPTS || "3",
+        10,
+      ),
       maxConcurrent: 1,
       execute: async ({ updateCheckpoint }) =>
         runRefreshPipelineSteps({
           rootDir,
           runId: job.jobId,
           scope,
-          updateCheckpoint
-        })
+          updateCheckpoint,
+        }),
     })
     .catch((err) => {
       const appErr = toAppError(err);
-      logger.error('refresh pipeline worker failed', {
+      logger.error("refresh pipeline worker failed", {
         jobId: job.jobId,
         errorCode: appErr.code,
-        error: appErr.message
+        error: appErr.message,
       });
     })
     .finally(() => {
@@ -1241,13 +1492,15 @@ async function postRefreshJob(body, options = {}) {
   const active = await findActiveRefreshJob(jobsRepo);
   if (active) {
     const payload = toRefreshJobPayload(active);
-    if (active.status === 'queued' || active.status === 'retry_wait') {
-      const runningCount = await jobsRepo.countRunningByType(REFRESH_JOB_TYPE).catch(() => 1);
+    if (active.status === "queued" || active.status === "retry_wait") {
+      const runningCount = await jobsRepo
+        .countRunningByType(REFRESH_JOB_TYPE)
+        .catch(() => 1);
       if (runningCount === 0) {
         startRefreshWorker({
           rootDir,
           job: active,
-          jobsRepo
+          jobsRepo,
         });
       }
     }
@@ -1256,7 +1509,7 @@ async function postRefreshJob(body, options = {}) {
       reused: true,
       in_flight: true,
       job_id: payload.job_id,
-      job: payload
+      job: payload,
     };
   }
 
@@ -1265,7 +1518,7 @@ async function postRefreshJob(body, options = {}) {
     jobId,
     scope.country,
     scope.asOf,
-    scope.sourceId
+    scope.sourceId,
   ]);
   const queuedJob = await jobsRepo.createQueuedJob({
     jobId,
@@ -1274,22 +1527,22 @@ async function postRefreshJob(body, options = {}) {
     runContext: {
       scope,
       requestedAt: new Date().toISOString(),
-      source: 'qa.refresh'
+      source: "qa.refresh",
     },
     checkpoint: {
-      status: 'queued',
+      status: "queued",
       scope,
-      step: 'queued',
-      stepLabel: 'Queued',
+      step: "queued",
+      stepLabel: "Queued",
       completedSteps: [],
-      updatedAt: new Date().toISOString()
-    }
+      updatedAt: new Date().toISOString(),
+    },
   });
 
   startRefreshWorker({
     rootDir,
     job: queuedJob,
-    jobsRepo
+    jobsRepo,
   });
 
   const payload = toRefreshJobPayload(queuedJob);
@@ -1298,18 +1551,18 @@ async function postRefreshJob(body, options = {}) {
     reused: false,
     in_flight: true,
     job_id: payload.job_id,
-    job: payload
+    job: payload,
   };
 }
 
 async function getRefreshJob(jobId, options = {}) {
   const rootDir = options.rootDir || process.cwd();
-  const cleanJobId = String(jobId || '').trim();
+  const cleanJobId = String(jobId || "").trim();
   if (!cleanJobId) {
     throw new AppError({
-      code: 'INVALID_REQUEST',
+      code: "INVALID_REQUEST",
       statusCode: 400,
-      message: 'job_id is required'
+      message: "job_id is required",
     });
   }
 
@@ -1320,11 +1573,15 @@ async function getRefreshJob(jobId, options = {}) {
   try {
     job = await jobsRepo.getById(cleanJobId);
   } catch (err) {
-    if (String(err.message || '').toLowerCase().includes('invalid input syntax for type uuid')) {
+    if (
+      String(err.message || "")
+        .toLowerCase()
+        .includes("invalid input syntax for type uuid")
+    ) {
       throw new AppError({
-        code: 'INVALID_REQUEST',
+        code: "INVALID_REQUEST",
         statusCode: 400,
-        message: 'job_id must be a valid UUID'
+        message: "job_id must be a valid UUID",
       });
     }
     throw err;
@@ -1332,19 +1589,24 @@ async function getRefreshJob(jobId, options = {}) {
 
   if (!job || job.jobType !== REFRESH_JOB_TYPE) {
     throw new AppError({
-      code: 'INVALID_REQUEST',
+      code: "INVALID_REQUEST",
       statusCode: 404,
-      message: 'Refresh pipeline job not found'
+      message: "Refresh pipeline job not found",
     });
   }
 
-  if ((job.status === 'queued' || job.status === 'retry_wait') && !refreshWorkers.has(job.jobId)) {
-    const runningCount = await jobsRepo.countRunningByType(REFRESH_JOB_TYPE).catch(() => 1);
+  if (
+    (job.status === "queued" || job.status === "retry_wait") &&
+    !refreshWorkers.has(job.jobId)
+  ) {
+    const runningCount = await jobsRepo
+      .countRunningByType(REFRESH_JOB_TYPE)
+      .catch(() => 1);
     if (runningCount === 0) {
       startRefreshWorker({
         rootDir,
         job,
-        jobsRepo
+        jobsRepo,
       });
     }
   }
@@ -1353,7 +1615,12 @@ async function getRefreshJob(jobId, options = {}) {
 }
 
 function persistGroupModel(tx, groupModel) {
-  if (!groupModel || !groupModel.groupId || !Array.isArray(groupModel.sections) || groupModel.sections.length === 0) {
+  if (
+    !groupModel ||
+    !groupModel.groupId ||
+    !Array.isArray(groupModel.sections) ||
+    groupModel.sections.length === 0
+  ) {
     return;
   }
 
@@ -1369,8 +1636,8 @@ function persistGroupModel(tx, groupModel) {
     `,
     {
       cluster_id: groupModel.clusterId,
-      requested_by: groupModel.requestedBy
-    }
+      requested_by: groupModel.requestedBy,
+    },
   );
 
   tx.add(
@@ -1415,8 +1682,8 @@ function persistGroupModel(tx, groupModel) {
       cluster_id: groupModel.clusterId,
       country: groupModel.country,
       display_name: groupModel.displayName,
-      requested_by: groupModel.requestedBy
-    }
+      requested_by: groupModel.requestedBy,
+    },
   );
 
   tx.add(
@@ -1425,8 +1692,8 @@ function persistGroupModel(tx, groupModel) {
     WHERE group_id = :'group_id'
     `,
     {
-      group_id: groupModel.groupId
-    }
+      group_id: groupModel.groupId,
+    },
   );
 
   for (const section of groupModel.sections) {
@@ -1459,11 +1726,14 @@ function persistGroupModel(tx, groupModel) {
         group_id: groupModel.groupId,
         section_type: section.sectionType,
         section_name: section.sectionName,
-        requested_by: groupModel.requestedBy
-      }
+        requested_by: groupModel.requestedBy,
+      },
     );
 
-    if (Array.isArray(section.memberStationIds) && section.memberStationIds.length > 0) {
+    if (
+      Array.isArray(section.memberStationIds) &&
+      section.memberStationIds.length > 0
+    ) {
       tx.add(
         `
         INSERT INTO qa_station_group_section_members_v2 (
@@ -1483,10 +1753,10 @@ function persistGroupModel(tx, groupModel) {
           section_id: section.sectionId,
           members: JSON.stringify(
             section.memberStationIds.map((stationId) => ({
-              canonical_station_id: stationId
-            }))
-          )
-        }
+              canonical_station_id: stationId,
+            })),
+          ),
+        },
       );
     }
   }
@@ -1530,8 +1800,8 @@ function persistGroupModel(tx, groupModel) {
                 from_section_id: link.fromSectionId,
                 to_section_id: link.toSectionId,
                 min_walk_minutes: link.minWalkMinutes,
-                metadata: link.metadata || {}
-              }
+                metadata: link.metadata || {},
+              },
             ];
             if (link.bidirectional) {
               rows.push({
@@ -1540,14 +1810,14 @@ function persistGroupModel(tx, groupModel) {
                 min_walk_minutes: link.minWalkMinutes,
                 metadata: {
                   ...(link.metadata || {}),
-                  bidirectional: true
-                }
+                  bidirectional: true,
+                },
               });
             }
             return rows;
-          })
-        )
-      }
+          }),
+        ),
+      },
     );
   }
 }
@@ -1557,12 +1827,12 @@ function buildDecisionMembersPayload(decision) {
   const seen = new Set();
 
   function pushRow(canonicalStationId, groupLabel, action, metadata = {}) {
-    const stationId = String(canonicalStationId || '').trim();
+    const stationId = String(canonicalStationId || "").trim();
     if (!stationId) {
       return;
     }
-    const label = String(groupLabel || '').trim();
-    const memberAction = String(action || 'candidate').trim() || 'candidate';
+    const label = String(groupLabel || "").trim();
+    const memberAction = String(action || "candidate").trim() || "candidate";
     const key = `${stationId}|${label}|${memberAction}`;
     if (seen.has(key)) {
       return;
@@ -1572,37 +1842,42 @@ function buildDecisionMembersPayload(decision) {
       canonical_station_id: stationId,
       group_label: label,
       action: memberAction,
-      metadata: metadata && typeof metadata === 'object' ? metadata : {}
+      metadata: metadata && typeof metadata === "object" ? metadata : {},
     });
   }
 
   if (decision.groups.length > 0) {
     for (const group of decision.groups) {
       for (const stationId of group.memberStationIds) {
-        pushRow(stationId, group.groupLabel, decision.operation === 'merge' ? 'merge_member' : 'candidate', {
-          rename_to: group.renameTo || null,
-          segment_action: group.segmentAction || {},
-          line_action: group.lineAction || {}
-        });
+        pushRow(
+          stationId,
+          group.groupLabel,
+          decision.operation === "merge" ? "merge_member" : "candidate",
+          {
+            rename_to: group.renameTo || null,
+            segment_action: group.segmentAction || {},
+            line_action: group.lineAction || {},
+          },
+        );
       }
     }
   }
 
   if (decision.groups.length === 0 && decision.selectedStationIds.length > 0) {
-    if (decision.operation === 'merge') {
+    if (decision.operation === "merge") {
       for (const stationId of decision.selectedStationIds) {
-        pushRow(stationId, 'selected', 'merge_member');
+        pushRow(stationId, "selected", "merge_member");
       }
     } else {
       for (const stationId of decision.selectedStationIds) {
-        pushRow(stationId, 'selected', 'candidate');
+        pushRow(stationId, "selected", "candidate");
       }
     }
   }
 
   if (rows.length === 0) {
     for (const stationId of decision.selectedStationIds) {
-      pushRow(stationId, 'selected', 'candidate');
+      pushRow(stationId, "selected", "candidate");
     }
   }
 
@@ -1614,8 +1889,8 @@ function buildRenameTargets(decision) {
   const seen = new Set();
 
   for (const target of decision.renameTargets || []) {
-    const stationId = toCleanString(target && target.canonicalStationId);
-    const renameTo = toCleanString(target && target.renameTo);
+    const stationId = toCleanString(target?.canonicalStationId);
+    const renameTo = toCleanString(target?.renameTo);
     if (!stationId || !renameTo) {
       continue;
     }
@@ -1626,7 +1901,7 @@ function buildRenameTargets(decision) {
     seen.add(key);
     targets.push({
       canonicalStationId: stationId,
-      renameTo
+      renameTo,
     });
   }
 
@@ -1638,30 +1913,45 @@ function buildSegmentWalkLinks(decision) {
   const seen = new Set();
 
   for (const group of decision.groups) {
-    const segmentAction = group && typeof group.segmentAction === 'object' ? group.segmentAction : {};
+    const segmentAction =
+      group && typeof group.segmentAction === "object"
+        ? group.segmentAction
+        : {};
     const rawLinks = Array.isArray(segmentAction.walk_links)
       ? segmentAction.walk_links
-      : (Array.isArray(segmentAction.walkLinks) ? segmentAction.walkLinks : []);
+      : Array.isArray(segmentAction.walkLinks)
+        ? segmentAction.walkLinks
+        : [];
 
     for (const rawLink of rawLinks) {
-      const input = rawLink && typeof rawLink === 'object' ? rawLink : {};
-      const fromSegmentId = String(input.from_segment_id || input.fromSegmentId || '').trim();
-      const toSegmentId = String(input.to_segment_id || input.toSegmentId || '').trim();
+      const input = rawLink && typeof rawLink === "object" ? rawLink : {};
+      const fromSegmentId = String(
+        input.from_segment_id || input.fromSegmentId || "",
+      ).trim();
+      const toSegmentId = String(
+        input.to_segment_id || input.toSegmentId || "",
+      ).trim();
       if (!fromSegmentId || !toSegmentId || fromSegmentId === toSegmentId) {
         continue;
       }
 
-      let minWalkMinutes = Number.parseInt(input.min_walk_minutes ?? input.minWalkMinutes ?? 0, 10);
+      let minWalkMinutes = Number.parseInt(
+        input.min_walk_minutes ?? input.minWalkMinutes ?? 0,
+        10,
+      );
       if (!Number.isFinite(minWalkMinutes) || minWalkMinutes < 0) {
         minWalkMinutes = 0;
       }
 
       const bidirectional = Boolean(input.bidirectional);
-      const metadata = input.metadata && typeof input.metadata === 'object' ? { ...input.metadata } : {};
+      const metadata =
+        input.metadata && typeof input.metadata === "object"
+          ? { ...input.metadata }
+          : {};
       const baseMetadata = {
         ...metadata,
-        group_label: group.groupLabel || '',
-        operation: decision.operation
+        group_label: group.groupLabel || "",
+        operation: decision.operation,
       };
 
       const forwardKey = `${fromSegmentId}|${toSegmentId}`;
@@ -1673,8 +1963,8 @@ function buildSegmentWalkLinks(decision) {
           minWalkMinutes,
           metadata: {
             ...baseMetadata,
-            bidirectional
-          }
+            bidirectional,
+          },
         });
       }
 
@@ -1688,8 +1978,8 @@ function buildSegmentWalkLinks(decision) {
             minWalkMinutes,
             metadata: {
               ...baseMetadata,
-              bidirectional: true
-            }
+              bidirectional: true,
+            },
           });
         }
       }
@@ -1701,37 +1991,42 @@ function buildSegmentWalkLinks(decision) {
 
 async function postReviewClusterDecisionV2(clusterId, body) {
   const client = await getDbClient();
-  const cleanClusterId = String(clusterId || '').trim();
+  const cleanClusterId = String(clusterId || "").trim();
   if (!cleanClusterId) {
     throw new AppError({
-      code: 'INVALID_REQUEST',
+      code: "INVALID_REQUEST",
       statusCode: 400,
-      message: 'cluster_id is required'
+      message: "cluster_id is required",
     });
   }
 
-  const {
-    cluster,
-    candidateSet,
-    segmentSet,
-    stationToSegment
-  } = await loadClusterScope(client, cleanClusterId);
+  const { cluster, candidateSet, segmentSet, stationToSegment } =
+    await loadClusterScope(client, cleanClusterId);
 
   const decision = normalizeClusterDecision(body);
   const candidateIdsFromDecision = gatherDecisionStationIds(decision);
-  validateClusterMembership(cleanClusterId, candidateIdsFromDecision, candidateSet);
+  validateClusterMembership(
+    cleanClusterId,
+    candidateIdsFromDecision,
+    candidateSet,
+  );
 
   const membersPayload = buildDecisionMembersPayload(decision);
   const renameTargets = buildRenameTargets(decision);
   const segmentWalkLinks = buildSegmentWalkLinks(decision);
-  const groupModel = buildGroupModelFromDecision(cleanClusterId, cluster.country, decision, stationToSegment);
+  const groupModel = buildGroupModelFromDecision(
+    cleanClusterId,
+    cluster.country,
+    decision,
+    stationToSegment,
+  );
   const curatedProjection = buildCuratedProjectionRowsV1({
     clusterId: cleanClusterId,
-    decision
+    decision,
   });
   const shouldDismiss = false;
   const shouldResolve = true;
-  let appliedToOverrides = false;
+  const appliedToOverrides = false;
 
   validateSegmentScope(segmentWalkLinks, segmentSet);
 
@@ -1771,12 +2066,12 @@ async function postReviewClusterDecisionV2(clusterId, body) {
           selected_station_ids: decision.selectedStationIds,
           groups: decision.groups,
           rename_to: decision.renameTo || null,
-          rename_targets: decision.renameTargets || []
+          rename_targets: decision.renameTargets || [],
         }),
         line_decision_payload: JSON.stringify(decision.lineDecisions || {}),
-        note: decision.note || '',
-        requested_by: decision.requestedBy
-      }
+        note: decision.note || "",
+        requested_by: decision.requestedBy,
+      },
     );
 
     if (membersPayload.length > 0) {
@@ -1803,8 +2098,8 @@ async function postReviewClusterDecisionV2(clusterId, body) {
         )
         `,
         {
-          members: JSON.stringify(membersPayload)
-        }
+          members: JSON.stringify(membersPayload),
+        },
       );
     }
 
@@ -1824,10 +2119,10 @@ async function postReviewClusterDecisionV2(clusterId, body) {
           rename_targets: JSON.stringify(
             renameTargets.map((target) => ({
               canonical_station_id: target.canonicalStationId,
-              rename_to: target.renameTo
-            }))
-          )
-        }
+              rename_to: target.renameTo,
+            })),
+          ),
+        },
       );
 
       tx.add(
@@ -1866,12 +2161,11 @@ async function postReviewClusterDecisionV2(clusterId, body) {
           rename_targets: JSON.stringify(
             renameTargets.map((target) => ({
               canonical_station_id: target.canonicalStationId,
-              rename_to: target.renameTo
-            }))
-          )
-        }
+              rename_to: target.renameTo,
+            })),
+          ),
+        },
       );
-
     }
 
     if (segmentWalkLinks.length > 0) {
@@ -1914,10 +2208,10 @@ async function postReviewClusterDecisionV2(clusterId, body) {
               from_segment_id: link.fromSegmentId,
               to_segment_id: link.toSegmentId,
               min_walk_minutes: link.minWalkMinutes,
-              metadata: link.metadata || {}
-            }))
-          )
-        }
+              metadata: link.metadata || {},
+            })),
+          ),
+        },
       );
     }
 
@@ -1930,12 +2224,12 @@ async function postReviewClusterDecisionV2(clusterId, body) {
         selected_station_ids: decision.selectedStationIds,
         groups: decision.groups,
         rename_to: decision.renameTo || null,
-        rename_targets: decision.renameTargets || []
+        rename_targets: decision.renameTargets || [],
       },
       entities: curatedProjection.entities,
       members: curatedProjection.members,
       fieldProvenance: curatedProjection.fieldProvenance,
-      lineage: curatedProjection.lineage
+      lineage: curatedProjection.lineage,
     });
 
     tx.add(
@@ -1945,8 +2239,8 @@ async function postReviewClusterDecisionV2(clusterId, body) {
       WHERE decision_id = (SELECT decision_id FROM _decision_ctx LIMIT 1)
       `,
       {
-        applied_to_overrides: appliedToOverrides ? 'true' : 'false'
-      }
+        applied_to_overrides: appliedToOverrides ? "true" : "false",
+      },
     );
 
     tx.add(
@@ -1971,10 +2265,10 @@ async function postReviewClusterDecisionV2(clusterId, body) {
       `,
       {
         cluster_id: cleanClusterId,
-        dismiss: shouldDismiss ? 'true' : 'false',
-        resolve: shouldResolve ? 'true' : 'false',
-        requested_by: decision.requestedBy
-      }
+        dismiss: shouldDismiss ? "true" : "false",
+        resolve: shouldResolve ? "true" : "false",
+        requested_by: decision.requestedBy,
+      },
     );
 
     tx.add(
@@ -1995,10 +2289,10 @@ async function postReviewClusterDecisionV2(clusterId, body) {
       `,
       {
         cluster_id: cleanClusterId,
-        dismiss: shouldDismiss ? 'true' : 'false',
+        dismiss: shouldDismiss ? "true" : "false",
         requested_by: decision.requestedBy,
-        note: decision.note || ''
-      }
+        note: decision.note || "",
+      },
     );
 
     tx.add(
@@ -2006,8 +2300,8 @@ async function postReviewClusterDecisionV2(clusterId, body) {
       SELECT qa_refresh_station_display_names_v2(:'country')
       `,
       {
-        country: cluster.country
-      }
+        country: cluster.country,
+      },
     );
   });
 
@@ -2022,8 +2316,8 @@ async function postReviewClusterDecisionV2(clusterId, body) {
     `,
     {
       cluster_id: cleanClusterId,
-      requested_by: decision.requestedBy
-    }
+      requested_by: decision.requestedBy,
+    },
   );
 
   return {
@@ -2031,7 +2325,9 @@ async function postReviewClusterDecisionV2(clusterId, body) {
     cluster_id: cleanClusterId,
     decision_id: latestDecision ? latestDecision.decision_id : null,
     operation: decision.operation,
-    applied_to_overrides: latestDecision ? Boolean(latestDecision.applied_to_overrides) : false
+    applied_to_overrides: latestDecision
+      ? Boolean(latestDecision.applied_to_overrides)
+      : false,
   };
 }
 
@@ -2042,5 +2338,5 @@ module.exports = {
   getCuratedStationDetailV1,
   postReviewClusterDecisionV2,
   postRefreshJob,
-  getRefreshJob
+  getRefreshJob,
 };

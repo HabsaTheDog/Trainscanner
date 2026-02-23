@@ -1,11 +1,11 @@
-import { useEffect } from 'react';
-import { initHomeApp } from './legacy/home-logic';
+import { useEffect } from "react";
+import { initHomeApp } from "./legacy/home-logic";
 
 export function HomePage() {
   useEffect(() => {
     const cleanup = initHomeApp();
     return () => {
-      if (typeof cleanup === 'function') {
+      if (typeof cleanup === "function") {
         cleanup();
       }
     };
@@ -15,9 +15,18 @@ export function HomePage() {
     <main className="page">
       <section className="card">
         <h1>MOTIS GTFS Profile Switcher</h1>
-        <p className="muted">Switch GTFS runtime profiles without taking down the frontend.</p>
+        <p className="muted">
+          Switch GTFS runtime profiles without taking down the frontend.
+        </p>
         <div style={{ marginBottom: 24 }}>
-          <a href="/curation.html" style={{ fontWeight: 600, color: 'var(--accent)', textDecoration: 'none' }}>
+          <a
+            href="/curation.html"
+            style={{
+              fontWeight: 600,
+              color: "var(--accent)",
+              textDecoration: "none",
+            }}
+          >
             &rarr; Open QA Curation Dashboard
           </a>
         </div>
@@ -25,14 +34,20 @@ export function HomePage() {
         <div className="row">
           <label htmlFor="profileSelect">Profile</label>
           <select id="profileSelect"></select>
-          <button id="activateBtn" type="button">Activate</button>
+          <button id="activateBtn" type="button">
+            Activate
+          </button>
         </div>
 
         <div className="status-row">
           <span>System status</span>
-          <span id="statusBadge" className="badge idle">idle</span>
+          <span id="statusBadge" className="badge idle">
+            idle
+          </span>
         </div>
-        <pre id="statusMessage" className="status-msg">Loading...</pre>
+        <pre id="statusMessage" className="status-msg">
+          Loading...
+        </pre>
       </section>
 
       <section className="card">
@@ -63,19 +78,29 @@ export function HomePage() {
           <label htmlFor="datetime">Datetime</label>
           <input id="datetime" name="datetime" type="datetime-local" required />
 
-          <button id="routeBtn" type="submit">Search Route</button>
+          <button id="routeBtn" type="submit">
+            Search Route
+          </button>
         </form>
 
         <section id="routeSummary" className="route-summary">
           <p className="muted">No query executed yet.</p>
         </section>
 
-        <div id="routeMapStatus" className="muted map-status">Map loading...</div>
-        <div id="routeMap" className="route-map" aria-label="Route map"></div>
+        <div id="routeMapStatus" className="muted map-status">
+          Map loading...
+        </div>
+        <section
+          id="routeMap"
+          className="route-map"
+          aria-label="Route map"
+        ></section>
 
         <details className="raw-section">
           <summary>Raw response</summary>
-          <pre id="routeResult" className="result">No query executed yet.</pre>
+          <pre id="routeResult" className="result">
+            No query executed yet.
+          </pre>
         </details>
       </section>
     </main>

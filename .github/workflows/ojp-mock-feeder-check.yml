@@ -3,20 +3,20 @@ name: OJP Mock Feeder Check
 on:
   push:
     paths:
-      - '.github/workflows/ojp-mock-feeder-check.yml'
-      - 'scripts/data/check-ojp-feeders-mock.sh'
-      - 'scripts/data/test-ojp-feeders.sh'
-      - 'scripts/data/mock/mock-ojp-server.js'
-      - 'scripts/data/samples/ojp-trip-response.mock.xml'
-      - 'config/ojp-endpoints.mock.json'
+      - ".github/workflows/ojp-mock-feeder-check.yml"
+      - "scripts/data/check-ojp-feeders-mock.sh"
+      - "scripts/data/test-ojp-feeders.sh"
+      - "scripts/data/mock/mock-ojp-server.js"
+      - "scripts/data/samples/ojp-trip-response.mock.xml"
+      - "config/ojp-endpoints.mock.json"
   pull_request:
     paths:
-      - '.github/workflows/ojp-mock-feeder-check.yml'
-      - 'scripts/data/check-ojp-feeders-mock.sh'
-      - 'scripts/data/test-ojp-feeders.sh'
-      - 'scripts/data/mock/mock-ojp-server.js'
-      - 'scripts/data/samples/ojp-trip-response.mock.xml'
-      - 'config/ojp-endpoints.mock.json'
+      - ".github/workflows/ojp-mock-feeder-check.yml"
+      - "scripts/data/check-ojp-feeders-mock.sh"
+      - "scripts/data/test-ojp-feeders.sh"
+      - "scripts/data/mock/mock-ojp-server.js"
+      - "scripts/data/samples/ojp-trip-response.mock.xml"
+      - "config/ojp-endpoints.mock.json"
   workflow_dispatch:
 
 jobs:
@@ -31,7 +31,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
       - name: Run deterministic mock feeder check
         run: scripts/data/check-ojp-feeders-mock.sh

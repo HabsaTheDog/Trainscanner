@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "commonjs",
+    "allowJs": true,
+    "checkJs": true,
+    "strict": false,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "moduleResolution": "node",
+    "typeRoots": ["./node_modules/@types"]
+  },
+  "include": ["scripts/**/*.js", "services/**/*.js", "workers/**/*.js"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "frontend",
+    "orchestrator",
+    "control-plane",
+    "**/*.test.js"
+  ]
+}

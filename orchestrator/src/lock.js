@@ -1,4 +1,4 @@
-const fs = require('node:fs/promises');
+const fs = require("node:fs/promises");
 
 function isProcessAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) {
@@ -8,7 +8,7 @@ function isProcessAlive(pid) {
     process.kill(pid, 0);
     return true;
   } catch (err) {
-    if (err && err.code === 'EPERM') {
+    if (err && err.code === "EPERM") {
       return true;
     }
     return false;
@@ -17,7 +17,7 @@ function isProcessAlive(pid) {
 
 async function readLockPayload(lockPath) {
   try {
-    const raw = await fs.readFile(lockPath, 'utf8');
+    const raw = await fs.readFile(lockPath, "utf8");
     return JSON.parse(raw);
   } catch {
     return null;
@@ -25,7 +25,7 @@ async function readLockPayload(lockPath) {
 }
 
 function isStaleLock(payload, staleMs) {
-  const pidAlive = isProcessAlive(Number.parseInt(payload && payload.pid, 10));
+  const pidAlive = isProcessAlive(Number.parseInt(payload?.pid, 10));
   if (!pidAlive) {
     return true;
   }
@@ -34,7 +34,7 @@ function isStaleLock(payload, staleMs) {
     return false;
   }
 
-  const createdAt = Date.parse(payload && payload.createdAt);
+  const createdAt = Date.parse(payload?.createdAt);
   if (!Number.isFinite(createdAt)) {
     return false;
   }
@@ -45,16 +45,20 @@ function isStaleLock(payload, staleMs) {
 async function acquireLock(lockPath, options = {}) {
   const staleMs = Number.parseInt(options.staleMs, 10);
   const logger = options.logger;
-  const payload = JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() }, null, 2);
+  const payload = JSON.stringify(
+    { pid: process.pid, createdAt: new Date().toISOString() },
+    null,
+    2,
+  );
   let handle;
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      handle = await fs.open(lockPath, 'wx', 0o644);
-      await handle.writeFile(payload, 'utf8');
+      handle = await fs.open(lockPath, "wx", 0o644);
+      await handle.writeFile(payload, "utf8");
       break;
     } catch (err) {
-      if (err.code !== 'EEXIST') {
+      if (err.code !== "EEXIST") {
         throw err;
       }
 
@@ -64,16 +68,16 @@ async function acquireLock(lockPath, options = {}) {
       }
 
       await fs.unlink(lockPath).catch((unlinkErr) => {
-        if (unlinkErr.code !== 'ENOENT') {
+        if (unlinkErr.code !== "ENOENT") {
           throw unlinkErr;
         }
       });
 
-      if (logger && typeof logger.info === 'function') {
-        logger.info('Removed stale switch lock', {
-          step: 'lock_stale_cleanup',
+      if (logger && typeof logger.info === "function") {
+        logger.info("Removed stale switch lock", {
+          step: "lock_stale_cleanup",
           stalePid: existing.pid || null,
-          staleCreatedAt: existing.createdAt || null
+          staleCreatedAt: existing.createdAt || null,
         });
       }
     }
@@ -89,12 +93,12 @@ async function acquireLock(lockPath, options = {}) {
         await handle.close();
       } finally {
         await fs.unlink(lockPath).catch((err) => {
-          if (err.code !== 'ENOENT') {
+          if (err.code !== "ENOENT") {
             throw err;
           }
         });
       }
-    }
+    },
   };
 }
 

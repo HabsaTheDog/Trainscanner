@@ -1,7 +1,7 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
+const test = require("node:test");
+const assert = require("node:assert/strict");
 
-const { createIngestService } = require('../../src/domains/ingest/service');
+const { createIngestService } = require("../../src/domains/ingest/service");
 
 function createInMemoryJobsRepo() {
   const byId = new Map();
@@ -30,35 +30,35 @@ function createInMemoryJobsRepo() {
         jobId: input.jobId,
         jobType: input.jobType,
         idempotencyKey: input.idempotencyKey,
-        status: 'queued',
+        status: "queued",
         attempt: 0,
         runContext: input.runContext || {},
         checkpoint: {},
-        resultContext: {}
+        resultContext: {},
       });
     },
     async markRunning(input) {
       const job = byId.get(input.jobId);
-      job.status = 'running';
+      job.status = "running";
       job.attempt = input.attempt;
       return save(job);
     },
     async markRetryWait(input) {
       const job = byId.get(input.jobId);
-      job.status = 'retry_wait';
+      job.status = "retry_wait";
       job.errorCode = input.errorCode;
       job.errorMessage = input.errorMessage;
       return save(job);
     },
     async markSucceeded(input) {
       const job = byId.get(input.jobId);
-      job.status = 'succeeded';
+      job.status = "succeeded";
       job.resultContext = input.resultContext || {};
       return save(job);
     },
     async markFailed(input) {
       const job = byId.get(input.jobId);
-      job.status = 'failed';
+      job.status = "failed";
       job.errorCode = input.errorCode;
       job.errorMessage = input.errorMessage;
       return save(job);
@@ -71,12 +71,12 @@ function createInMemoryJobsRepo() {
     async countRunningByType(jobType) {
       let count = 0;
       for (const job of byId.values()) {
-        if (job.jobType === jobType && job.status === 'running') {
+        if (job.jobType === jobType && job.status === "running") {
           count += 1;
         }
       }
       return count;
-    }
+    },
   };
 }
 
@@ -90,10 +90,10 @@ async function waitFor(fn, timeoutMs = 2000, intervalMs = 20) {
     // eslint-disable-next-line no-await-in-loop
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
-  throw new Error('Timed out waiting for condition');
+  throw new Error("Timed out waiting for condition");
 }
 
-test('ingest service job orchestration reuses completed job for same args', async () => {
+test("ingest service job orchestration reuses completed job for same args", async () => {
   const calls = [];
   const jobsRepo = createInMemoryJobsRepo();
 
@@ -102,24 +102,24 @@ test('ingest service job orchestration reuses completed job for same args', asyn
       calls.push(opts);
       return {
         ok: true,
-        runId: opts.runId || 'run-1'
+        runId: opts.runId || "run-1",
       };
     },
     createPostgisClient: () => ({
-      async ensureReady() {}
+      async ensureReady() {},
     }),
-    createPipelineJobsRepo: () => jobsRepo
+    createPipelineJobsRepo: () => jobsRepo,
   });
 
   const first = await ingestService.ingestNetex({
-    rootDir: '/tmp/repo',
-    args: ['--country', 'DE', '--as-of', '2026-02-19'],
-    jobOrchestrationEnabled: true
+    rootDir: "/tmp/repo",
+    args: ["--country", "DE", "--as-of", "2026-02-19"],
+    jobOrchestrationEnabled: true,
   });
   const second = await ingestService.ingestNetex({
-    rootDir: '/tmp/repo',
-    args: ['--country', 'DE', '--as-of', '2026-02-19'],
-    jobOrchestrationEnabled: true
+    rootDir: "/tmp/repo",
+    args: ["--country", "DE", "--as-of", "2026-02-19"],
+    jobOrchestrationEnabled: true,
   });
 
   assert.equal(first.reused, false);
@@ -127,7 +127,7 @@ test('ingest service job orchestration reuses completed job for same args', asyn
   assert.equal(calls.length, 1);
 });
 
-test('ingest service enforces backpressure on concurrent start attempts', async () => {
+test("ingest service enforces backpressure on concurrent start attempts", async () => {
   const jobsRepo = createInMemoryJobsRepo();
   let releaseFirst;
   const firstGate = new Promise((resolve) => {
@@ -139,40 +139,40 @@ test('ingest service enforces backpressure on concurrent start attempts', async 
       await firstGate;
       return {
         ok: true,
-        runId: 'run-concurrent'
+        runId: "run-concurrent",
       };
     },
     createPostgisClient: () => ({
-      async ensureReady() {}
+      async ensureReady() {},
     }),
-    createPipelineJobsRepo: () => jobsRepo
+    createPipelineJobsRepo: () => jobsRepo,
   });
 
   const firstRunPromise = ingestService.ingestNetex({
-    rootDir: '/tmp/repo',
-    args: ['--country', 'DE', '--as-of', '2026-02-19'],
-    jobOrchestrationEnabled: true
+    rootDir: "/tmp/repo",
+    args: ["--country", "DE", "--as-of", "2026-02-19"],
+    jobOrchestrationEnabled: true,
   });
 
   await waitFor(async () => {
-    const running = await jobsRepo.countRunningByType('ingest.netex');
+    const running = await jobsRepo.countRunningByType("ingest.netex");
     return running === 1;
   });
 
   await assert.rejects(
     ingestService.ingestNetex({
-      rootDir: '/tmp/repo',
-      args: ['--country', 'AT', '--as-of', '2026-02-19'],
-      jobOrchestrationEnabled: true
+      rootDir: "/tmp/repo",
+      args: ["--country", "AT", "--as-of", "2026-02-19"],
+      jobOrchestrationEnabled: true,
     }),
     (err) => {
-      assert.equal(err.code, 'JOB_BACKPRESSURE');
+      assert.equal(err.code, "JOB_BACKPRESSURE");
       return true;
-    }
+    },
   );
 
   releaseFirst();
   const first = await firstRunPromise;
   assert.equal(first.reused, false);
-  assert.equal(first.job.status, 'succeeded');
+  assert.equal(first.job.status, "succeeded");
 });

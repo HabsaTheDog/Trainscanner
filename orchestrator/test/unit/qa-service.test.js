@@ -1,18 +1,18 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
+const test = require("node:test");
+const assert = require("node:assert/strict");
 
-const { createQaService } = require('../../src/domains/qa/service');
+const { createQaService } = require("../../src/domains/qa/service");
 
-test('reportReviewQueue runs repository-backed report generator', async () => {
+test("reportReviewQueue runs repository-backed report generator", async () => {
   const ensureReadyCalls = [];
   const fetchCalls = [];
   const stdoutWrites = [];
   const originalStdoutWrite = process.stdout.write;
   process.stdout.write = (chunk, encoding, callback) => {
     stdoutWrites.push(String(chunk));
-    if (typeof encoding === 'function') {
+    if (typeof encoding === "function") {
       encoding();
-    } else if (typeof callback === 'function') {
+    } else if (typeof callback === "function") {
       callback();
     }
     return true;
@@ -22,8 +22,8 @@ test('reportReviewQueue runs repository-backed report generator', async () => {
     const service = createQaService({
       createPostgisClient: () => ({
         ensureReady: async () => {
-          ensureReadyCalls.push('ready');
-        }
+          ensureReadyCalls.push("ready");
+        },
       }),
       createReviewQueueRepo: () => ({
         fetchReportMetrics: async (scope) => {
@@ -35,20 +35,22 @@ test('reportReviewQueue runs repository-backed report generator', async () => {
             dismissedItems: 1,
             resolvedItems: 1,
             autoResolvedItems: 0,
-            reviewCoveragePercent: 40
+            reviewCoveragePercent: 40,
           };
         },
-        listCountsByIssueType: async () => [{ issue_type: 'duplicate_hard_id', status: 'open', items: 2 }],
+        listCountsByIssueType: async () => [
+          { issue_type: "duplicate_hard_id", status: "open", items: 2 },
+        ],
         listOpenOrConfirmed: async () => [{ review_item_id: 1 }],
-        listResolved: async () => [{ review_item_id: 2 }]
-      })
+        listResolved: async () => [{ review_item_id: 2 }],
+      }),
     });
 
     await service.reportReviewQueue({
-      rootDir: '/tmp/repo',
-      runId: 'run-review-report-1',
-      args: ['--country', 'DE', '--limit', '10'],
-      jobOrchestrationEnabled: false
+      rootDir: "/tmp/repo",
+      runId: "run-review-report-1",
+      args: ["--country", "DE", "--limit", "10"],
+      jobOrchestrationEnabled: false,
     });
   } finally {
     process.stdout.write = originalStdoutWrite;
@@ -57,10 +59,23 @@ test('reportReviewQueue runs repository-backed report generator', async () => {
   assert.equal(ensureReadyCalls.length, 1);
   assert.equal(fetchCalls.length, 1);
   assert.deepEqual(fetchCalls[0], {
-    country: 'DE',
-    scopeTag: 'latest',
+    country: "DE",
+    scopeTag: "latest",
     allScopes: false,
-    limitRows: 10
+    limitRows: 10,
   });
-  assert.match(stdoutWrites.join(''), /"total_items":5/);
+  assert.match(stdoutWrites.join(""), /"total_items":5/);
+});
+
+test("reportReviewQueue rejects invalid calendar dates for --as-of", async () => {
+  const service = createQaService();
+
+  await assert.rejects(
+    () =>
+      service.reportReviewQueue({
+        args: ["--as-of", "2026-02-30"],
+        jobOrchestrationEnabled: false,
+      }),
+    /Invalid --as-of value/,
+  );
 });

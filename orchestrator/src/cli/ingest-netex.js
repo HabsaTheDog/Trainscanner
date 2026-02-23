@@ -1,17 +1,17 @@
 #!/usr/bin/env node
-const { ingestNetex } = require('../domains/ingest/service');
-const { parsePipelineCliArgs, printCliError } = require('./pipeline-common');
+const { ingestNetex } = require("../domains/ingest/service");
+const { parsePipelineCliArgs, printCliError } = require("./pipeline-common");
 
 async function run() {
   const parsed = parsePipelineCliArgs(process.argv.slice(2));
   await ingestNetex({
     rootDir: parsed.rootDir,
     runId: parsed.runId,
-    args: parsed.passthroughArgs
+    args: parsed.passthroughArgs,
   });
 }
 
 run().catch((err) => {
-  printCliError('ingest-netex', err, 'Ingest NeTEx failed');
+  printCliError("ingest-netex", err, "Ingest NeTEx failed");
   process.exit(1);
 });

@@ -1,62 +1,84 @@
 #!/usr/bin/env node
-const crypto = require('node:crypto');
+const crypto = require("node:crypto");
 
-const { AppError } = require('../core/errors');
-const { fetchSources } = require('../domains/source-discovery/service');
-const { ingestNetex } = require('../domains/ingest/service');
-const { buildCanonicalStations, buildReviewQueue } = require('../domains/canonical/service');
-const { parsePipelineCliArgs, printCliError } = require('./pipeline-common');
+const { AppError } = require("../core/errors");
+const { fetchSources } = require("../domains/source-discovery/service");
+const { ingestNetex } = require("../domains/ingest/service");
+const {
+  buildCanonicalStations,
+  buildReviewQueue,
+} = require("../domains/canonical/service");
+const { parsePipelineCliArgs, printCliError } = require("./pipeline-common");
+const { isStrictIsoDate } = require("../core/date");
 
-const STEP_IDS = ['fetch', 'ingest', 'canonical', 'review-queue'];
-
-function isIsoDate(value) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return false;
-  }
-  const parsed = new Date(`${value}T00:00:00Z`);
-  return Number.isFinite(parsed.getTime());
-}
+const STEP_IDS = ["fetch", "ingest", "canonical", "review-queue"];
 
 function parseStepToken(raw) {
-  const token = String(raw || '')
+  const token = String(raw || "")
     .trim()
     .toLowerCase();
   if (!token) {
-    return '';
+    return "";
   }
-  if (token === 'queue' || token === 'review' || token === 'review_queue') {
-    return 'review-queue';
+  if (token === "queue" || token === "review" || token === "review_queue") {
+    return "review-queue";
   }
   return token;
 }
 
 function tokenizeStepList(rawValue) {
-  return String(rawValue || '')
-    .split(',')
+  return String(rawValue || "")
+    .split(",")
     .map((value) => parseStepToken(value))
     .filter(Boolean);
 }
 
 function printUsage() {
-  process.stdout.write('Usage: scripts/data/refresh-station-review.sh [options]\n');
-  process.stdout.write('\n');
-  process.stdout.write('Run station review refresh stages in the terminal with live logs.\n');
-  process.stdout.write('\n');
-  process.stdout.write('Options:\n');
-  process.stdout.write('  --country DE|AT|CH          Restrict refresh scope to one country (default: all DACH)\n');
-  process.stdout.write('  --as-of YYYY-MM-DD          Snapshot date override for all stages\n');
-  process.stdout.write('  --source-id <id>            Restrict fetch/ingest/canonical to one source id\n');
-  process.stdout.write('  --only <list>               Comma-separated steps: fetch,ingest,canonical,review-queue\n');
-  process.stdout.write('  --from-step <step>          Start from step: fetch|ingest|canonical|review-queue\n');
-  process.stdout.write('  --to-step <step>            Stop after step: fetch|ingest|canonical|review-queue\n');
-  process.stdout.write('  --skip-fetch                Skip fetch step\n');
-  process.stdout.write('  --skip-ingest               Skip ingest step\n');
-  process.stdout.write('  --skip-canonical            Skip canonical build step\n');
-  process.stdout.write('  --skip-review-queue         Skip review queue build step\n');
-  process.stdout.write('  --dry-run                   Print resolved plan without executing stages\n');
-  process.stdout.write('  --run-id <id>               Optional run id prefix for stage logs\n');
-  process.stdout.write('  --root <path>               Repo root (default: cwd)\n');
-  process.stdout.write('  -h, --help                  Show this help\n');
+  process.stdout.write(
+    "Usage: scripts/data/refresh-station-review.sh [options]\n",
+  );
+  process.stdout.write("\n");
+  process.stdout.write(
+    "Run station review refresh stages in the terminal with live logs.\n",
+  );
+  process.stdout.write("\n");
+  process.stdout.write("Options:\n");
+  process.stdout.write(
+    "  --country DE|AT|CH          Restrict refresh scope to one country (default: all DACH)\n",
+  );
+  process.stdout.write(
+    "  --as-of YYYY-MM-DD          Snapshot date override for all stages\n",
+  );
+  process.stdout.write(
+    "  --source-id <id>            Restrict fetch/ingest/canonical to one source id\n",
+  );
+  process.stdout.write(
+    "  --only <list>               Comma-separated steps: fetch,ingest,canonical,review-queue\n",
+  );
+  process.stdout.write(
+    "  --from-step <step>          Start from step: fetch|ingest|canonical|review-queue\n",
+  );
+  process.stdout.write(
+    "  --to-step <step>            Stop after step: fetch|ingest|canonical|review-queue\n",
+  );
+  process.stdout.write("  --skip-fetch                Skip fetch step\n");
+  process.stdout.write("  --skip-ingest               Skip ingest step\n");
+  process.stdout.write(
+    "  --skip-canonical            Skip canonical build step\n",
+  );
+  process.stdout.write(
+    "  --skip-review-queue         Skip review queue build step\n",
+  );
+  process.stdout.write(
+    "  --dry-run                   Print resolved plan without executing stages\n",
+  );
+  process.stdout.write(
+    "  --run-id <id>               Optional run id prefix for stage logs\n",
+  );
+  process.stdout.write(
+    "  --root <path>               Repo root (default: cwd)\n",
+  );
+  process.stdout.write("  -h, --help                  Show this help\n");
 }
 
 function assertStepId(stepId, flagName) {
@@ -64,42 +86,46 @@ function assertStepId(stepId, flagName) {
     return;
   }
   throw new AppError({
-    code: 'INVALID_REQUEST',
-    message: `${flagName} must be one of fetch|ingest|canonical|review-queue`
+    code: "INVALID_REQUEST",
+    message: `${flagName} must be one of fetch|ingest|canonical|review-queue`,
   });
 }
 
 function parseArgs(argv = []) {
   const parsed = parsePipelineCliArgs(argv);
-  const passthrough = Array.isArray(parsed.passthroughArgs) ? parsed.passthroughArgs : [];
+  const passthrough = Array.isArray(parsed.passthroughArgs)
+    ? parsed.passthroughArgs
+    : [];
 
   const options = {
     rootDir: parsed.rootDir,
-    runId: parsed.runId || '',
-    country: '',
-    asOf: '',
-    sourceId: '',
+    runId: parsed.runId || "",
+    country: "",
+    asOf: "",
+    sourceId: "",
     onlySteps: [],
-    fromStep: '',
-    toStep: '',
+    fromStep: "",
+    toStep: "",
     skipSteps: new Set(),
-    dryRun: false
+    dryRun: false,
   };
 
   for (let i = 0; i < passthrough.length; i += 1) {
     const arg = passthrough[i];
 
-    if (arg === '-h' || arg === '--help') {
+    if (arg === "-h" || arg === "--help") {
       options.help = true;
       continue;
     }
 
-    if (arg === '--country') {
-      const value = String(passthrough[i + 1] || '').trim().toUpperCase();
+    if (arg === "--country") {
+      const value = String(passthrough[i + 1] || "")
+        .trim()
+        .toUpperCase();
       if (!value) {
         throw new AppError({
-          code: 'INVALID_REQUEST',
-          message: 'Missing value for --country'
+          code: "INVALID_REQUEST",
+          message: "Missing value for --country",
         });
       }
       options.country = value;
@@ -107,12 +133,12 @@ function parseArgs(argv = []) {
       continue;
     }
 
-    if (arg === '--as-of') {
-      const value = String(passthrough[i + 1] || '').trim();
+    if (arg === "--as-of") {
+      const value = String(passthrough[i + 1] || "").trim();
       if (!value) {
         throw new AppError({
-          code: 'INVALID_REQUEST',
-          message: 'Missing value for --as-of'
+          code: "INVALID_REQUEST",
+          message: "Missing value for --as-of",
         });
       }
       options.asOf = value;
@@ -120,12 +146,12 @@ function parseArgs(argv = []) {
       continue;
     }
 
-    if (arg === '--source-id') {
-      const value = String(passthrough[i + 1] || '').trim();
+    if (arg === "--source-id") {
+      const value = String(passthrough[i + 1] || "").trim();
       if (!value) {
         throw new AppError({
-          code: 'INVALID_REQUEST',
-          message: 'Missing value for --source-id'
+          code: "INVALID_REQUEST",
+          message: "Missing value for --source-id",
         });
       }
       options.sourceId = value;
@@ -133,12 +159,12 @@ function parseArgs(argv = []) {
       continue;
     }
 
-    if (arg === '--only') {
-      const value = String(passthrough[i + 1] || '').trim();
+    if (arg === "--only") {
+      const value = String(passthrough[i + 1] || "").trim();
       if (!value) {
         throw new AppError({
-          code: 'INVALID_REQUEST',
-          message: 'Missing value for --only'
+          code: "INVALID_REQUEST",
+          message: "Missing value for --only",
         });
       }
       options.onlySteps.push(...tokenizeStepList(value));
@@ -146,12 +172,12 @@ function parseArgs(argv = []) {
       continue;
     }
 
-    if (arg === '--from-step') {
+    if (arg === "--from-step") {
       const value = parseStepToken(passthrough[i + 1]);
       if (!value) {
         throw new AppError({
-          code: 'INVALID_REQUEST',
-          message: 'Missing value for --from-step'
+          code: "INVALID_REQUEST",
+          message: "Missing value for --from-step",
         });
       }
       options.fromStep = value;
@@ -159,12 +185,12 @@ function parseArgs(argv = []) {
       continue;
     }
 
-    if (arg === '--to-step') {
+    if (arg === "--to-step") {
       const value = parseStepToken(passthrough[i + 1]);
       if (!value) {
         throw new AppError({
-          code: 'INVALID_REQUEST',
-          message: 'Missing value for --to-step'
+          code: "INVALID_REQUEST",
+          message: "Missing value for --to-step",
         });
       }
       options.toStep = value;
@@ -172,34 +198,34 @@ function parseArgs(argv = []) {
       continue;
     }
 
-    if (arg === '--skip-fetch') {
-      options.skipSteps.add('fetch');
+    if (arg === "--skip-fetch") {
+      options.skipSteps.add("fetch");
       continue;
     }
 
-    if (arg === '--skip-ingest') {
-      options.skipSteps.add('ingest');
+    if (arg === "--skip-ingest") {
+      options.skipSteps.add("ingest");
       continue;
     }
 
-    if (arg === '--skip-canonical') {
-      options.skipSteps.add('canonical');
+    if (arg === "--skip-canonical") {
+      options.skipSteps.add("canonical");
       continue;
     }
 
-    if (arg === '--skip-review-queue') {
-      options.skipSteps.add('review-queue');
+    if (arg === "--skip-review-queue") {
+      options.skipSteps.add("review-queue");
       continue;
     }
 
-    if (arg === '--dry-run') {
+    if (arg === "--dry-run") {
       options.dryRun = true;
       continue;
     }
 
     throw new AppError({
-      code: 'INVALID_REQUEST',
-      message: `Unknown argument: ${arg}`
+      code: "INVALID_REQUEST",
+      message: `Unknown argument: ${arg}`,
     });
   }
 
@@ -207,30 +233,30 @@ function parseArgs(argv = []) {
     return options;
   }
 
-  if (options.country && !['DE', 'AT', 'CH'].includes(options.country)) {
+  if (options.country && !["DE", "AT", "CH"].includes(options.country)) {
     throw new AppError({
-      code: 'INVALID_REQUEST',
-      message: "country must be one of 'DE', 'AT', 'CH'"
+      code: "INVALID_REQUEST",
+      message: "country must be one of 'DE', 'AT', 'CH'",
     });
   }
 
-  if (options.asOf && !isIsoDate(options.asOf)) {
+  if (options.asOf && !isStrictIsoDate(options.asOf)) {
     throw new AppError({
-      code: 'INVALID_REQUEST',
-      message: 'as-of must be an ISO date in YYYY-MM-DD format'
+      code: "INVALID_REQUEST",
+      message: "as-of must be an ISO date in YYYY-MM-DD format",
     });
   }
 
   if (options.fromStep) {
-    assertStepId(options.fromStep, '--from-step');
+    assertStepId(options.fromStep, "--from-step");
   }
 
   if (options.toStep) {
-    assertStepId(options.toStep, '--to-step');
+    assertStepId(options.toStep, "--to-step");
   }
 
   for (const step of options.onlySteps) {
-    assertStepId(step, '--only');
+    assertStepId(step, "--only");
   }
 
   return options;
@@ -247,7 +273,9 @@ function filterSelectedSteps(options) {
 
   if (options.fromStep) {
     const fromIndex = STEP_IDS.indexOf(options.fromStep);
-    selected = selected.filter((stepId) => STEP_IDS.indexOf(stepId) >= fromIndex);
+    selected = selected.filter(
+      (stepId) => STEP_IDS.indexOf(stepId) >= fromIndex,
+    );
   }
 
   if (options.toStep) {
@@ -257,8 +285,8 @@ function filterSelectedSteps(options) {
 
   if (selected.length === 0) {
     throw new AppError({
-      code: 'INVALID_REQUEST',
-      message: 'No pipeline steps selected after applying filters'
+      code: "INVALID_REQUEST",
+      message: "No pipeline steps selected after applying filters",
     });
   }
 
@@ -274,11 +302,11 @@ function appendArgIfSet(args, key, value) {
 
 function buildStepArgs(options, stepId) {
   const args = [];
-  appendArgIfSet(args, '--as-of', options.asOf);
-  appendArgIfSet(args, '--country', options.country);
+  appendArgIfSet(args, "--as-of", options.asOf);
+  appendArgIfSet(args, "--country", options.country);
 
-  if (stepId !== 'review-queue') {
-    appendArgIfSet(args, '--source-id', options.sourceId);
+  if (stepId !== "review-queue") {
+    appendArgIfSet(args, "--source-id", options.sourceId);
   }
 
   return args;
@@ -287,56 +315,56 @@ function buildStepArgs(options, stepId) {
 function toStepDefinitions(options) {
   return {
     fetch: {
-      label: 'Fetch DACH sources',
-      args: buildStepArgs(options, 'fetch'),
+      label: "Fetch DACH sources",
+      args: buildStepArgs(options, "fetch"),
       run: (runOptions) =>
         fetchSources({
           rootDir: runOptions.rootDir,
           runId: runOptions.runId,
-          args: runOptions.args
-        })
+          args: runOptions.args,
+        }),
     },
     ingest: {
-      label: 'Ingest NeTEx snapshots',
-      args: buildStepArgs(options, 'ingest'),
+      label: "Ingest NeTEx snapshots",
+      args: buildStepArgs(options, "ingest"),
       run: (runOptions) =>
         ingestNetex({
           rootDir: runOptions.rootDir,
           runId: runOptions.runId,
           args: runOptions.args,
-          jobOrchestrationEnabled: false
-        })
+          jobOrchestrationEnabled: false,
+        }),
     },
     canonical: {
-      label: 'Build canonical stations',
-      args: buildStepArgs(options, 'canonical'),
+      label: "Build canonical stations",
+      args: buildStepArgs(options, "canonical"),
       run: (runOptions) =>
         buildCanonicalStations({
           rootDir: runOptions.rootDir,
           runId: runOptions.runId,
           args: runOptions.args,
-          jobOrchestrationEnabled: false
-        })
+          jobOrchestrationEnabled: false,
+        }),
     },
-    'review-queue': {
-      label: 'Build station review queue',
-      args: buildStepArgs(options, 'review-queue'),
+    "review-queue": {
+      label: "Build station review queue",
+      args: buildStepArgs(options, "review-queue"),
       run: (runOptions) =>
         buildReviewQueue({
           rootDir: runOptions.rootDir,
           runId: runOptions.runId,
           args: runOptions.args,
-          jobOrchestrationEnabled: false
-        })
-    }
+          jobOrchestrationEnabled: false,
+        }),
+    },
   };
 }
 
 function formatArgs(args = []) {
   if (!Array.isArray(args) || args.length === 0) {
-    return '(no extra args)';
+    return "(no extra args)";
   }
-  return args.join(' ');
+  return args.join(" ");
 }
 
 async function run() {
@@ -348,16 +376,22 @@ async function run() {
 
   const selectedSteps = filterSelectedSteps(options);
   const stepDefs = toStepDefinitions(options);
-  const runIdBase = String(options.runId || '').trim() || crypto.randomUUID();
+  const runIdBase = String(options.runId || "").trim() || crypto.randomUUID();
 
   process.stdout.write(`[refresh-station-review] runId=${runIdBase}\n`);
-  process.stdout.write(`[refresh-station-review] scope country=${options.country || 'ALL'} as-of=${options.asOf || 'latest'} source-id=${options.sourceId || 'ALL'}\n`);
-  process.stdout.write(`[refresh-station-review] selected steps: ${selectedSteps.join(' -> ')}\n`);
+  process.stdout.write(
+    `[refresh-station-review] scope country=${options.country || "ALL"} as-of=${options.asOf || "latest"} source-id=${options.sourceId || "ALL"}\n`,
+  );
+  process.stdout.write(
+    `[refresh-station-review] selected steps: ${selectedSteps.join(" -> ")}\n`,
+  );
 
   if (options.dryRun) {
     for (const stepId of selectedSteps) {
       const def = stepDefs[stepId];
-      process.stdout.write(`[refresh-station-review] dry-run ${stepId}: ${def.label} ${formatArgs(def.args)}\n`);
+      process.stdout.write(
+        `[refresh-station-review] dry-run ${stepId}: ${def.label} ${formatArgs(def.args)}\n`,
+      );
     }
     return;
   }
@@ -366,28 +400,36 @@ async function run() {
   for (let index = 0; index < selectedSteps.length; index += 1) {
     const stepId = selectedSteps[index];
     const def = stepDefs[stepId];
-    const stepRunId = `${runIdBase}-${stepId.replace(/[^a-z0-9]+/gi, '-')}`;
+    const stepRunId = `${runIdBase}-${stepId.replace(/[^a-z0-9]+/gi, "-")}`;
     const stepStartedAt = Date.now();
 
     process.stdout.write(
-      `[refresh-station-review] (${index + 1}/${selectedSteps.length}) ${stepId}: ${def.label} ${formatArgs(def.args)}\n`
+      `[refresh-station-review] (${index + 1}/${selectedSteps.length}) ${stepId}: ${def.label} ${formatArgs(def.args)}\n`,
     );
 
     await def.run({
       rootDir: options.rootDir,
       runId: stepRunId,
-      args: def.args
+      args: def.args,
     });
 
     const elapsedMs = Date.now() - stepStartedAt;
-    process.stdout.write(`[refresh-station-review] completed ${stepId} in ${(elapsedMs / 1000).toFixed(1)}s\n`);
+    process.stdout.write(
+      `[refresh-station-review] completed ${stepId} in ${(elapsedMs / 1000).toFixed(1)}s\n`,
+    );
   }
 
   const totalMs = Date.now() - startedAt;
-  process.stdout.write(`[refresh-station-review] done in ${(totalMs / 1000).toFixed(1)}s\n`);
+  process.stdout.write(
+    `[refresh-station-review] done in ${(totalMs / 1000).toFixed(1)}s\n`,
+  );
 }
 
 run().catch((err) => {
-  printCliError('refresh-station-review', err, 'Station review refresh pipeline failed');
+  printCliError(
+    "refresh-station-review",
+    err,
+    "Station review refresh pipeline failed",
+  );
   process.exit(1);
 });

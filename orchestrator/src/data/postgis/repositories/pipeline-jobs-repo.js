@@ -1,25 +1,25 @@
-const { validateOrThrow } = require('../../../core/schema');
+const { validateOrThrow } = require("../../../core/schema");
 
-const JOB_STATUS = ['queued', 'running', 'retry_wait', 'succeeded', 'failed'];
+const JOB_STATUS = ["queued", "running", "retry_wait", "succeeded", "failed"];
 
 const JOB_SCHEMA = {
-  type: 'object',
-  required: ['jobId', 'jobType', 'idempotencyKey', 'status', 'attempt'],
+  type: "object",
+  required: ["jobId", "jobType", "idempotencyKey", "status", "attempt"],
   properties: {
-    jobId: { type: 'string', minLength: 1 },
-    jobType: { type: 'string', minLength: 1 },
-    idempotencyKey: { type: 'string', minLength: 1 },
-    status: { type: 'string', enum: JOB_STATUS },
-    attempt: { type: 'integer', minimum: 0 },
-    startedAt: { type: 'string' },
-    endedAt: { type: 'string' },
-    errorCode: { type: 'string' },
-    errorMessage: { type: 'string' },
-    runContext: { type: 'object' },
-    checkpoint: { type: 'object' },
-    resultContext: { type: 'object' }
+    jobId: { type: "string", minLength: 1 },
+    jobType: { type: "string", minLength: 1 },
+    idempotencyKey: { type: "string", minLength: 1 },
+    status: { type: "string", enum: JOB_STATUS },
+    attempt: { type: "integer", minimum: 0 },
+    startedAt: { type: "string" },
+    endedAt: { type: "string" },
+    errorCode: { type: "string" },
+    errorMessage: { type: "string" },
+    runContext: { type: "object" },
+    checkpoint: { type: "object" },
+    resultContext: { type: "object" },
   },
-  additionalProperties: true
+  additionalProperties: true,
 };
 
 function normalizeJobRow(row) {
@@ -27,20 +27,31 @@ function normalizeJobRow(row) {
     return null;
   }
 
-  const startedAt = row.started_at || row.startedat || row.startedAt || '';
-  const endedAt = row.ended_at || row.endedat || row.endedAt || '';
-  const errorCode = row.error_code || row.errorcode || row.errorCode || '';
-  const errorMessage = row.error_message || row.errormessage || row.errorMessage || '';
+  const startedAt = row.started_at || row.startedat || row.startedAt || "";
+  const endedAt = row.ended_at || row.endedat || row.endedAt || "";
+  const errorCode = row.error_code || row.errorcode || row.errorCode || "";
+  const errorMessage =
+    row.error_message || row.errormessage || row.errorMessage || "";
 
   const out = {
     jobId: row.job_id || row.jobid || row.jobId,
     jobType: row.job_type || row.jobtype || row.jobType,
-    idempotencyKey: row.idempotency_key || row.idempotencykey || row.idempotencyKey,
+    idempotencyKey:
+      row.idempotency_key || row.idempotencykey || row.idempotencyKey,
     status: row.status,
     attempt: Number.parseInt(String(row.attempt || 0), 10) || 0,
-    runContext: row.run_context && typeof row.run_context === 'object' ? row.run_context : {},
-    checkpoint: row.checkpoint && typeof row.checkpoint === 'object' ? row.checkpoint : {},
-    resultContext: row.result_context && typeof row.result_context === 'object' ? row.result_context : {}
+    runContext:
+      row.run_context && typeof row.run_context === "object"
+        ? row.run_context
+        : {},
+    checkpoint:
+      row.checkpoint && typeof row.checkpoint === "object"
+        ? row.checkpoint
+        : {},
+    resultContext:
+      row.result_context && typeof row.result_context === "object"
+        ? row.result_context
+        : {},
   };
 
   if (startedAt) {
@@ -57,8 +68,8 @@ function normalizeJobRow(row) {
   }
 
   validateOrThrow(out, JOB_SCHEMA, {
-    code: 'INVALID_CONFIG',
-    message: 'Invalid pipeline job row returned from repository'
+    code: "INVALID_CONFIG",
+    message: "Invalid pipeline job row returned from repository",
   });
 
   return out;
@@ -105,8 +116,8 @@ function createPipelineJobsRepo(client) {
         `,
         {
           job_type: jobType,
-          idempotency_key: idempotencyKey
-        }
+          idempotency_key: idempotencyKey,
+        },
       );
       return normalizeJobRow(row);
     },
@@ -132,8 +143,8 @@ function createPipelineJobsRepo(client) {
           LIMIT 1;
         `,
         {
-          job_id: jobId
-        }
+          job_id: jobId,
+        },
       );
       return normalizeJobRow(row);
     },
@@ -168,8 +179,8 @@ function createPipelineJobsRepo(client) {
           job_type: input.jobType,
           idempotency_key: input.idempotencyKey,
           run_context: JSON.stringify(input.runContext || {}),
-          checkpoint: JSON.stringify(input.checkpoint || {})
-        }
+          checkpoint: JSON.stringify(input.checkpoint || {}),
+        },
       );
 
       return normalizeJobRow(row);
@@ -192,15 +203,17 @@ function createPipelineJobsRepo(client) {
         `,
         {
           job_id: input.jobId,
-          attempt: String(input.attempt)
-        }
+          attempt: String(input.attempt),
+        },
       );
 
       return normalizeJobRow(row);
     },
 
     async claimRunning(input) {
-      const maxConcurrent = Number.isFinite(input.maxConcurrent) ? Math.max(1, input.maxConcurrent) : 1;
+      const maxConcurrent = Number.isFinite(input.maxConcurrent)
+        ? Math.max(1, input.maxConcurrent)
+        : 1;
       const row = await client.queryOne(
         `
           WITH lock_guard AS (
@@ -233,8 +246,8 @@ function createPipelineJobsRepo(client) {
           job_id: input.jobId,
           job_type: input.jobType,
           attempt: String(input.attempt),
-          max_concurrent: String(maxConcurrent)
-        }
+          max_concurrent: String(maxConcurrent),
+        },
       );
 
       return normalizeJobRow(row);
@@ -254,9 +267,9 @@ function createPipelineJobsRepo(client) {
         `,
         {
           job_id: input.jobId,
-          error_code: input.errorCode || '',
-          error_message: input.errorMessage || ''
-        }
+          error_code: input.errorCode || "",
+          error_message: input.errorMessage || "",
+        },
       );
 
       return normalizeJobRow(row);
@@ -278,8 +291,8 @@ function createPipelineJobsRepo(client) {
         `,
         {
           job_id: input.jobId,
-          result_context: JSON.stringify(input.resultContext || {})
-        }
+          result_context: JSON.stringify(input.resultContext || {}),
+        },
       );
 
       return normalizeJobRow(row);
@@ -300,9 +313,9 @@ function createPipelineJobsRepo(client) {
         `,
         {
           job_id: input.jobId,
-          error_code: input.errorCode || '',
-          error_message: input.errorMessage || ''
-        }
+          error_code: input.errorCode || "",
+          error_message: input.errorMessage || "",
+        },
       );
 
       return normalizeJobRow(row);
@@ -320,8 +333,8 @@ function createPipelineJobsRepo(client) {
         `,
         {
           job_id: input.jobId,
-          checkpoint: JSON.stringify(input.checkpoint || {})
-        }
+          checkpoint: JSON.stringify(input.checkpoint || {}),
+        },
       );
 
       return normalizeJobRow(row);
@@ -335,7 +348,7 @@ function createPipelineJobsRepo(client) {
           WHERE job_type = :'job_type'
             AND status = 'running';
         `,
-        { job_type: jobType }
+        { job_type: jobType },
       );
       return Number.parseInt(String(row?.running_count || 0), 10) || 0;
     },
@@ -362,18 +375,18 @@ function createPipelineJobsRepo(client) {
           LIMIT NULLIF(:'limit_rows', '')::integer;
         `,
         {
-          job_type: jobType || '',
-          limit_rows: String(limit)
-        }
+          job_type: jobType || "",
+          limit_rows: String(limit),
+        },
       );
 
       return rows.map((row) => normalizeJobRow(row));
-    }
+    },
   };
 }
 
 module.exports = {
   JOB_STATUS,
   createPipelineJobsRepo,
-  normalizeJobRow
+  normalizeJobRow,
 };

@@ -1,20 +1,29 @@
-const fs = require('node:fs/promises');
-const path = require('node:path');
+const fs = require("node:fs/promises");
+const path = require("node:path");
 
-const { acquireLock } = require('./lock');
-const { restartMotisContainer, waitForMotisReady } = require('./motis');
-const { normalizeProfiles, resolveProfileArtifact } = require('./profile-resolver');
-const { AppError, toAppError } = require('./core/errors');
-const { generateId } = require('./core/ids');
-const { VALID_SWITCH_STATES, isInFlightState } = require('./domains/switch-runtime/status');
-const { getSystemState, setSystemState } = require('./data/postgis/system-state');
+const { acquireLock } = require("./lock");
+const { restartMotisContainer, waitForMotisReady } = require("./motis");
+const {
+  normalizeProfiles,
+  resolveProfileArtifact,
+} = require("./profile-resolver");
+const { AppError, toAppError } = require("./core/errors");
+const { generateId } = require("./core/ids");
+const {
+  VALID_SWITCH_STATES,
+  isInFlightState,
+} = require("./domains/switch-runtime/status");
+const {
+  getSystemState,
+  setSystemState,
+} = require("./data/postgis/system-state");
 
 async function readJson(filePath, fallback) {
   try {
-    const content = await fs.readFile(filePath, 'utf8');
+    const content = await fs.readFile(filePath, "utf8");
     return JSON.parse(content);
   } catch (err) {
-    if (err.code === 'ENOENT') {
+    if (err.code === "ENOENT") {
       return fallback;
     }
     throw err;
@@ -25,7 +34,7 @@ async function writeJsonAtomic(filePath, payload) {
   const dir = path.dirname(filePath);
   const tempPath = `${filePath}.tmp`;
   await fs.mkdir(dir, { recursive: true });
-  await fs.writeFile(tempPath, JSON.stringify(payload, null, 2) + '\n', 'utf8');
+  await fs.writeFile(tempPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
   await fs.rename(tempPath, filePath);
 }
 
@@ -40,12 +49,14 @@ class GtfsSwitcher {
     this.currentJob = null;
     this.motisAdapter = options.motisAdapter || {
       restartMotisContainer,
-      waitForMotisReady
+      waitForMotisReady,
     };
   }
 
   async getProfilesWithMeta() {
-    const profilesRaw = await readJson(this.config.profilesPath, { profiles: {} });
+    const profilesRaw = await readJson(this.config.profilesPath, {
+      profiles: {},
+    });
     const activeRaw = await this.readActiveProfile();
     const profiles = normalizeProfiles(profilesRaw);
     const items = [];
@@ -54,61 +65,61 @@ class GtfsSwitcher {
       try {
         const resolved = await resolveProfileArtifact(name, value, {
           dataDir: this.config.dataDir,
-          allowMissing: true
+          allowMissing: true,
         });
 
         items.push({
           name,
           zipPath: resolved.zipPath,
-          description: value.description || '',
+          description: value.description || "",
           sourceType: resolved.sourceType,
           runtime: resolved.runtime || null,
           exists: resolved.exists,
           absolutePath: resolved.absolutePath,
-          resolutionError: null
+          resolutionError: null,
         });
       } catch (err) {
         items.push({
           name,
-          zipPath: '',
-          description: value.description || '',
-          sourceType: value.sourceType || 'static',
+          zipPath: "",
+          description: value.description || "",
+          sourceType: value.sourceType || "static",
           runtime: value.runtime || null,
           exists: false,
           absolutePath: null,
-          resolutionError: err.message
+          resolutionError: err.message,
         });
       }
     }
 
     return {
       activeProfile: activeRaw.activeProfile || null,
-      profiles: items
+      profiles: items,
     };
   }
 
   async getStatus() {
-    let state = await getSystemState('gtfs_switch_status', null);
+    let state = await getSystemState("gtfs_switch_status", null);
     if (!state) {
       state = await readJson(this.config.switchStatusPath, {
-        state: 'idle',
+        state: "idle",
         activeProfile: null,
         requestedProfile: null,
         runId: null,
-        message: 'No switch executed yet',
+        message: "No switch executed yet",
         updatedAt: nowIso(),
-        error: null
+        error: null,
       });
     }
     return state;
   }
 
   async readActiveProfile() {
-    let next = await getSystemState('active_gtfs', null);
+    let next = await getSystemState("active_gtfs", null);
     if (!next) {
       next = await readJson(this.config.activeProfilePath, null);
     }
-    if (next && typeof next === 'object') {
+    if (next && typeof next === "object") {
       return next;
     }
 
@@ -118,21 +129,30 @@ class GtfsSwitcher {
     }
 
     const legacy = await readJson(legacyPath, { activeProfile: null });
-    if (legacy && typeof legacy === 'object' && legacy.activeProfile) {
+    if (legacy && typeof legacy === "object" && legacy.activeProfile) {
       try {
-        await setSystemState('active_gtfs', legacy);
-        this.logger.info('Migrated legacy active profile state into system_state', {
-          step: 'active_profile_migration',
-          from: legacyPath
-        });
+        await setSystemState("active_gtfs", legacy);
+        this.logger.info(
+          "Migrated legacy active profile state into system_state",
+          {
+            step: "active_profile_migration",
+            from: legacyPath,
+          },
+        );
       } catch (err) {
-        this.logger.warn('Failed to migrate legacy active profile state to DB, falling back to FS', { error: err.message });
+        this.logger.warn(
+          "Failed to migrate legacy active profile state to DB, falling back to FS",
+          { error: err.message },
+        );
         await writeJsonAtomic(this.config.activeProfilePath, legacy);
-        this.logger.info('Migrated legacy active profile state into state directory', {
-          step: 'active_profile_migration',
-          from: legacyPath,
-          to: this.config.activeProfilePath
-        });
+        this.logger.info(
+          "Migrated legacy active profile state into state directory",
+          {
+            step: "active_profile_migration",
+            from: legacyPath,
+            to: this.config.activeProfilePath,
+          },
+        );
       }
     }
     return legacy;
@@ -141,8 +161,8 @@ class GtfsSwitcher {
   async setStatus(next) {
     if (!VALID_SWITCH_STATES.has(next.state)) {
       throw new AppError({
-        code: 'INVALID_CONFIG',
-        message: `Invalid switch state: ${next.state}`
+        code: "INVALID_CONFIG",
+        message: `Invalid switch state: ${next.state}`,
       });
     }
 
@@ -150,125 +170,136 @@ class GtfsSwitcher {
     const payload = {
       ...existing,
       ...next,
-      updatedAt: nowIso()
+      updatedAt: nowIso(),
     };
 
     try {
-      await setSystemState('gtfs_switch_status', payload);
+      await setSystemState("gtfs_switch_status", payload);
     } catch (err) {
-      this.logger.warn('Failed to persist switch status to system_state, falling back to FS', { error: err.message });
+      this.logger.warn(
+        "Failed to persist switch status to system_state, falling back to FS",
+        { error: err.message },
+      );
       await writeJsonAtomic(this.config.switchStatusPath, payload);
     }
 
-    this.logger.info('GTFS switch status updated', {
-      step: 'status',
+    this.logger.info("GTFS switch status updated", {
+      step: "status",
       state: payload.state,
       runId: payload.runId || null,
       activeProfile: payload.activeProfile,
       requestedProfile: payload.requestedProfile || null,
-      message: payload.message
+      message: payload.message,
     });
     return payload;
   }
 
   async start(profileName, options = {}) {
-    const requestedProfile = String(profileName || '').trim();
+    const requestedProfile = String(profileName || "").trim();
     if (!requestedProfile) {
       throw new AppError({
-        code: 'INVALID_REQUEST',
+        code: "INVALID_REQUEST",
         statusCode: 400,
-        message: 'Missing required profile name'
+        message: "Missing required profile name",
       });
     }
 
     if (this.currentJob) {
       if (this.currentJob.profileName === requestedProfile) {
-        this.logger.info('Idempotent switch request reused in-flight run', {
-          step: 'switch_start_reused',
+        this.logger.info("Idempotent switch request reused in-flight run", {
+          step: "switch_start_reused",
           profile: requestedProfile,
-          runId: this.currentJob.runId
+          runId: this.currentJob.runId,
         });
         return {
           accepted: true,
           reused: true,
           runId: this.currentJob.runId,
           profile: requestedProfile,
-          state: 'switching'
+          state: "switching",
         };
       }
 
       throw new AppError({
-        code: 'SWITCH_CONFLICT',
+        code: "SWITCH_CONFLICT",
         statusCode: 409,
-        message: `Another profile switch is already running for '${this.currentJob.profileName}'`
+        message: `Another profile switch is already running for '${this.currentJob.profileName}'`,
       });
     }
 
-    const [status, active] = await Promise.all([this.getStatus(), this.readActiveProfile().catch(() => ({ activeProfile: null }))]);
-    if (status.state === 'ready' && active.activeProfile === requestedProfile) {
+    const [status, active] = await Promise.all([
+      this.getStatus(),
+      this.readActiveProfile().catch(() => ({ activeProfile: null })),
+    ]);
+    if (status.state === "ready" && active.activeProfile === requestedProfile) {
       return {
         accepted: false,
         noop: true,
         profile: requestedProfile,
         runId: status.runId || null,
-        message: `Profile '${requestedProfile}' is already active`
+        message: `Profile '${requestedProfile}' is already active`,
       };
     }
 
-    await fs.mkdir(path.dirname(this.config.switchLockPath), { recursive: true });
+    await fs.mkdir(path.dirname(this.config.switchLockPath), {
+      recursive: true,
+    });
     const lock = await acquireLock(this.config.switchLockPath, {
       staleMs: this.config.switchLockStaleMs,
-      logger: this.logger
+      logger: this.logger,
     });
     if (!lock) {
-      if (isInFlightState(status.state) && status.requestedProfile === requestedProfile) {
+      if (
+        isInFlightState(status.state) &&
+        status.requestedProfile === requestedProfile
+      ) {
         return {
           accepted: true,
           reused: true,
           profile: requestedProfile,
           runId: status.runId || null,
           state: status.state,
-          message: `Switch already in progress for '${requestedProfile}'`
+          message: `Switch already in progress for '${requestedProfile}'`,
         };
       }
 
       throw new AppError({
-        code: 'SWITCH_LOCK_HELD',
+        code: "SWITCH_LOCK_HELD",
         statusCode: 409,
-        message: 'Switch lock already held. Another switch is in progress.'
+        message: "Switch lock already held. Another switch is in progress.",
       });
     }
 
-    const runId = options.runId || generateId('switch');
+    const runId = options.runId || generateId("switch");
     this.currentJob = {
       profileName: requestedProfile,
-      runId
+      runId,
     };
 
-    this.logger.info('GTFS profile switch accepted', {
-      step: 'switch_start',
+    this.logger.info("GTFS profile switch accepted", {
+      step: "switch_start",
       profile: requestedProfile,
-      runId
+      runId,
     });
 
     this.run(requestedProfile, runId)
       .catch((err) => {
         const appErr = toAppError(err);
-        this.logger.error('GTFS switch failed unexpectedly', {
-          step: 'switch_exception',
+        this.logger.error("GTFS switch failed unexpectedly", {
+          step: "switch_exception",
           profile: requestedProfile,
           runId,
           error: appErr.message,
-          errorCode: appErr.code
+          errorCode: appErr.code,
         });
       })
       .finally(async () => {
         this.currentJob = null;
         await lock.release().catch((err) => {
-          this.logger.error('Failed to release switch lock', {
-            step: 'unlock',
+          this.logger.error("Failed to release switch lock", {
+            step: "unlock",
             runId,
-            error: err.message
+            error: err.message,
           });
         });
       });
@@ -278,47 +309,51 @@ class GtfsSwitcher {
       reused: false,
       runId,
       profile: requestedProfile,
-      message: `Profile switch to '${requestedProfile}' started`
+      message: `Profile switch to '${requestedProfile}' started`,
     };
   }
 
   async run(profileName, runId) {
     try {
       await this.setStatus({
-        state: 'switching',
+        state: "switching",
         runId,
         requestedProfile: profileName,
         message: `Validating profile '${profileName}'`,
-        error: null
+        error: null,
       });
 
-      const profilesRaw = await readJson(this.config.profilesPath, { profiles: {} });
+      const profilesRaw = await readJson(this.config.profilesPath, {
+        profiles: {},
+      });
       const profiles = normalizeProfiles(profilesRaw);
       const selected = profiles[profileName];
 
       if (!selected) {
         throw new AppError({
-          code: 'UNKNOWN_PROFILE',
+          code: "UNKNOWN_PROFILE",
           statusCode: 404,
-          message: `Profile '${profileName}' not found in ${this.config.profilesPath}`
+          message: `Profile '${profileName}' not found in ${this.config.profilesPath}`,
         });
       }
 
       const resolved = await resolveProfileArtifact(profileName, selected, {
         dataDir: this.config.dataDir,
-        allowMissing: false
+        allowMissing: false,
       });
       const sourceZipPath = resolved.absolutePath;
 
       await this.setStatus({
-        state: 'importing',
+        state: "importing",
         runId,
         requestedProfile: profileName,
         message: `Preparing MOTIS input from ${resolved.zipPath}`,
-        error: null
+        error: null,
       });
 
-      await fs.mkdir(path.dirname(this.config.motisActiveGtfsPath), { recursive: true });
+      await fs.mkdir(path.dirname(this.config.motisActiveGtfsPath), {
+        recursive: true,
+      });
       await fs.copyFile(sourceZipPath, this.config.motisActiveGtfsPath);
 
       const payload = {
@@ -327,61 +362,67 @@ class GtfsSwitcher {
         sourceType: resolved.sourceType,
         runtime: resolved.runtime || null,
         activatedAt: nowIso(),
-        runId
+        runId,
       };
 
       try {
-        await setSystemState('active_gtfs', payload);
+        await setSystemState("active_gtfs", payload);
       } catch (err) {
-        this.logger.warn('Failed to persist active_gtfs down to DB, falling back to FS', { error: err.message });
+        this.logger.warn(
+          "Failed to persist active_gtfs down to DB, falling back to FS",
+          { error: err.message },
+        );
         await writeJsonAtomic(this.config.activeProfilePath, payload);
       }
 
       await this.setStatus({
-        state: 'restarting',
+        state: "restarting",
         runId,
         requestedProfile: profileName,
         activeProfile: profileName,
-        message: 'Restarting MOTIS service',
-        error: null
+        message: "Restarting MOTIS service",
+        error: null,
       });
 
       await this.motisAdapter.restartMotisContainer(this.config);
 
-      const ready = await this.motisAdapter.waitForMotisReady(this.config, this.logger);
+      const ready = await this.motisAdapter.waitForMotisReady(
+        this.config,
+        this.logger,
+      );
       if (!ready.ok) {
         throw new AppError({
-          code: 'MOTIS_UNAVAILABLE',
+          code: "MOTIS_UNAVAILABLE",
           statusCode: 502,
-          message: `MOTIS did not become ready in ${this.config.motisReadyTimeoutMs}ms`
+          message: `MOTIS did not become ready in ${this.config.motisReadyTimeoutMs}ms`,
         });
       }
 
       await this.setStatus({
-        state: 'ready',
+        state: "ready",
         runId,
         requestedProfile: profileName,
         activeProfile: profileName,
         message: `Profile '${profileName}' activated successfully`,
         lastHealth: ready.health,
-        error: null
+        error: null,
       });
     } catch (err) {
       const appErr = toAppError(err);
       await this.setStatus({
-        state: 'failed',
+        state: "failed",
         runId,
         requestedProfile: profileName,
         message: appErr.message,
         error: appErr.message,
-        errorCode: appErr.code
+        errorCode: appErr.code,
       });
-      this.logger.error('GTFS profile switch failed', {
-        step: 'switch_failed',
+      this.logger.error("GTFS profile switch failed", {
+        step: "switch_failed",
         runId,
         error: appErr.message,
         errorCode: appErr.code,
-        profile: profileName
+        profile: profileName,
       });
     }
   }
@@ -389,5 +430,5 @@ class GtfsSwitcher {
 
 module.exports = {
   GtfsSwitcher,
-  normalizeProfiles
+  normalizeProfiles,
 };

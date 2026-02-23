@@ -9,8 +9,8 @@ function createNetexStopsRepo(client) {
         `,
         {
           source_id: scope.sourceId,
-          snapshot_date: scope.snapshotDate
-        }
+          snapshot_date: scope.snapshotDate,
+        },
       );
     },
 
@@ -21,10 +21,12 @@ function createNetexStopsRepo(client) {
           FROM netex_stops_staging
           WHERE import_run_id = :'run_id'::uuid;
         `,
-        { run_id: runId }
+        { run_id: runId },
       );
 
-      return row ? Number.parseInt(String(row.row_count || row.rowCount || 0), 10) : 0;
+      return row
+        ? Number.parseInt(String(row.row_count || row.rowCount || 0), 10)
+        : 0;
     },
 
     async copyCsv(csvPath) {
@@ -47,12 +49,12 @@ function createNetexStopsRepo(client) {
           hard_id,
           source_file,
           raw_payload
-        )`
+        )`,
       );
-    }
+    },
   };
 }
 
 module.exports = {
-  createNetexStopsRepo
+  createNetexStopsRepo,
 };

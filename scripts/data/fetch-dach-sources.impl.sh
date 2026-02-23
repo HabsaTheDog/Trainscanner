@@ -160,8 +160,10 @@ parse_args() {
 
 load_env() {
   if [[ -f .env ]]; then
+    set -a
     # shellcheck disable=SC1091
-    set -a; source .env; set +a
+    source .env
+    set +a
   fi
 }
 
@@ -578,6 +580,7 @@ main() {
   local retrieval_ts
   retrieval_ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
+  # shellcheck disable=SC2016
   local jq_filter='(.sources[] | select((($country == "") or (.country == $country)) and (($source_id == "") or (.id == $source_id))))'
   mapfile -t selected_sources < <(jq -c --arg country "$COUNTRY_FILTER" --arg source_id "$SOURCE_ID_FILTER" "$jq_filter" "$CONFIG_FILE")
 

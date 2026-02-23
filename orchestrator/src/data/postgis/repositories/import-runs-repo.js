@@ -1,22 +1,22 @@
-const { validateOrThrow } = require('../../../core/schema');
+const { validateOrThrow } = require("../../../core/schema");
 
 const IMPORT_RUN_SCHEMA = {
-  type: 'object',
-  required: ['runId', 'pipeline', 'status'],
+  type: "object",
+  required: ["runId", "pipeline", "status"],
   properties: {
-    runId: { type: 'string', minLength: 1 },
-    pipeline: { type: 'string', minLength: 1 },
-    status: { type: 'string', enum: ['running', 'succeeded', 'failed'] },
-    sourceId: { type: 'string' },
-    country: { type: 'string' },
-    snapshotDate: { type: 'string' },
-    startedAt: { type: 'string' },
-    endedAt: { type: 'string' },
-    errorCode: { type: 'string' },
-    errorMessage: { type: 'string' },
-    stats: { type: 'object' }
+    runId: { type: "string", minLength: 1 },
+    pipeline: { type: "string", minLength: 1 },
+    status: { type: "string", enum: ["running", "succeeded", "failed"] },
+    sourceId: { type: "string" },
+    country: { type: "string" },
+    snapshotDate: { type: "string" },
+    startedAt: { type: "string" },
+    endedAt: { type: "string" },
+    errorCode: { type: "string" },
+    errorMessage: { type: "string" },
+    stats: { type: "object" },
   },
-  additionalProperties: true
+  additionalProperties: true,
 };
 
 function normalizeRunRow(row) {
@@ -28,19 +28,21 @@ function normalizeRunRow(row) {
     runId: row.run_id || row.runid || row.runId,
     pipeline: row.pipeline,
     status: row.status,
-    sourceId: row.source_id || row.sourceid || row.sourceId || '',
-    country: row.country || '',
-    snapshotDate: row.snapshot_date || row.snapshotdate || row.snapshotDate || '',
-    startedAt: row.started_at || row.startedat || row.startedAt || '',
-    endedAt: row.ended_at || row.endedat || row.endedAt || '',
-    errorCode: row.error_code || row.errorcode || row.errorCode || '',
-    errorMessage: row.error_message || row.errormessage || row.errorMessage || '',
-    stats: row.stats && typeof row.stats === 'object' ? row.stats : {}
+    sourceId: row.source_id || row.sourceid || row.sourceId || "",
+    country: row.country || "",
+    snapshotDate:
+      row.snapshot_date || row.snapshotdate || row.snapshotDate || "",
+    startedAt: row.started_at || row.startedat || row.startedAt || "",
+    endedAt: row.ended_at || row.endedat || row.endedAt || "",
+    errorCode: row.error_code || row.errorcode || row.errorCode || "",
+    errorMessage:
+      row.error_message || row.errormessage || row.errorMessage || "",
+    stats: row.stats && typeof row.stats === "object" ? row.stats : {},
   };
 
   validateOrThrow(normalized, IMPORT_RUN_SCHEMA, {
-    code: 'INVALID_CONFIG',
-    message: 'Invalid import run row returned from repository'
+    code: "INVALID_CONFIG",
+    message: "Invalid import run row returned from repository",
   });
 
   return normalized;
@@ -68,11 +70,11 @@ function createImportRunsRepo(client) {
         {
           run_id: input.runId,
           pipeline: input.pipeline,
-          status: input.status || 'running',
-          source_id: input.sourceId || '',
-          country: input.country || '',
-          snapshot_date: input.snapshotDate || ''
-        }
+          status: input.status || "running",
+          source_id: input.sourceId || "",
+          country: input.country || "",
+          snapshot_date: input.snapshotDate || "",
+        },
       );
 
       return normalizeRunRow(row);
@@ -102,9 +104,9 @@ function createImportRunsRepo(client) {
         `,
         {
           run_id: input.runId,
-          error_message: input.errorMessage || '',
-          stats_json: input.stats ? JSON.stringify(input.stats) : ''
-        }
+          error_message: input.errorMessage || "",
+          stats_json: input.stats ? JSON.stringify(input.stats) : "",
+        },
       );
 
       return normalizeRunRow(row);
@@ -134,8 +136,8 @@ function createImportRunsRepo(client) {
         `,
         {
           run_id: input.runId,
-          stats_json: input.stats ? JSON.stringify(input.stats) : ''
-        }
+          stats_json: input.stats ? JSON.stringify(input.stats) : "",
+        },
       );
 
       return normalizeRunRow(row);
@@ -159,15 +161,15 @@ function createImportRunsRepo(client) {
           WHERE run_id = :'run_id'::uuid
           LIMIT 1;
         `,
-        { run_id: runId }
+        { run_id: runId },
       );
 
       return normalizeRunRow(row);
-    }
+    },
   };
 }
 
 module.exports = {
   createImportRunsRepo,
-  normalizeRunRow
+  normalizeRunRow,
 };

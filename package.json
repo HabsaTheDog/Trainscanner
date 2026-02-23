@@ -12,6 +12,45 @@
     "check:data": "./scripts/check-motis-data.sh",
     "check:config": "./scripts/validate-config.sh",
     "check:docs": "bash -lc \"test -f README.md && test -f AGENTS.md && test -f frontend/AGENTS.md && test -f orchestrator/AGENTS.md && test -f docs/AGENTS.md && test -f docs/documentation-standard.md && test -f tests/AGENTS.md\"",
-    "route:find": "./scripts/find-working-route.sh"
+    "route:find": "./scripts/find-working-route.sh",
+    "check:js": "biome check .",
+    "check:rs": "cargo fmt --manifest-path workers/rust-ingestion/Cargo.toml --check && cargo clippy --manifest-path workers/rust-ingestion/Cargo.toml -- -D warnings",
+    "check:py": "cd services/ai-scoring && python3 -m ruff check . && python3 -m ruff format --check . && python3 -m pyright .",
+    "check:sh": "npx --yes shellcheck scripts/*.sh scripts/ci/*.sh scripts/data/*.sh scripts/qa/*.sh",
+    "check:types": "tsc --noEmit --allowJs --checkJs --project jsconfig.json",
+    "check:md": "bash -lc \"find . \\\\( -path './.git' -o -path './node_modules' -o -path './dist' -o -path './data' -o -path './db' -o -path './state' -o -path './workers/rust-ingestion/target' -o -path './.playwright-cli' \\\\) -prune -o -type f \\\\( -name '*.md' -o -name '*.yml' -o -name '*.yaml' \\\\) -print0 | xargs -0 -r prettier --check\"",
+    "check:orchestrator": "bash -lc \"cd orchestrator && npm run check\"",
+    "check": "npm run check:js && npm run check:rs && npm run check:py && npm run check:sh && npm run check:types && npm run check:md",
+    "test:orchestrator:unit": "bash -lc \"cd orchestrator && npm run test:unit\"",
+    "test:orchestrator:integration": "bash -lc \"cd orchestrator && npm run test:integration\"",
+    "test:orchestrator:e2e": "bash -lc \"cd orchestrator && npm run test:e2e\"",
+    "test:orchestrator": "bash -lc \"cd orchestrator && npm run test\"",
+    "test": "npm run test:orchestrator",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.4",
+    "@types/node": "^25.3.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.7",
+    "prettier": "^3.8.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  },
+  "lint-staged": {
+    "*.{js,ts,jsx,tsx}": [
+      "biome check --write"
+    ],
+    "*.{md,yml,yaml}": [
+      "prettier --write"
+    ],
+    "*.py": [
+      "ruff check --fix",
+      "ruff format",
+      "pyright"
+    ],
+    "*.rs": [
+      "cargo fmt --"
+    ]
   }
 }

@@ -1,7 +1,7 @@
-const crypto = require('node:crypto');
+const crypto = require("node:crypto");
 
 function toCleanString(value) {
-  return String(value || '').trim();
+  return String(value || "").trim();
 }
 
 function normalizeStringArray(raw) {
@@ -22,7 +22,11 @@ function normalizeStringArray(raw) {
 }
 
 function hashStableId(prefix, input) {
-  const digest = crypto.createHash('sha1').update(String(input || '')).digest('hex').slice(0, 20);
+  const digest = crypto
+    .createHash("sha1")
+    .update(String(input || ""))
+    .digest("hex")
+    .slice(0, 20);
   return `${prefix}_${digest}`;
 }
 
@@ -34,7 +38,7 @@ function buildEntityFromMembers({
   renameTo,
   memberStationIds,
   targetCanonicalStationId,
-  metadata = {}
+  metadata = {},
 }) {
   const members = normalizeStringArray(memberStationIds);
   if (members.length === 0) {
@@ -42,12 +46,13 @@ function buildEntityFromMembers({
   }
 
   const targetId = toCleanString(targetCanonicalStationId) || members[0];
-  const label = toCleanString(groupLabel) || 'selected';
-  const displayName = toCleanString(renameTo) || label || `Curated ${operation}`;
+  const label = toCleanString(groupLabel) || "selected";
+  const displayName =
+    toCleanString(renameTo) || label || `Curated ${operation}`;
 
   const curatedStationId = hashStableId(
-    'curst',
-    `${clusterId}|${operation}|${label}|${members.join(',')}|${displayName}`
+    "curst",
+    `${clusterId}|${operation}|${label}|${members.join(",")}|${displayName}`,
   );
 
   const namingReason = toCleanString(renameTo)
@@ -62,56 +67,57 @@ function buildEntityFromMembers({
     metadata: {
       ...metadata,
       group_label: label,
-      target_canonical_station_id: targetId
-    }
+      target_canonical_station_id: targetId,
+    },
   };
 
   const memberRows = members.map((stationId, index) => ({
     curated_station_id: curatedStationId,
     canonical_station_id: stationId,
-    member_role: stationId === targetId ? 'primary' : 'member',
+    member_role: stationId === targetId ? "primary" : "member",
     member_rank: index + 1,
     contribution: {
       selected: true,
       operation,
-      group_label: label
-    }
+      group_label: label,
+    },
   }));
 
   const fieldRows = [
     {
       curated_station_id: curatedStationId,
-      field_name: 'display_name',
+      field_name: "display_name",
       field_value: displayName,
-      source_kind: toCleanString(renameTo) ? 'manual_decision' : 'derived',
+      source_kind: toCleanString(renameTo) ? "manual_decision" : "derived",
       source_ref: toCleanString(renameTo) ? requestedBy : targetId,
       metadata: {
         operation,
-        group_label: label
-      }
-    }
+        group_label: label,
+      },
+    },
   ];
 
   const lineageRows = [
     {
       curated_station_id: curatedStationId,
-      operation
-    }
+      operation,
+    },
   ];
 
   return {
     entity,
     memberRows,
     fieldRows,
-    lineageRows
+    lineageRows,
   };
 }
 
 function buildCuratedProjectionRowsV1(input = {}) {
   const clusterId = toCleanString(input.clusterId);
-  const decision = input.decision && typeof input.decision === 'object' ? input.decision : {};
+  const decision =
+    input.decision && typeof input.decision === "object" ? input.decision : {};
   const operation = toCleanString(decision.operation);
-  const requestedBy = toCleanString(decision.requestedBy) || 'curation_tool_v2';
+  const requestedBy = toCleanString(decision.requestedBy) || "curation_tool_v2";
   const selectedStationIds = normalizeStringArray(decision.selectedStationIds);
   const groups = Array.isArray(decision.groups) ? decision.groups : [];
   const renameTo = toCleanString(decision.renameTo);
@@ -126,13 +132,14 @@ function buildCuratedProjectionRowsV1(input = {}) {
       entities,
       members,
       fieldProvenance,
-      lineage
+      lineage,
     };
   }
 
   if (groups.length > 0) {
     for (let idx = 0; idx < groups.length; idx += 1) {
-      const group = groups[idx] && typeof groups[idx] === 'object' ? groups[idx] : {};
+      const group =
+        groups[idx] && typeof groups[idx] === "object" ? groups[idx] : {};
       const candidateRows = buildEntityFromMembers({
         clusterId,
         operation,
@@ -140,12 +147,12 @@ function buildCuratedProjectionRowsV1(input = {}) {
         groupLabel: group.groupLabel || `group-${idx + 1}`,
         renameTo: group.renameTo || renameTo,
         memberStationIds: group.memberStationIds || [],
-        targetCanonicalStationId: group.targetCanonicalStationId || '',
+        targetCanonicalStationId: group.targetCanonicalStationId || "",
         metadata: {
-          source: 'qa-v2-decision',
+          source: "qa-v2-decision",
           section_type: toCleanString(group.sectionType),
-          section_name: toCleanString(group.sectionName)
-        }
+          section_name: toCleanString(group.sectionName),
+        },
       });
       if (!candidateRows) {
         continue;
@@ -160,12 +167,12 @@ function buildCuratedProjectionRowsV1(input = {}) {
       entities,
       members,
       fieldProvenance,
-      lineage
+      lineage,
     };
   }
 
-  const targetCanonicalStationId = selectedStationIds[0] || '';
-  const fallbackLabel = operation === 'merge' ? 'merge-selected' : 'selected';
+  const targetCanonicalStationId = selectedStationIds[0] || "";
+  const fallbackLabel = operation === "merge" ? "merge-selected" : "selected";
   const candidateRows = buildEntityFromMembers({
     clusterId,
     operation,
@@ -175,8 +182,8 @@ function buildCuratedProjectionRowsV1(input = {}) {
     memberStationIds: selectedStationIds,
     targetCanonicalStationId,
     metadata: {
-      source: 'qa-v2-decision'
-    }
+      source: "qa-v2-decision",
+    },
   });
 
   if (!candidateRows) {
@@ -184,7 +191,7 @@ function buildCuratedProjectionRowsV1(input = {}) {
       entities,
       members,
       fieldProvenance,
-      lineage
+      lineage,
     };
   }
 
@@ -197,23 +204,27 @@ function buildCuratedProjectionRowsV1(input = {}) {
     entities,
     members,
     fieldProvenance,
-    lineage
+    lineage,
   };
 }
 
 function persistCuratedProjectionV1(tx, input = {}) {
-  if (!tx || typeof tx.add !== 'function') {
+  if (!tx || typeof tx.add !== "function") {
     return;
   }
 
   const clusterId = toCleanString(input.clusterId);
   const country = toCleanString(input.country).toUpperCase();
-  const requestedBy = toCleanString(input.requestedBy) || 'curation_tool_v2';
+  const requestedBy = toCleanString(input.requestedBy) || "curation_tool_v2";
   const decisionPayload =
-    input.decisionPayload && typeof input.decisionPayload === 'object' ? input.decisionPayload : {};
+    input.decisionPayload && typeof input.decisionPayload === "object"
+      ? input.decisionPayload
+      : {};
   const entities = Array.isArray(input.entities) ? input.entities : [];
   const members = Array.isArray(input.members) ? input.members : [];
-  const fieldProvenance = Array.isArray(input.fieldProvenance) ? input.fieldProvenance : [];
+  const fieldProvenance = Array.isArray(input.fieldProvenance)
+    ? input.fieldProvenance
+    : [];
   const lineage = Array.isArray(input.lineage) ? input.lineage : [];
 
   if (!clusterId || !country || entities.length === 0) {
@@ -232,8 +243,8 @@ function persistCuratedProjectionV1(tx, input = {}) {
     `,
     {
       cluster_id: clusterId,
-      requested_by: requestedBy
-    }
+      requested_by: requestedBy,
+    },
   );
 
   tx.add(
@@ -291,8 +302,8 @@ function persistCuratedProjectionV1(tx, input = {}) {
       cluster_id: clusterId,
       country,
       requested_by: requestedBy,
-      entities: JSON.stringify(entities)
-    }
+      entities: JSON.stringify(entities),
+    },
   );
 
   if (members.length > 0) {
@@ -312,8 +323,8 @@ function persistCuratedProjectionV1(tx, input = {}) {
       WHERE m.curated_station_id = d.curated_station_id
       `,
       {
-        members: JSON.stringify(members)
-      }
+        members: JSON.stringify(members),
+      },
     );
 
     tx.add(
@@ -349,8 +360,8 @@ function persistCuratedProjectionV1(tx, input = {}) {
         contribution = EXCLUDED.contribution
       `,
       {
-        members: JSON.stringify(members)
-      }
+        members: JSON.stringify(members),
+      },
     );
   }
 
@@ -373,8 +384,8 @@ function persistCuratedProjectionV1(tx, input = {}) {
         AND p.field_name = 'display_name'
       `,
       {
-        field_rows: JSON.stringify(fieldProvenance)
-      }
+        field_rows: JSON.stringify(fieldProvenance),
+      },
     );
 
     tx.add(
@@ -412,8 +423,8 @@ function persistCuratedProjectionV1(tx, input = {}) {
         metadata = qa_curated_station_field_provenance_v1.metadata || EXCLUDED.metadata
       `,
       {
-        field_rows: JSON.stringify(fieldProvenance)
-      }
+        field_rows: JSON.stringify(fieldProvenance),
+      },
     );
   }
 
@@ -449,13 +460,13 @@ function persistCuratedProjectionV1(tx, input = {}) {
       {
         cluster_id: clusterId,
         decision_payload: JSON.stringify(decisionPayload),
-        lineage_rows: JSON.stringify(lineage)
-      }
+        lineage_rows: JSON.stringify(lineage),
+      },
     );
   }
 }
 
 module.exports = {
   buildCuratedProjectionRowsV1,
-  persistCuratedProjectionV1
+  persistCuratedProjectionV1,
 };

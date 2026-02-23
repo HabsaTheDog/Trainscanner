@@ -1,7 +1,7 @@
-const http = require('node:http');
+const http = require("node:http");
 
 function joinUrl(base, pathname) {
-  if (pathname.startsWith('/')) {
+  if (pathname.startsWith("/")) {
     return `${base}${pathname}`;
   }
   return `${base}/${pathname}`;
@@ -20,7 +20,7 @@ function uniqueList(values) {
 }
 
 function parseStationInput(value) {
-  const input = String(value || '').trim();
+  const input = String(value || "").trim();
   const bracketMatch = input.match(/\[(.+?)\]\s*$/);
   if (bracketMatch) {
     return bracketMatch[1].trim();
@@ -29,7 +29,7 @@ function parseStationInput(value) {
 }
 
 function stationCandidates(value) {
-  const input = String(value || '').trim();
+  const input = String(value || "").trim();
   const out = [];
   const bracketMatch = input.match(/^(.*?)\s*\[(.+?)\]\s*$/);
   if (bracketMatch) {
@@ -51,9 +51,9 @@ function stationCandidates(value) {
 }
 
 function responseText(response) {
-  const raw = (response.body && response.body.raw) || '';
-  const message = (response.body && response.body.message) || '';
-  const error = (response.body && response.body.error) || '';
+  const raw = response.body?.raw || "";
+  const message = response.body?.message || "";
+  const error = response.body?.error || "";
   return `${raw} ${message} ${error}`.trim();
 }
 
@@ -74,9 +74,9 @@ async function requestJson(url, options = {}, timeoutMs = 10000) {
       ...options,
       signal: ctrl.signal,
       headers: {
-        'content-type': 'application/json',
-        ...(options.headers || {})
-      }
+        "content-type": "application/json",
+        ...(options.headers || {}),
+      },
     });
 
     const text = await response.text();
@@ -95,7 +95,7 @@ async function requestJson(url, options = {}, timeoutMs = 10000) {
     return {
       ok: response.ok,
       status: response.status,
-      body: parsed
+      body: parsed,
     };
   } finally {
     clearTimeout(timer);
@@ -106,63 +106,77 @@ async function checkMotisHealth(config) {
   const url = joinUrl(config.motisBaseUrl, config.motisHealthPath);
 
   try {
-    const response = await requestJson(url, { method: 'GET' }, config.motisRequestTimeoutMs);
-    if (!response.ok && response.status === 404 && config.motisHealthAccept404) {
+    const response = await requestJson(
+      url,
+      { method: "GET" },
+      config.motisRequestTimeoutMs,
+    );
+    if (
+      !response.ok &&
+      response.status === 404 &&
+      config.motisHealthAccept404
+    ) {
       return {
         ok: true,
         status: response.status,
         body: {
-          message: 'Configured MOTIS health endpoint returned 404, treating service as reachable/ready',
-          originalBody: response.body
-        }
+          message:
+            "Configured MOTIS health endpoint returned 404, treating service as reachable/ready",
+          originalBody: response.body,
+        },
       };
     }
 
     return {
       ok: response.ok,
       status: response.status,
-      body: response.body
+      body: response.body,
     };
   } catch (err) {
     return {
       ok: false,
       status: 0,
-      body: { error: err.message }
+      body: { error: err.message },
     };
   }
 }
 
-function dockerApiRequest(socketPath, path, method = 'POST', timeoutMs = 10000) {
+function dockerApiRequest(
+  socketPath,
+  path,
+  method = "POST",
+  timeoutMs = 10000,
+) {
   return new Promise((resolve, reject) => {
     const req = http.request(
       {
         socketPath,
         path,
         method,
-        timeout: timeoutMs
+        timeout: timeoutMs,
       },
       (res) => {
         const chunks = [];
-        res.on('data', (chunk) => chunks.push(chunk));
-        res.on('end', () => {
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () => {
           resolve({
             statusCode: res.statusCode || 0,
-            body: Buffer.concat(chunks).toString('utf8')
+            body: Buffer.concat(chunks).toString("utf8"),
           });
         });
-      }
+      },
     );
 
-    req.on('timeout', () => {
-      req.destroy(new Error('docker API request timeout'));
+    req.on("timeout", () => {
+      req.destroy(new Error("docker API request timeout"));
     });
-    req.on('error', reject);
+    req.on("error", reject);
     req.end();
   });
 }
 
 function parseDockerApiVersion(raw) {
-  if (typeof raw !== 'string') {
+  if (typeof raw !== "string") {
     return null;
   }
   const m = raw.match(/^(\d+)\.(\d+)$/);
@@ -180,48 +194,51 @@ function compareDockerApiVersion(a, b) {
 }
 
 async function resolveDockerApiVersion(config) {
-  if (config.motisDockerApiVersion && config.motisDockerApiVersion !== 'auto') {
+  if (config.motisDockerApiVersion && config.motisDockerApiVersion !== "auto") {
     return config.motisDockerApiVersion;
   }
 
   try {
     const response = await dockerApiRequest(
       config.motisDockerSocketPath,
-      '/version',
-      'GET',
-      config.motisRequestTimeoutMs
+      "/version",
+      "GET",
+      config.motisRequestTimeoutMs,
     );
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      return 'v1.44';
+      return "v1.44";
     }
 
-    const payload = JSON.parse(response.body || '{}');
-    const rawVersion = typeof payload.ApiVersion === 'string' ? payload.ApiVersion : '1.44';
+    const payload = JSON.parse(response.body || "{}");
+    const rawVersion =
+      typeof payload.ApiVersion === "string" ? payload.ApiVersion : "1.44";
     const parsed = parseDockerApiVersion(rawVersion);
-    const min = parseDockerApiVersion('1.44');
+    const min = parseDockerApiVersion("1.44");
 
     if (!parsed || !min) {
-      return 'v1.44';
+      return "v1.44";
     }
 
     if (compareDockerApiVersion(parsed, min) < 0) {
-      return 'v1.44';
+      return "v1.44";
     }
 
     return `v${parsed.major}.${parsed.minor}`;
   } catch {
-    return 'v1.44';
+    return "v1.44";
   }
 }
 
 async function restartMotisContainer(config) {
-  if (config.motisRestartMode === 'none') {
+  if (config.motisRestartMode === "none") {
     return { skipped: true };
   }
 
-  if (config.motisRestartMode !== 'docker') {
-    throw new Error(`Unsupported MOTIS_RESTART_MODE: ${config.motisRestartMode}`);
+  if (config.motisRestartMode !== "docker") {
+    throw new Error(
+      `Unsupported MOTIS_RESTART_MODE: ${config.motisRestartMode}`,
+    );
   }
 
   const containerName = encodeURIComponent(config.motisContainerName);
@@ -230,12 +247,14 @@ async function restartMotisContainer(config) {
   const response = await dockerApiRequest(
     config.motisDockerSocketPath,
     apiPath,
-    'POST',
-    config.motisRequestTimeoutMs
+    "POST",
+    config.motisRequestTimeoutMs,
   );
 
   if (response.statusCode !== 204) {
-    throw new Error(`Failed to restart MOTIS container. Docker API status=${response.statusCode} body=${response.body}`);
+    throw new Error(
+      `Failed to restart MOTIS container. Docker API status=${response.statusCode} body=${response.body}`,
+    );
   }
 
   return { skipped: false };
@@ -243,17 +262,24 @@ async function restartMotisContainer(config) {
 
 async function waitForMotisReady(config, logger) {
   if (config.motisSkipHealthcheck) {
-    logger.warn('Skipping MOTIS health checks because MOTIS_SKIP_HEALTHCHECK=true', {
-      step: 'health_poll'
-    });
+    logger.warn(
+      "Skipping MOTIS health checks because MOTIS_SKIP_HEALTHCHECK=true",
+      {
+        step: "health_poll",
+      },
+    );
     return {
       ok: true,
-      health: { ok: true, status: 200, body: { skipped: true, reason: 'MOTIS_SKIP_HEALTHCHECK' } }
+      health: {
+        ok: true,
+        status: 200,
+        body: { skipped: true, reason: "MOTIS_SKIP_HEALTHCHECK" },
+      },
     };
   }
 
   const start = Date.now();
-  let lastHealth = { ok: false, status: 0, body: { message: 'not checked' } };
+  let lastHealth = { ok: false, status: 0, body: { message: "not checked" } };
 
   while (Date.now() - start < config.motisReadyTimeoutMs) {
     lastHealth = await checkMotisHealth(config);
@@ -261,13 +287,15 @@ async function waitForMotisReady(config, logger) {
       return { ok: true, health: lastHealth };
     }
 
-    logger.info('MOTIS health check not ready yet', {
-      step: 'health_poll',
+    logger.info("MOTIS health check not ready yet", {
+      step: "health_poll",
       statusCode: lastHealth.status,
-      details: lastHealth.body
+      details: lastHealth.body,
     });
 
-    await new Promise((resolve) => setTimeout(resolve, config.motisHealthPollIntervalMs));
+    await new Promise((resolve) =>
+      setTimeout(resolve, config.motisHealthPollIntervalMs),
+    );
   }
 
   return { ok: false, health: lastHealth };
@@ -276,24 +304,24 @@ async function waitForMotisReady(config, logger) {
 async function queryMotisRoute(config, payload) {
   const originCandidates = stationCandidates(payload.origin);
   const destinationCandidates = stationCandidates(payload.destination);
-  const datetime = String(payload.datetime || '').trim();
+  const datetime = String(payload.datetime || "").trim();
 
   const defaultPlanPaths = [
-    '/api/v5/plan',
-    '/v5/plan',
-    '/api/v4/plan',
-    '/v4/plan',
-    '/api/v3/plan',
-    '/v3/plan',
-    '/api/v2/plan',
-    '/v2/plan',
-    '/api/v1/plan',
-    '/v1/plan',
-    '/api/plan',
-    '/plan'
+    "/api/v5/plan",
+    "/v5/plan",
+    "/api/v4/plan",
+    "/v4/plan",
+    "/api/v3/plan",
+    "/v3/plan",
+    "/api/v2/plan",
+    "/v2/plan",
+    "/api/v1/plan",
+    "/v1/plan",
+    "/api/plan",
+    "/plan",
   ];
 
-  const configuredPath = config.motisRoutePath.startsWith('/')
+  const configuredPath = config.motisRoutePath.startsWith("/")
     ? config.motisRoutePath
     : `/${config.motisRoutePath}`;
   const planPaths = uniqueList([configuredPath, ...defaultPlanPaths]);
@@ -305,8 +333,18 @@ async function queryMotisRoute(config, payload) {
   for (const planPath of planPaths) {
     // Probe endpoint existence without params.
     const probeUrl = new URL(joinUrl(config.motisBaseUrl, planPath));
-    const probe = await requestJson(probeUrl.toString(), { method: 'GET' }, config.motisRequestTimeoutMs);
-    attempts.push({ method: 'GET', path: planPath, params: {}, status: probe.status, probe: true });
+    const probe = await requestJson(
+      probeUrl.toString(),
+      { method: "GET" },
+      config.motisRequestTimeoutMs,
+    );
+    attempts.push({
+      method: "GET",
+      path: planPath,
+      params: {},
+      status: probe.status,
+      probe: true,
+    });
 
     // Missing endpoint: skip to next path.
     if (probe.status === 404 && isEndpointNotFound(probe)) {
@@ -315,13 +353,43 @@ async function queryMotisRoute(config, payload) {
 
     const queryVariants = [
       // MOTIS instance in this stack responds to camelCase place params.
-      (from, to, t) => ({ fromPlace: from, toPlace: to, time: t, detailedTransfers: true }),
-      (from, to, t) => ({ fromPlace: from, toPlace: to, time: t, detailed_transfers: true }),
+      (from, to, t) => ({
+        fromPlace: from,
+        toPlace: to,
+        time: t,
+        detailedTransfers: true,
+      }),
+      (from, to, t) => ({
+        fromPlace: from,
+        toPlace: to,
+        time: t,
+        detailed_transfers: true,
+      }),
       // Alternate styles for compatibility across builds.
-      (from, to, t) => ({ from_place: from, to_place: to, time: t, detailed_transfers: true }),
-      (from, to, t) => ({ from: from, to: to, time: t, detailed_transfers: true }),
-      (from, to, t) => ({ from: from, to: to, departure_time: t, detailed_transfers: true }),
-      (from, to, t) => ({ from: from, to: to, departureTime: t, detailed_transfers: true })
+      (from, to, t) => ({
+        from_place: from,
+        to_place: to,
+        time: t,
+        detailed_transfers: true,
+      }),
+      (from, to, t) => ({
+        from: from,
+        to: to,
+        time: t,
+        detailed_transfers: true,
+      }),
+      (from, to, t) => ({
+        from: from,
+        to: to,
+        departure_time: t,
+        detailed_transfers: true,
+      }),
+      (from, to, t) => ({
+        from: from,
+        to: to,
+        departureTime: t,
+        detailed_transfers: true,
+      }),
     ];
 
     for (const origin of originCandidates) {
@@ -333,20 +401,24 @@ async function queryMotisRoute(config, payload) {
             url.searchParams.set(key, value);
           }
 
-          const response = await requestJson(url.toString(), { method: 'GET' }, config.motisRequestTimeoutMs);
+          const response = await requestJson(
+            url.toString(),
+            { method: "GET" },
+            config.motisRequestTimeoutMs,
+          );
           attempts.push({
-            method: 'GET',
+            method: "GET",
             path: planPath,
             params,
-            status: response.status
+            status: response.status,
           });
 
           if (response.ok) {
             return {
               ...response,
               routePath: planPath,
-              routeMethod: 'GET',
-              routeAttempts: attempts
+              routeMethod: "GET",
+              routeAttempts: attempts,
             };
           }
 
@@ -356,7 +428,7 @@ async function queryMotisRoute(config, payload) {
               firstRouteNotFound = {
                 ...response,
                 routePath: planPath,
-                routeMethod: 'GET'
+                routeMethod: "GET",
               };
             }
             continue;
@@ -366,7 +438,7 @@ async function queryMotisRoute(config, payload) {
             firstNonNotFound = {
               ...response,
               routePath: planPath,
-              routeMethod: 'GET'
+              routeMethod: "GET",
             };
           }
         }
@@ -377,14 +449,14 @@ async function queryMotisRoute(config, payload) {
   if (firstRouteNotFound) {
     return {
       ...firstRouteNotFound,
-      routeAttempts: attempts
+      routeAttempts: attempts,
     };
   }
 
   if (firstNonNotFound) {
     return {
       ...firstNonNotFound,
-      routeAttempts: attempts
+      routeAttempts: attempts,
     };
   }
 
@@ -392,12 +464,12 @@ async function queryMotisRoute(config, payload) {
     ok: false,
     status: 404,
     body: {
-      error: 'No known MOTIS routing endpoint responded',
-      attempts
+      error: "No known MOTIS routing endpoint responded",
+      attempts,
     },
     routePath: configuredPath,
-    routeMethod: 'GET',
-    routeAttempts: attempts
+    routeMethod: "GET",
+    routeAttempts: attempts,
   };
 }
 
@@ -405,5 +477,5 @@ module.exports = {
   checkMotisHealth,
   restartMotisContainer,
   waitForMotisReady,
-  queryMotisRoute
+  queryMotisRoute,
 };

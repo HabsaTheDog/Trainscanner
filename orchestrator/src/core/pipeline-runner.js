@@ -1,14 +1,14 @@
-const fs = require('node:fs');
-const path = require('node:path');
-const { spawn } = require('node:child_process');
-const crypto = require('node:crypto');
+const fs = require("node:fs");
+const path = require("node:path");
+const { spawn } = require("node:child_process");
+const crypto = require("node:crypto");
 
-const { AppError } = require('./errors');
-const { generateId } = require('./ids');
-const { createLogger } = require('../logger');
+const { AppError } = require("./errors");
+const { generateId } = require("./ids");
+const { createLogger } = require("../logger");
 
 function resolveRepoRoot(startPath = __dirname) {
-  return path.resolve(startPath, '../../..');
+  return path.resolve(startPath, "../../..");
 }
 
 function toSafeArgs(args) {
@@ -18,21 +18,26 @@ function toSafeArgs(args) {
   return args.map((arg) => String(arg));
 }
 
-function createPipelineLogger(rootDir, service, runId, loggerFactory = createLogger) {
-  const stateDir = path.join(rootDir, 'state');
-  const logPath = path.join(stateDir, 'pipeline.log');
+function createPipelineLogger(
+  rootDir,
+  service,
+  runId,
+  loggerFactory = createLogger,
+) {
+  const stateDir = path.join(rootDir, "state");
+  const logPath = path.join(stateDir, "pipeline.log");
   return loggerFactory(logPath, {
     service,
-    runId
+    runId,
   });
 }
 
 function buildIdempotencyKey(service, args = []) {
   const payload = JSON.stringify({
-    service: String(service || ''),
-    args: Array.isArray(args) ? args.map((arg) => String(arg)) : []
+    service: String(service || ""),
+    args: Array.isArray(args) ? args.map((arg) => String(arg)) : [],
   });
-  return crypto.createHash('sha256').update(payload).digest('hex');
+  return crypto.createHash("sha256").update(payload).digest("hex");
 }
 
 function spawnInherit(command, args, options = {}) {
@@ -40,14 +45,14 @@ function spawnInherit(command, args, options = {}) {
     const child = spawn(command, args, {
       cwd: options.cwd,
       env: options.env,
-      stdio: 'inherit'
+      stdio: "inherit",
     });
 
-    child.on('error', (err) => reject(err));
-    child.on('close', (exitCode, signal) => {
+    child.on("error", (err) => reject(err));
+    child.on("close", (exitCode, signal) => {
       resolve({
         exitCode: Number.isInteger(exitCode) ? exitCode : 1,
-        signal: signal || null
+        signal: signal || null,
       });
     });
   });
@@ -55,58 +60,56 @@ function spawnInherit(command, args, options = {}) {
 
 async function runLegacyDataScript(options = {}) {
   const rootDir = path.resolve(options.rootDir || resolveRepoRoot());
-  const scriptFile = String(options.scriptFile || '').trim();
-  const service = String(options.service || 'pipeline').trim();
-  const errorCode = String(options.errorCode || 'INTERNAL_ERROR').trim();
+  const scriptFile = String(options.scriptFile || "").trim();
+  const service = String(options.service || "pipeline").trim();
+  const errorCode = String(options.errorCode || "INTERNAL_ERROR").trim();
   const args = toSafeArgs(options.args);
-  const runId = String(options.runId || '').trim() || generateId(service.replace(/[^A-Za-z0-9]+/g, '-'));
+  const runId =
+    String(options.runId || "").trim() ||
+    generateId(service.replace(/[^A-Za-z0-9]+/g, "-"));
   const runCommand = options.runCommand || spawnInherit;
 
   if (!scriptFile) {
     throw new AppError({
-      code: 'INVALID_REQUEST',
-      message: `Missing scriptFile for service '${service}'`
+      code: "INVALID_REQUEST",
+      message: `Missing scriptFile for service '${service}'`,
     });
   }
 
-  const scriptPath = path.join(rootDir, 'scripts', 'data', scriptFile);
+  const scriptPath = path.join(rootDir, "scripts", "data", scriptFile);
   if (!fs.existsSync(scriptPath)) {
     throw new AppError({
-      code: 'INVALID_CONFIG',
+      code: "INVALID_CONFIG",
       message: `Pipeline script not found: ${scriptPath}`,
-      details: { runId, scriptFile }
+      details: { runId, scriptFile },
     });
   }
 
   const logger =
     options.logger ||
-    createPipelineLogger(
-      rootDir,
-      service,
-      runId,
-      options.loggerFactory
-    );
+    createPipelineLogger(rootDir, service, runId, options.loggerFactory);
 
-  logger.info('pipeline command started', {
+  logger.info("pipeline command started", {
     scriptFile,
-    args
+    args,
   });
 
-  const envOverrides = options.env && typeof options.env === 'object' ? options.env : {};
+  const envOverrides =
+    options.env && typeof options.env === "object" ? options.env : {};
 
   let result;
   try {
-    result = await runCommand('bash', [scriptPath, ...args], {
+    result = await runCommand("bash", [scriptPath, ...args], {
       cwd: rootDir,
       env: {
         ...process.env,
-        ...envOverrides
-      }
+        ...envOverrides,
+      },
     });
   } catch (err) {
-    logger.error('pipeline command execution failed', {
+    logger.error("pipeline command execution failed", {
       scriptFile,
-      error: err
+      error: err,
     });
 
     throw new AppError({
@@ -114,17 +117,17 @@ async function runLegacyDataScript(options = {}) {
       message: `Command execution failed: ${scriptFile}`,
       details: {
         runId,
-        scriptFile
+        scriptFile,
       },
-      cause: err
+      cause: err,
     });
   }
 
   if (result.exitCode !== 0) {
-    logger.error('pipeline command failed', {
+    logger.error("pipeline command failed", {
       scriptFile,
       exitCode: result.exitCode,
-      signal: result.signal
+      signal: result.signal,
     });
 
     throw new AppError({
@@ -134,19 +137,19 @@ async function runLegacyDataScript(options = {}) {
         runId,
         scriptFile,
         exitCode: result.exitCode,
-        signal: result.signal
-      }
+        signal: result.signal,
+      },
     });
   }
 
-  logger.info('pipeline command completed', {
-    scriptFile
+  logger.info("pipeline command completed", {
+    scriptFile,
   });
 
   return {
     ok: true,
     runId,
-    scriptFile
+    scriptFile,
   };
 }
 
@@ -155,5 +158,5 @@ module.exports = {
   createPipelineLogger,
   resolveRepoRoot,
   runLegacyDataScript,
-  spawnInherit
+  spawnInherit,
 };
