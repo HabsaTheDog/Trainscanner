@@ -16,3 +16,4 @@ When executing commands in the terminal, be aware of the following recurring env
 
 - **Interactive Prompts Hang:** Commands that prompt for user input (like `npx` asking for permission to install a package) will hang indefinitely and block execution. Always strictly use non-interactive flags (e.g., `npx --yes`, `npm install --no-fund --no-audit`, etc.).
 - **Stuck NPM Commands:** Occasionally, `npm` package installations or wrapper commands may hang entirely due to cache locks or registry timeouts in this environment. If a command runs unusually long with no output, cancel it, try clearing the cache (`npm cache clean --force`), or run the underlying tools (e.g., `biome`, `tsc`) directly instead of through NPM scripts.
+- **Long-Running Commands:** Do not let commands run for longer than 30 seconds without periodically checking their output or status. If a command is stuck or requires interaction that is not visible, cancel it and investigate.
