@@ -66,3 +66,9 @@ data/motis/osm.pbf
 data/motis/data/
 data/gtfs/*.zip
 data/gtfs/runtime/
+
+# Rust
+target/
+
+# Python linting
+.ruff_cache/
