@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import sys
 import zipfile
 from dataclasses import dataclass
@@ -28,6 +29,14 @@ def clean_text(value: str | None) -> str | None:
         return None
     stripped = value.strip()
     return stripped if stripped else None
+
+
+def compute_grid_id(country: str, lat: float | None, lon: float | None) -> str:
+    if lat is not None and lon is not None and -90 <= lat <= 90 and -180 <= lon <= 180:
+        lat_bucket = math.floor(lat + 90)
+        lon_bucket = math.floor(lon + 180)
+        return f"g{lat_bucket:03d}_{lon_bucket:03d}"
+    return f"zzz{country.strip().lower()}"
 
 
 def first_direct_child_text(elem: etree._Element, names: set[str]) -> str | None:
@@ -250,6 +259,7 @@ def extract(zip_path: Path, writer: csv.DictWriter, args: argparse.Namespace) ->
                                 "stop_name": stop_name,
                                 "latitude": "" if lat is None else f"{lat:.8f}",
                                 "longitude": "" if lon is None else f"{lon:.8f}",
+                                "grid_id": compute_grid_id(args.country, lat, lon),
                                 "public_code": public_code or "",
                                 "private_code": private_code or "",
                                 "hard_id": hard_id or "",
@@ -297,6 +307,7 @@ def main() -> int:
                 "stop_name",
                 "latitude",
                 "longitude",
+                "grid_id",
                 "public_code",
                 "private_code",
                 "hard_id",

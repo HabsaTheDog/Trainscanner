@@ -81,6 +81,7 @@ const shouldRun = hasDocker && process.env.ENABLE_POSTGIS_TESTS === "1";
       latitude,
       longitude,
       geom,
+      grid_id,
       match_method,
       member_count,
       first_seen_snapshot_date,
@@ -88,9 +89,9 @@ const shouldRun = hasDocker && process.env.ENABLE_POSTGIS_TESTS === "1";
       last_built_run_id,
       updated_at
     ) VALUES
-      (:'station_a', 'Alpha Hub', normalize_station_name('Alpha Hub'), 'DE', 48.1001, 11.5001, ST_SetSRID(ST_MakePoint(11.5001, 48.1001), 4326), 'hard_id', 1, '2026-02-20', '2026-02-20', :'run_id'::uuid, now()),
-      (:'station_b', 'Alpha Hub North', normalize_station_name('Alpha Hub North'), 'DE', 48.1012, 11.5012, ST_SetSRID(ST_MakePoint(11.5012, 48.1012), 4326), 'hard_id', 1, '2026-02-20', '2026-02-20', :'run_id'::uuid, now())
-    ON CONFLICT (canonical_station_id) DO NOTHING;
+      (:'station_a', 'Alpha Hub', normalize_station_name('Alpha Hub'), 'DE', 48.1001, 11.5001, ST_SetSRID(ST_MakePoint(11.5001, 48.1001), 4326), compute_geo_grid_id('DE', 48.1001, 11.5001, ST_SetSRID(ST_MakePoint(11.5001, 48.1001), 4326)), 'hard_id', 1, '2026-02-20', '2026-02-20', :'run_id'::uuid, now()),
+      (:'station_b', 'Alpha Hub North', normalize_station_name('Alpha Hub North'), 'DE', 48.1012, 11.5012, ST_SetSRID(ST_MakePoint(11.5012, 48.1012), 4326), compute_geo_grid_id('DE', 48.1012, 11.5012, ST_SetSRID(ST_MakePoint(11.5012, 48.1012), 4326)), 'hard_id', 1, '2026-02-20', '2026-02-20', :'run_id'::uuid, now())
+    ON CONFLICT (grid_id, canonical_station_id) DO NOTHING;
 
     INSERT INTO netex_stops_staging (
       import_run_id,
@@ -102,12 +103,13 @@ const shouldRun = hasDocker && process.env.ENABLE_POSTGIS_TESTS === "1";
       stop_name,
       latitude,
       longitude,
+      grid_id,
       hard_id,
       raw_payload
     ) VALUES
-      (:'run_id'::uuid, :'source_a', 'DE', 'qa-provider', '2026-02-20'::date, :'stop_a', 'Alpha Hub', 48.1001, 11.5001, :'hard_id', '{"lines": ["S1", "ICE-1"], "language": "de"}'::jsonb),
-      (:'run_id'::uuid, :'source_b', 'DE', 'qa-provider', '2026-02-20'::date, :'stop_b', 'Alpha Hub North', 48.1012, 11.5012, :'hard_id', '{"lines": ["S1"], "language": "de"}'::jsonb)
-    ON CONFLICT (source_id, snapshot_date, source_stop_id) DO NOTHING;
+      (:'run_id'::uuid, :'source_a', 'DE', 'qa-provider', '2026-02-20'::date, :'stop_a', 'Alpha Hub', 48.1001, 11.5001, compute_geo_grid_id('DE', 48.1001, 11.5001, NULL::geometry), :'hard_id', '{"lines": ["S1", "ICE-1"], "language": "de"}'::jsonb),
+      (:'run_id'::uuid, :'source_b', 'DE', 'qa-provider', '2026-02-20'::date, :'stop_b', 'Alpha Hub North', 48.1012, 11.5012, compute_geo_grid_id('DE', 48.1012, 11.5012, NULL::geometry), :'hard_id', '{"lines": ["S1"], "language": "de"}'::jsonb)
+    ON CONFLICT (grid_id, source_id, snapshot_date, source_stop_id) DO NOTHING;
 
     INSERT INTO canonical_station_sources (
       canonical_station_id,

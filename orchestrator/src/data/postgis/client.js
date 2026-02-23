@@ -70,6 +70,83 @@ function escapeRegex(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function toSqlLiteral(value) {
+  if (value === null || value === undefined) {
+    return "NULL";
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new AppError({
+        code: "INVALID_REQUEST",
+        message: "SQL numeric parameter must be finite",
+      });
+    }
+    return String(value);
+  }
+  if (typeof value === "boolean") {
+    return value ? "TRUE" : "FALSE";
+  }
+  if (value instanceof Date) {
+    return `'${value.toISOString().replace(/'/g, "''")}'`;
+  }
+  if (typeof value === "object") {
+    return `'${JSON.stringify(value).replace(/'/g, "''")}'`;
+  }
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+function interpolateSqlLiterals(sql, params = {}) {
+  let query = String(sql || "");
+  const entries = Object.entries(params || {});
+  entries.sort((a, b) => b[0].length - a[0].length);
+
+  for (const [key, value] of entries) {
+    const token = new RegExp(`:'${escapeRegex(key)}'`, "g");
+    if (token.test(query)) {
+      query = query.replace(token, toSqlLiteral(value));
+    }
+  }
+
+  const unresolved = query.match(/:'[A-Za-z_][A-Za-z0-9_]*'/g);
+  if (unresolved && unresolved.length > 0) {
+    throw new AppError({
+      code: "INVALID_REQUEST",
+      message: `Missing SQL params for placeholders: ${Array.from(new Set(unresolved)).join(", ")}`,
+    });
+  }
+
+  return query;
+}
+
+function scriptResultToStdout(result) {
+  const candidate = Array.isArray(result)
+    ? [...result]
+        .reverse()
+        .find((item) => Array.isArray(item?.rows) && item.rows.length > 0) ||
+      result[result.length - 1]
+    : result;
+
+  if (
+    !candidate ||
+    !Array.isArray(candidate.rows) ||
+    candidate.rows.length === 0
+  ) {
+    return "";
+  }
+
+  return candidate.rows
+    .map((row) => {
+      const values = Object.values(row || {});
+      if (values.length === 1) {
+        return values[0] === undefined || values[0] === null
+          ? ""
+          : String(values[0]);
+      }
+      return JSON.stringify(row);
+    })
+    .join("\n");
+}
+
 /**
  * Converts named parameters (:'paramName') into Postgres positional parameters ($1, $2)
  * and returns the parameterized SQL string and the ordered array of values.
@@ -176,7 +253,29 @@ function createPostgisClient(options = {}) {
   }
 
   async function runScript(sql, params = {}) {
-    return runSql(sql, params);
+    const q = String(sql || "").trim();
+    if (!q) {
+      throw new AppError({
+        code: "INVALID_REQUEST",
+        message: "SQL script is required",
+      });
+    }
+    const query = interpolateSqlLiterals(q, params);
+
+    try {
+      const result = await pool.query(query);
+      return {
+        stdout: scriptResultToStdout(result),
+        stderr: "",
+      };
+    } catch (err) {
+      throw new AppError({
+        code: "INTERNAL_ERROR",
+        message: err.message,
+        details: { query },
+        cause: err,
+      });
+    }
   }
 
   async function exec(sql, params = {}) {

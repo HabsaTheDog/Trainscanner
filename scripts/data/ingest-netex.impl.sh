@@ -309,6 +309,7 @@ ingest_source() {
     stop_name,
     latitude,
     longitude,
+    grid_id,
     public_code,
     private_code,
     hard_id,

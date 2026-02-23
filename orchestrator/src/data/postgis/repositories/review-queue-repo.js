@@ -269,6 +269,8 @@ WHERE :'close_missing' = 'true'
     WHERE i.issue_key = q.issue_key
   );
 
+COMMIT;
+
 SELECT json_build_object(
   'scopeCountry', COALESCE(NULLIF(:'country_filter', ''), ''),
   'scopeAsOf', COALESCE(NULLIF(:'as_of', ''), ''),
@@ -300,8 +302,6 @@ SELECT json_build_object(
     NULLIF(:'as_of', '')::date
   )
 )::text;
-
-COMMIT;
 `;
 
 function createReviewQueueRepo(client) {

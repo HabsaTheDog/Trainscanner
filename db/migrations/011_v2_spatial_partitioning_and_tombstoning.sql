@@ -1,19 +1,53 @@
 -- V2 Capabilities: Tombstoning and Spatial Partitioning
+--
+-- This migration is intentionally resilient to partial previous runs.
+-- It is wrapped in a transaction so fresh executions are atomic.
+
+BEGIN;
 
 -- 1. Add Tombstoning columns to canonical_stations
-ALTER TABLE canonical_stations ADD COLUMN IF NOT EXISTS is_deleted boolean NOT NULL DEFAULT false;
-ALTER TABLE canonical_stations ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
+ALTER TABLE IF EXISTS canonical_stations
+  ADD COLUMN IF NOT EXISTS is_deleted boolean NOT NULL DEFAULT false;
+ALTER TABLE IF EXISTS canonical_stations
+  ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
 
 -- 2. Add Tombstoning columns to qa_station_clusters_v2
-ALTER TABLE qa_station_clusters_v2 ADD COLUMN IF NOT EXISTS is_deleted boolean NOT NULL DEFAULT false;
-ALTER TABLE qa_station_clusters_v2 ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
+ALTER TABLE qa_station_clusters_v2
+  ADD COLUMN IF NOT EXISTS is_deleted boolean NOT NULL DEFAULT false;
+ALTER TABLE qa_station_clusters_v2
+  ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
 
--- 3. Partitioning: Renaming old tables to legacy to prepare partitions
-ALTER TABLE canonical_stations RENAME TO canonical_stations_legacy;
-ALTER TABLE netex_stops_staging RENAME TO netex_stops_staging_legacy;
+-- 3. Rename old base tables to *_legacy only when needed.
+DO $$
+DECLARE
+  v_canonical regclass := to_regclass('public.canonical_stations');
+  v_staging regclass := to_regclass('public.netex_stops_staging');
+BEGIN
+  IF to_regclass('public.canonical_stations_legacy') IS NULL
+     AND v_canonical IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1
+       FROM pg_partitioned_table p
+       WHERE p.partrelid = v_canonical
+     )
+  THEN
+    EXECUTE 'ALTER TABLE canonical_stations RENAME TO canonical_stations_legacy';
+  END IF;
 
--- 4. Create new Partitioned Table for canonical_stations
-CREATE TABLE canonical_stations (
+  IF to_regclass('public.netex_stops_staging_legacy') IS NULL
+     AND v_staging IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1
+       FROM pg_partitioned_table p
+       WHERE p.partrelid = v_staging
+     )
+  THEN
+    EXECUTE 'ALTER TABLE netex_stops_staging RENAME TO netex_stops_staging_legacy';
+  END IF;
+END $$;
+
+-- 4. Create partitioned canonical_stations.
+CREATE TABLE IF NOT EXISTS canonical_stations (
   canonical_station_id text,
   canonical_name text NOT NULL,
   normalized_name text NOT NULL,
@@ -33,39 +67,87 @@ CREATE TABLE canonical_stations (
   PRIMARY KEY (country, canonical_station_id)
 ) PARTITION BY LIST (country);
 
-CREATE TABLE canonical_stations_de PARTITION OF canonical_stations FOR VALUES IN ('DE');
-CREATE TABLE canonical_stations_at PARTITION OF canonical_stations FOR VALUES IN ('AT');
-CREATE TABLE canonical_stations_ch PARTITION OF canonical_stations FOR VALUES IN ('CH');
+CREATE TABLE IF NOT EXISTS canonical_stations_de
+  PARTITION OF canonical_stations FOR VALUES IN ('DE');
+CREATE TABLE IF NOT EXISTS canonical_stations_at
+  PARTITION OF canonical_stations FOR VALUES IN ('AT');
+CREATE TABLE IF NOT EXISTS canonical_stations_ch
+  PARTITION OF canonical_stations FOR VALUES IN ('CH');
 
-CREATE INDEX idx_canonical_stations_name ON canonical_stations (country, normalized_name);
-CREATE INDEX idx_canonical_stations_geom ON canonical_stations USING gist (geom);
+CREATE INDEX IF NOT EXISTS idx_canonical_stations_name
+  ON canonical_stations (country, normalized_name);
+CREATE INDEX IF NOT EXISTS idx_canonical_stations_geom_partitioned
+  ON canonical_stations USING gist (geom);
 
--- Migration of existing data
-INSERT INTO canonical_stations (
-  canonical_station_id, canonical_name, normalized_name, country, latitude, longitude, geom,
-  match_method, member_count, first_seen_snapshot_date, last_seen_snapshot_date,
-  last_built_run_id, created_at, updated_at
-)
-SELECT 
-  canonical_station_id, canonical_name, normalized_name, country, latitude, longitude, geom,
-  match_method, member_count, first_seen_snapshot_date, last_seen_snapshot_date,
-  last_built_run_id, created_at, updated_at
-FROM canonical_stations_legacy;
+-- Copy existing rows if legacy table exists.
+DO $$
+BEGIN
+  IF to_regclass('public.canonical_stations_legacy') IS NOT NULL THEN
+    INSERT INTO canonical_stations (
+      canonical_station_id,
+      canonical_name,
+      normalized_name,
+      country,
+      latitude,
+      longitude,
+      geom,
+      match_method,
+      member_count,
+      first_seen_snapshot_date,
+      last_seen_snapshot_date,
+      last_built_run_id,
+      is_deleted,
+      deleted_at,
+      created_at,
+      updated_at
+    )
+    SELECT
+      canonical_station_id,
+      canonical_name,
+      normalized_name,
+      country,
+      latitude,
+      longitude,
+      geom,
+      match_method,
+      member_count,
+      first_seen_snapshot_date,
+      last_seen_snapshot_date,
+      last_built_run_id,
+      COALESCE(is_deleted, false),
+      deleted_at,
+      created_at,
+      updated_at
+    FROM canonical_stations_legacy
+    ON CONFLICT (country, canonical_station_id) DO NOTHING;
+  END IF;
+END $$;
 
--- Drop foreign keys pointing to old table before dropping
-ALTER TABLE qa_station_naming_overrides_v2 DROP CONSTRAINT qa_station_naming_overrides_v2_canonical_station_id_fkey;
-ALTER TABLE qa_station_display_names_v2 DROP CONSTRAINT qa_station_display_names_v2_canonical_station_id_fkey;
-ALTER TABLE canonical_station_sources DROP CONSTRAINT canonical_station_sources_canonical_station_id_fkey;
-ALTER TABLE qa_station_segments_v2 DROP CONSTRAINT qa_station_segments_v2_canonical_station_id_fkey;
-ALTER TABLE qa_station_cluster_candidates_v2 DROP CONSTRAINT qa_station_cluster_candidates_v2_canonical_stat_fkey;
-ALTER TABLE qa_station_cluster_evidence_v2 DROP CONSTRAINT qa_station_cluster_evidence_v2_source_canonical_s_fkey;
-ALTER TABLE qa_station_cluster_evidence_v2 DROP CONSTRAINT qa_station_cluster_evidence_v2_target_canonical_s_fkey;
-ALTER TABLE qa_station_cluster_decision_members_v2 DROP CONSTRAINT qa_station_cluster_decision_members_v2_canonical_s_fkey;
+-- Drop all foreign keys that still point at legacy canonical table.
+DO $$
+DECLARE
+  r record;
+BEGIN
+  IF to_regclass('public.canonical_stations_legacy') IS NOT NULL THEN
+    FOR r IN
+      SELECT conrelid::regclass AS table_name, conname
+      FROM pg_constraint
+      WHERE contype = 'f'
+        AND confrelid = 'public.canonical_stations_legacy'::regclass
+    LOOP
+      EXECUTE format(
+        'ALTER TABLE %s DROP CONSTRAINT IF EXISTS %I',
+        r.table_name,
+        r.conname
+      );
+    END LOOP;
+  END IF;
+END $$;
 
-DROP TABLE canonical_stations_legacy;
+DROP TABLE IF EXISTS canonical_stations_legacy;
 
--- 5. Create new Partitioned Table for netex_stops_staging
-CREATE TABLE netex_stops_staging (
+-- 5. Create partitioned netex_stops_staging.
+CREATE TABLE IF NOT EXISTS netex_stops_staging (
   staging_id bigserial,
   import_run_id uuid NOT NULL,
   source_id text NOT NULL,
@@ -90,24 +172,76 @@ CREATE TABLE netex_stops_staging (
   PRIMARY KEY (country, staging_id)
 ) PARTITION BY LIST (country);
 
-CREATE TABLE netex_stops_staging_de PARTITION OF netex_stops_staging FOR VALUES IN ('DE');
-CREATE TABLE netex_stops_staging_at PARTITION OF netex_stops_staging FOR VALUES IN ('AT');
-CREATE TABLE netex_stops_staging_ch PARTITION OF netex_stops_staging FOR VALUES IN ('CH');
+CREATE TABLE IF NOT EXISTS netex_stops_staging_de
+  PARTITION OF netex_stops_staging FOR VALUES IN ('DE');
+CREATE TABLE IF NOT EXISTS netex_stops_staging_at
+  PARTITION OF netex_stops_staging FOR VALUES IN ('AT');
+CREATE TABLE IF NOT EXISTS netex_stops_staging_ch
+  PARTITION OF netex_stops_staging FOR VALUES IN ('CH');
 
-CREATE UNIQUE INDEX idx_netex_stops_uniq ON netex_stops_staging (country, source_id, snapshot_date, source_stop_id);
-CREATE INDEX idx_netex_stops_staging_geom ON netex_stops_staging USING gist (geom);
-CREATE INDEX idx_netex_stops_name ON netex_stops_staging (country, normalized_name);
-CREATE INDEX idx_netex_stops_hard_id ON netex_stops_staging (country, hard_id) WHERE hard_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_netex_stops_uniq
+  ON netex_stops_staging (country, source_id, snapshot_date, source_stop_id);
+CREATE INDEX IF NOT EXISTS idx_netex_stops_staging_geom
+  ON netex_stops_staging USING gist (geom);
+CREATE INDEX IF NOT EXISTS idx_netex_stops_name
+  ON netex_stops_staging (country, normalized_name);
+CREATE INDEX IF NOT EXISTS idx_netex_stops_hard_id
+  ON netex_stops_staging (country, hard_id)
+  WHERE hard_id IS NOT NULL;
 
-INSERT INTO netex_stops_staging (
-  staging_id, import_run_id, source_id, country, provider_slug, snapshot_date, manifest_sha256,
-  source_stop_id, source_parent_stop_id, stop_name, normalized_name, latitude, longitude, geom,
-  public_code, private_code, hard_id, source_file, raw_payload, inserted_at, updated_at
-)
-SELECT 
-  staging_id, import_run_id, source_id, country, provider_slug, snapshot_date, manifest_sha256,
-  source_stop_id, source_parent_stop_id, stop_name, normalized_name, latitude, longitude, geom,
-  public_code, private_code, hard_id, source_file, raw_payload, inserted_at, updated_at
-FROM netex_stops_staging_legacy;
+DO $$
+BEGIN
+  IF to_regclass('public.netex_stops_staging_legacy') IS NOT NULL THEN
+    INSERT INTO netex_stops_staging (
+      staging_id,
+      import_run_id,
+      source_id,
+      country,
+      provider_slug,
+      snapshot_date,
+      manifest_sha256,
+      source_stop_id,
+      source_parent_stop_id,
+      stop_name,
+      normalized_name,
+      latitude,
+      longitude,
+      geom,
+      public_code,
+      private_code,
+      hard_id,
+      source_file,
+      raw_payload,
+      inserted_at,
+      updated_at
+    )
+    SELECT
+      staging_id,
+      import_run_id,
+      source_id,
+      country,
+      provider_slug,
+      snapshot_date,
+      manifest_sha256,
+      source_stop_id,
+      source_parent_stop_id,
+      stop_name,
+      normalized_name,
+      latitude,
+      longitude,
+      geom,
+      public_code,
+      private_code,
+      hard_id,
+      source_file,
+      raw_payload,
+      inserted_at,
+      updated_at
+    FROM netex_stops_staging_legacy
+    ON CONFLICT (country, staging_id) DO NOTHING;
+  END IF;
+END $$;
 
-DROP TABLE netex_stops_staging_legacy;
+DROP TABLE IF EXISTS netex_stops_staging_legacy;
+
+COMMIT;

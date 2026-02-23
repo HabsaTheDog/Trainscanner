@@ -269,6 +269,16 @@ SELECT
        OR cs.last_seen_snapshot_date IS DISTINCT FROM nc.last_seen_snapshot_date
   ) AS updated;
 
+DELETE FROM canonical_stations cs
+USING (
+  SELECT
+    nc.canonical_station_id,
+    compute_geo_grid_id(nc.country::text, nc.latitude, nc.longitude, nc.geom) AS expected_grid_id
+  FROM _new_canonical nc
+) expected
+WHERE cs.canonical_station_id = expected.canonical_station_id
+  AND cs.grid_id <> expected.expected_grid_id;
+
 INSERT INTO canonical_stations (
   canonical_station_id,
   canonical_name,
@@ -277,6 +287,7 @@ INSERT INTO canonical_stations (
   latitude,
   longitude,
   geom,
+  grid_id,
   match_method,
   member_count,
   first_seen_snapshot_date,
@@ -292,6 +303,7 @@ SELECT
   latitude,
   longitude,
   geom,
+  compute_geo_grid_id(country::text, latitude, longitude, geom) AS grid_id,
   match_method,
   member_count,
   first_seen_snapshot_date,
@@ -299,7 +311,7 @@ SELECT
   :'run_id'::uuid,
   now()
 FROM _new_canonical
-ON CONFLICT (canonical_station_id)
+ON CONFLICT (grid_id, canonical_station_id)
 DO UPDATE SET
   canonical_name = EXCLUDED.canonical_name,
   normalized_name = EXCLUDED.normalized_name,
@@ -358,6 +370,8 @@ WHERE cs.country IN (SELECT DISTINCT country FROM _selected_snapshots)
     WHERE css.canonical_station_id = cs.canonical_station_id
   );
 
+COMMIT;
+
 SELECT json_build_object(
   'sourceRows', (SELECT source_rows FROM _summary),
   'canonicalRows', (SELECT canonical_rows FROM _summary),
@@ -369,8 +383,6 @@ SELECT json_build_object(
   'asOf', COALESCE(NULLIF(:'as_of', ''), ''),
   'sourceScope', COALESCE(NULLIF(:'source_id_scope', ''), '')
 )::text;
-
-COMMIT;
 `;
 
 function createCanonicalStationsRepo(client) {

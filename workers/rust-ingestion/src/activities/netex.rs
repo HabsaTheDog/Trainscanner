@@ -6,6 +6,15 @@ use std::env;
 use std::io::Write;
 use temporal_sdk::ActContext;
 
+fn compute_grid_id(country: &str, latitude: f64, longitude: f64) -> String {
+    if (-90.0..=90.0).contains(&latitude) && (-180.0..=180.0).contains(&longitude) {
+        let lat_bucket = (latitude + 90.0).floor() as i32;
+        let lon_bucket = (longitude + 180.0).floor() as i32;
+        return format!("g{:03}_{:03}", lat_bucket, lon_bucket);
+    }
+    format!("zzz{}", country.trim().to_lowercase())
+}
+
 pub async fn extract_netex_stops(
     _ctx: ActContext,
     payload: serde_json::Value,
@@ -79,7 +88,7 @@ pub async fn extract_netex_stops(
     let mut db_writer = pg_client.copy_in(
         "COPY netex_stops_staging (
         import_run_id, source_id, country, provider_slug, snapshot_date, manifest_sha256,
-        source_stop_id, source_parent_stop_id, stop_name, latitude, longitude,
+        source_stop_id, source_parent_stop_id, stop_name, latitude, longitude, grid_id,
         public_code, private_code, hard_id, source_file, raw_payload
     ) FROM STDIN WITH (FORMAT csv)",
     )?;
@@ -95,10 +104,13 @@ pub async fn extract_netex_stops(
         // ... Deep SAX logic here ...
         // We will output dummy/sample parsed data for now to finalize the integration bridge
 
+        let sample_lat = 52.52_f64;
+        let sample_lon = 13.40_f64;
+        let sample_grid_id = compute_grid_id(country, sample_lat, sample_lon);
         let sample_csv_line = format!(
-            "\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"\",\"Sample Station\",\"52.52\",\"13.40\",\"\",\"\",\"\",\"{}\",\"{{}}\"\n",
+            "\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"\",\"Sample Station\",\"52.52\",\"13.40\",\"{}\",\"\",\"\",\"\",\"{}\",\"{{}}\"\n",
             run_id, source_id, country, provider_slug, snapshot_date, manifest_sha256,
-            "123456", entry_name
+            "123456", sample_grid_id, entry_name
         );
         db_writer.write_all(sample_csv_line.as_bytes())?;
         stop_places_written += 1;

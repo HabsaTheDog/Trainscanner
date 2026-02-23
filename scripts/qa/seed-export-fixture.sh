@@ -135,13 +135,14 @@ INSERT INTO netex_stops_staging (
   stop_name,
   latitude,
   longitude,
+  grid_id,
   source_file,
   raw_payload
 )
 VALUES
-  ('11111111-1111-1111-1111-111111111111'::uuid, 'fixture_de_netex', 'DE', 'fixture_provider', :'as_of'::date, 'fixture', 'fixture_stop_a', 'Fixture Hbf', 52.520008, 13.404954, 'fixture.xml', '{}'::jsonb),
-  ('11111111-1111-1111-1111-111111111111'::uuid, 'fixture_de_netex', 'DE', 'fixture_provider', :'as_of'::date, 'fixture', 'fixture_stop_b', 'Fixture Ost', 52.515000, 13.454000, 'fixture.xml', '{}'::jsonb)
-ON CONFLICT (source_id, snapshot_date, source_stop_id) DO UPDATE
+  ('11111111-1111-1111-1111-111111111111'::uuid, 'fixture_de_netex', 'DE', 'fixture_provider', :'as_of'::date, 'fixture', 'fixture_stop_a', 'Fixture Hbf', 52.520008, 13.404954, compute_geo_grid_id('DE', 52.520008, 13.404954, NULL::geometry), 'fixture.xml', '{}'::jsonb),
+  ('11111111-1111-1111-1111-111111111111'::uuid, 'fixture_de_netex', 'DE', 'fixture_provider', :'as_of'::date, 'fixture', 'fixture_stop_b', 'Fixture Ost', 52.515000, 13.454000, compute_geo_grid_id('DE', 52.515000, 13.454000, NULL::geometry), 'fixture.xml', '{}'::jsonb)
+ON CONFLICT (grid_id, source_id, snapshot_date, source_stop_id) DO UPDATE
 SET
   stop_name = EXCLUDED.stop_name,
   latitude = EXCLUDED.latitude,
@@ -156,6 +157,7 @@ INSERT INTO canonical_stations (
   latitude,
   longitude,
   geom,
+  grid_id,
   match_method,
   member_count,
   first_seen_snapshot_date,
@@ -172,6 +174,7 @@ VALUES
     52.520008,
     13.404954,
     ST_SetSRID(ST_MakePoint(13.404954, 52.520008), 4326),
+    compute_geo_grid_id('DE', 52.520008, 13.404954, ST_SetSRID(ST_MakePoint(13.404954, 52.520008), 4326)),
     'hard_id',
     1,
     :'as_of'::date,
@@ -187,6 +190,7 @@ VALUES
     52.515000,
     13.454000,
     ST_SetSRID(ST_MakePoint(13.454000, 52.515000), 4326),
+    compute_geo_grid_id('DE', 52.515000, 13.454000, ST_SetSRID(ST_MakePoint(13.454000, 52.515000), 4326)),
     'hard_id',
     1,
     :'as_of'::date,
@@ -194,7 +198,7 @@ VALUES
     '22222222-2222-2222-2222-222222222222'::uuid,
     now()
   )
-ON CONFLICT (canonical_station_id) DO UPDATE
+ON CONFLICT (grid_id, canonical_station_id) DO UPDATE
 SET
   canonical_name = EXCLUDED.canonical_name,
   normalized_name = EXCLUDED.normalized_name,
