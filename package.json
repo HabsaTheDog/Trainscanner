@@ -9,6 +9,7 @@
     "up": "./scripts/up.sh",
     "init": "./scripts/init-motis.sh",
     "switch": "./scripts/switch-gtfs.sh",
+    "data:seed:base-spatial": "./scripts/data/seed-base-spatial-data.sh",
     "check:data": "./scripts/check-motis-data.sh",
     "check:config": "./scripts/validate-config.sh",
     "check:docs": "bash -lc \"test -f README.md && test -f AGENTS.md && test -f frontend/AGENTS.md && test -f orchestrator/AGENTS.md && test -f docs/AGENTS.md && test -f docs/documentation-standard.md && test -f tests/AGENTS.md\"",

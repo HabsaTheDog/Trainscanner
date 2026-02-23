@@ -43,3 +43,4 @@ npm run stop
 - `scripts/data/run-station-review-pipeline.sh`: Run full QA ingestion/review pipeline.
 - `scripts/qa/build-profile.sh`: Build deterministic profile from Canonical PostGIS.
 - `scripts/data/fetch-dach-sources.sh`: Fetch raw DACH data snapshots.
+- `scripts/data/seed-base-spatial-data.sh`: Pre-seed `canonical_stations` from OSM/UIC base topology (cold-start mitigation).
