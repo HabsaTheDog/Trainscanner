@@ -71,3 +71,25 @@ Temporal integration:
 - Workflow name: `compileGtfsArtifact`
 - Task queue: `review-pipeline`
 - Activity name: `compileGtfsArtifact`
+
+## Ephemeral K8s MOTIS Testing
+
+Run disposable Kubernetes jobs for post-compilation route validation:
+
+```bash
+# Micro graph: bbox-scoped local/regional regression checks
+scripts/run-motis-k8s-test.sh \
+  --mode micro \
+  --gtfs-path data/gtfs/runtime/de/2026-02-20/active-gtfs.zip \
+  --tier regional \
+  --bbox "48.05,11.35,48.30,11.75"
+
+# Macro graph: sparse high-speed cross-border checks
+scripts/run-motis-k8s-test.sh \
+  --mode macro \
+  --gtfs-path data/artifacts/canonical-high-speed-2026-02-20.zip \
+  --tier high-speed
+```
+
+Artifacts and generated query suites are written to `data/motis-k8s/<job-name>/`.
+See `k8s/motis-testing/README.md` for `kind` / `minikube` path-mapping details.

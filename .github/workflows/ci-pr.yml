@@ -29,8 +29,12 @@ jobs:
 
       - name: Shell and Python syntax checks
         run: |
-          bash -n scripts/*.sh scripts/ci/*.sh scripts/data/*.sh scripts/qa/*.sh
-          python3 -m py_compile scripts/qa/export-canonical-gtfs.py scripts/data/netex_extract_stops.py
+          bash -n scripts/*.sh scripts/ci/*.sh scripts/data/*.sh scripts/qa/*.sh k8s/motis-testing/bin/*.sh
+          python3 -m py_compile \
+            scripts/qa/export-canonical-gtfs.py \
+            scripts/data/netex_extract_stops.py \
+            scripts/qa/prepare-motis-k8s-artifacts.py \
+            k8s/motis-testing/bin/test-motis-routes.py
 
       - name: Install Root Dependencies
         run: npm ci

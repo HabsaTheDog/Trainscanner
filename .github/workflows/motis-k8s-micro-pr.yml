@@ -1,0 +1,100 @@
+name: MOTIS K8s Micro PR
+
+on:
+  pull_request:
+    paths:
+      - "scripts/qa/**"
+      - "scripts/run-motis-k8s-test.sh"
+      - "k8s/motis-testing/**"
+      - "config/gtfs-profiles.json"
+      - "config/active-gtfs.json"
+      - "db/migrations/**"
+      - "orchestrator/src/temporal/**"
+      - ".github/workflows/motis-k8s-micro-pr.yml"
+  workflow_dispatch:
+
+jobs:
+  motis-k8s-micro:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup kind
+        uses: engineerd/setup-kind@v0.6.2
+        with:
+          version: v0.23.0
+
+      - name: Create kind cluster with workspace mount
+        run: |
+          cat > /tmp/kind-trainscanner.yaml <<EOF
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          nodes:
+            - role: control-plane
+              extraMounts:
+                - hostPath: ${GITHUB_WORKSPACE}
+                  containerPath: /workspace/trainscanner
+            - role: worker
+              extraMounts:
+                - hostPath: ${GITHUB_WORKSPACE}
+                  containerPath: /workspace/trainscanner
+          EOF
+          kind create cluster --name trainscanner-ci --config /tmp/kind-trainscanner.yaml --wait 180s
+          kubectl get nodes -o wide
+
+      - name: Build tiny deterministic GTFS fixture
+        run: |
+          mkdir -p data/motis data/motis-k8s-ci
+
+          curl -fsSL --retry 4 --retry-all-errors \
+            -o data/motis/osm.pbf \
+            https://download.geofabrik.de/europe/liechtenstein-latest.osm.pbf
+
+          cat > data/motis-k8s-ci/ci-stops.csv <<'EOF'
+          stop_id,stop_name,country,stop_lat,stop_lon,tier_hint
+          ci_berlin_hbf,Berlin Hbf,DE,52.525084,13.369402,regional
+          ci_berlin_sued,Berlin Suedkreuz,DE,52.475283,13.365757,regional
+          ci_potsdam_hbf,Potsdam Hbf,DE,52.391764,13.067645,regional
+          ci_brandenburg_hbf,Brandenburg Hbf,DE,52.412982,12.531644,regional
+          EOF
+
+          python3 scripts/qa/export-canonical-gtfs.py \
+            --stops-csv data/motis-k8s-ci/ci-stops.csv \
+            --tier regional \
+            --profile ci_micro \
+            --as-of "$(date -u +%F)" \
+            --output-zip data/motis-k8s-ci/ci-micro.zip \
+            --summary-json data/motis-k8s-ci/ci-micro-summary.json
+
+      - name: Run MOTIS micro K8s regression
+        run: |
+          scripts/run-motis-k8s-test.sh \
+            --mode micro \
+            --gtfs-path "${GITHUB_WORKSPACE}/data/motis-k8s-ci/ci-micro.zip" \
+            --tier regional \
+            --bbox "52.35,12.45,52.55,13.45" \
+            --osm-path "${GITHUB_WORKSPACE}/data/motis/osm.pbf" \
+            --namespace motis-testing \
+            --job-name "motis-micro-pr-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --timeout-sec 900 \
+            --health-timeout-sec 300 \
+            --node-path-map "${GITHUB_WORKSPACE}=/workspace/trainscanner"
+
+      - name: Dump K8s diagnostics on failure
+        if: failure()
+        run: |
+          kubectl get namespaces || true
+          kubectl -n motis-testing get all || true
+          kubectl -n motis-testing get events --sort-by=.metadata.creationTimestamp || true
+
+      - name: Delete kind cluster
+        if: always()
+        run: kind delete cluster --name trainscanner-ci
