@@ -5,6 +5,7 @@ const {
 const {
   getLowConfidenceQueue,
   recordAiMatchDecision,
+  setMegaHubWalkTime,
 } = require("../domains/qa/ai-queue");
 const { createPostgisClient } = require("../data/postgis/client");
 const _crypto = require("node:crypto");
@@ -148,6 +149,21 @@ const rootValue = {
       decision_id: result.decisionId,
       cluster_id: result.clusterId,
       operation: result.operation,
+    };
+  },
+
+  setMegaHubWalkTime: async ({ hubId, walkMinutes }) => {
+    const client = await getDbClient();
+    const result = await setMegaHubWalkTime(client, {
+      hubId,
+      walkMinutes: Number(walkMinutes),
+      requestedBy: "operator",
+    });
+    return {
+      ok: true,
+      rule_id: result.ruleId,
+      hub_id: result.hubId,
+      walk_minutes: result.walkMinutes,
     };
   },
 };

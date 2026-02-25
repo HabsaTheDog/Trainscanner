@@ -4,9 +4,10 @@
  * test/unit/graphql-qa-schema.test.js
  *
  * Verifies that the GraphQL schema correctly defines:
- *  - lowConfidenceQueue query
- *  - approveAiMatch / rejectAiMatch / overrideAiMatch mutations
- *  - LowConfidenceQueueResult, LowConfidenceItem, AiMatchDecisionResult types
+ *  - lowConfidenceQueue query (incl. coordinate fields)
+ *  - approveAiMatch / rejectAiMatch / overrideAiMatch / setMegaHubWalkTime mutations
+ *  - LowConfidenceQueueResult, LowConfidenceItem, AiMatchDecisionResult,
+ *    WalkTimeOverrideResult types
  *
  * Uses the Node.js built-in test runner (no external deps).
  */
@@ -45,7 +46,7 @@ test("LowConfidenceQueueResult has expected fields", () => {
     assert.ok(fields.items, "should have 'items' field");
 });
 
-test("LowConfidenceItem has all required fields", () => {
+test("LowConfidenceItem has all required fields including coordinates", () => {
     const type = schema.getType("LowConfidenceItem");
     assert.ok(type, "LowConfidenceItem type should exist");
     const fields = type.getFields();
@@ -58,6 +59,10 @@ test("LowConfidenceItem has all required fields", () => {
         "ai_confidence",
         "ai_suggested_action",
         "cluster_display_name",
+        "source_lat",
+        "source_lon",
+        "target_lat",
+        "target_lon",
     ];
     for (const fieldName of required) {
         assert.ok(fields[fieldName], `LowConfidenceItem should have '${fieldName}' field`);
@@ -101,6 +106,26 @@ test("AiMatchDecisionResult has expected fields", () => {
     assert.ok(fields.decision_id, "should have 'decision_id' field");
     assert.ok(fields.cluster_id, "should have 'cluster_id' field");
     assert.ok(fields.operation, "should have 'operation' field");
+});
+
+test("setMegaHubWalkTime mutation is present with correct args", () => {
+    const mutationType = schema.getMutationType();
+    assert.ok(mutationType, "Should have a Mutation type");
+    const field = mutationType.getFields().setMegaHubWalkTime;
+    assert.ok(field, "setMegaHubWalkTime should exist on Mutation");
+    const args = Object.fromEntries(field.args.map((a) => [a.name, a]));
+    assert.ok(args.hubId, "setMegaHubWalkTime should have hubId arg");
+    assert.ok(args.walkMinutes, "setMegaHubWalkTime should have walkMinutes arg");
+});
+
+test("WalkTimeOverrideResult has expected fields", () => {
+    const type = schema.getType("WalkTimeOverrideResult");
+    assert.ok(type, "WalkTimeOverrideResult type should exist");
+    const fields = type.getFields();
+    assert.ok(fields.ok, "should have 'ok' field");
+    assert.ok(fields.rule_id, "should have 'rule_id' field");
+    assert.ok(fields.hub_id, "should have 'hub_id' field");
+    assert.ok(fields.walk_minutes, "should have 'walk_minutes' field");
 });
 
 test("health query resolves without DB connection", async () => {

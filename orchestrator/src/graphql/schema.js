@@ -13,6 +13,7 @@ const schema = buildSchema(`
     approveAiMatch(clusterId: ID!, evidenceId: ID!): AiMatchDecisionResult!
     rejectAiMatch(clusterId: ID!, evidenceId: ID!): AiMatchDecisionResult!
     overrideAiMatch(clusterId: ID!, evidenceId: ID!, targetClusterId: ID!): AiMatchDecisionResult!
+    setMegaHubWalkTime(hubId: ID!, walkMinutes: Int!): WalkTimeOverrideResult!
   }
 
   type Cluster {
@@ -97,6 +98,17 @@ const schema = buildSchema(`
     ai_confidence: Float
     ai_suggested_action: String
     cluster_display_name: String
+    source_lat: Float
+    source_lon: Float
+    target_lat: Float
+    target_lon: Float
+  }
+
+  type WalkTimeOverrideResult {
+    ok: Boolean!
+    rule_id: ID!
+    hub_id: String!
+    walk_minutes: Int!
   }
 
   type AiMatchDecisionResult {
