@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from "react";
 import maplibregl from "maplibre-gl";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { graphqlQuery } from "./graphql";
 
 // ---------------------------------------------------------------------------
@@ -184,7 +184,11 @@ function actionBadge(action) {
     review: { bg: "#fef3c7", color: "#92400e", label: "⚠ review" },
     error: { bg: "#f1f5f9", color: "#475569", label: "— error" },
   };
-  const style = map[action] || { bg: "#f1f5f9", color: "#475569", label: action };
+  const style = map[action] || {
+    bg: "#f1f5f9",
+    color: "#475569",
+    label: action,
+  };
   return (
     <span
       style={{
@@ -208,7 +212,8 @@ function itemCoords(stationId, lat, lon) {
   if (lat != null && lon != null) return [lon, lat];
   // Deterministic fallback (safe until all stations have coords)
   let h = 0;
-  for (let i = 0; i < stationId.length; i++) h = (h * 31 + stationId.charCodeAt(i)) >>> 0;
+  for (let i = 0; i < stationId.length; i++)
+    h = (h * 31 + stationId.charCodeAt(i)) >>> 0;
   const fbLat = 48 + ((h % 1000) / 1000) * 12;
   const fbLon = 2 + (((h >> 8) % 1000) / 1000) * 28;
   return [fbLon, fbLat];
@@ -218,17 +223,27 @@ function itemCoords(stationId, lat, lon) {
 // Sub-component: single queue row
 // ---------------------------------------------------------------------------
 
-function QueueRow({ item, selected, active, onSelect, onActivate, onApprove, onReject, busy }) {
+function QueueRow({
+  item,
+  selected,
+  active,
+  onSelect,
+  onActivate,
+  onApprove,
+  onReject,
+  busy,
+}) {
   const score = item.ai_confidence;
   return (
     <tr
       className={`qa-table-row${active ? " qa-row-active" : ""}${selected ? " qa-row-selected" : ""}`}
       onClick={() => onActivate(item)}
     >
-      <td style={{ width: 28 }} onClick={(e) => { e.stopPropagation(); onSelect(item.evidence_id); }}>
+      <td style={{ width: 28 }}>
         <input
           type="checkbox"
           checked={selected}
+          onClick={(e) => e.stopPropagation()}
           onChange={() => onSelect(item.evidence_id)}
           id={`chk-${item.evidence_id}`}
         />
@@ -244,29 +259,46 @@ function QueueRow({ item, selected, active, onSelect, onActivate, onApprove, onR
           <div className="confidence-bar-wrap">
             <div
               className="confidence-bar-fill"
-              style={{ width: `${Math.round((score ?? 0) * 100)}%`, background: confidenceColor(score) }}
+              style={{
+                width: `${Math.round((score ?? 0) * 100)}%`,
+                background: confidenceColor(score),
+              }}
             />
           </div>
-          <span style={{ fontSize: "0.82rem", color: confidenceColor(score), fontWeight: 600 }}>
+          <span
+            style={{
+              fontSize: "0.82rem",
+              color: confidenceColor(score),
+              fontWeight: 600,
+            }}
+          >
             {score != null ? `${Math.round(score * 100)}%` : "—"}
           </span>
         </div>
       </td>
       <td>{actionBadge(item.ai_suggested_action)}</td>
       <td>
-        <div className="qa-action-btns" onClick={(e) => e.stopPropagation()}>
+        <div className="qa-action-btns">
           <button
+            type="button"
             className="qa-btn qa-btn-approve"
             disabled={busy}
-            onClick={() => onApprove(item)}
+            onClick={(e) => {
+              e.stopPropagation();
+              onApprove(item);
+            }}
             title="Approve this match"
           >
             ✓
           </button>
           <button
+            type="button"
             className="qa-btn qa-btn-reject"
             disabled={busy}
-            onClick={() => onReject(item)}
+            onClick={(e) => {
+              e.stopPropagation();
+              onReject(item);
+            }}
             title="Reject this match"
           >
             ✗
@@ -302,7 +334,11 @@ function TransferMatrix() {
 
   function handleChange(hubId, val) {
     setDirty((d) => ({ ...d, [hubId]: val }));
-    setSaved((s) => { const n = { ...s }; delete n[hubId]; return n; });
+    setSaved((s) => {
+      const n = { ...s };
+      delete n[hubId];
+      return n;
+    });
   }
 
   function handleSave(hubId) {
@@ -312,7 +348,11 @@ function TransferMatrix() {
     setOverrides(next);
     saveOverrides(next);
     setSaved((s) => ({ ...s, [hubId]: "saving" }));
-    setDirty((d) => { const n = { ...d }; delete n[hubId]; return n; });
+    setDirty((d) => {
+      const n = { ...d };
+      delete n[hubId];
+      return n;
+    });
     // Persist to DB
     graphqlQuery(SET_WALK_TIME_MUTATION, { hubId, walkMinutes: minutes })
       .then(() => setSaved((s) => ({ ...s, [hubId]: "ok" })))
@@ -361,11 +401,22 @@ function TransferMatrix() {
                   {saved[hub.id] === "ok" ? (
                     <span className="qa-saved-badge">Saved ✓</span>
                   ) : saved[hub.id] === "saving" ? (
-                    <span className="qa-saved-badge" style={{ color: "var(--muted)" }}>Saving…</span>
+                    <span
+                      className="qa-saved-badge"
+                      style={{ color: "var(--muted)" }}
+                    >
+                      Saving…
+                    </span>
                   ) : saved[hub.id] === "error" ? (
-                    <span className="qa-saved-badge" style={{ color: "var(--danger)" }}>⚠ Error</span>
+                    <span
+                      className="qa-saved-badge"
+                      style={{ color: "var(--danger)" }}
+                    >
+                      ⚠ Error
+                    </span>
                   ) : (
                     <button
+                      type="button"
                       className="qa-btn qa-btn-save"
                       onClick={() => handleSave(hub.id)}
                     >
@@ -411,7 +462,6 @@ export function QAQueuePage() {
   // --- bbox drawing state ---
   const [bboxDrawing, setBboxDrawing] = useState(false);
   const bboxStart = useRef(null);
-  const bboxRect = useRef(null);
 
   // --- map refs ---
   const mapContainerRef = useRef(null);
@@ -426,7 +476,10 @@ export function QAQueuePage() {
     setLoading(true);
     setError(null);
     try {
-      const data = await graphqlQuery(QUEUE_QUERY, { limit: PAGE_SIZE, offset: off });
+      const data = await graphqlQuery(QUEUE_QUERY, {
+        limit: PAGE_SIZE,
+        offset: off,
+      });
       setItems(data.lowConfidenceQueue.items);
       setTotal(data.lowConfidenceQueue.total);
       setOffset(off);
@@ -491,15 +544,23 @@ export function QAQueuePage() {
       tgtEl.className = "qa-marker qa-marker-tgt";
       tgtEl.title = item.target_canonical_station_id;
 
-      const [sLon, sLat] = itemCoords(item.source_canonical_station_id, item.source_lat, item.source_lon);
-      const [tLon, tLat] = itemCoords(item.target_canonical_station_id, item.target_lat, item.target_lon);
+      const [sLon, sLat] = itemCoords(
+        item.source_canonical_station_id,
+        item.source_lat,
+        item.source_lon,
+      );
+      const [tLon, tLat] = itemCoords(
+        item.target_canonical_station_id,
+        item.target_lat,
+        item.target_lon,
+      );
 
       const srcMarker = new maplibregl.Marker({ element: srcEl })
         .setLngLat([sLon, sLat])
         .setPopup(
           new maplibregl.Popup({ closeButton: false }).setHTML(
-            `<strong>${item.cluster_display_name || item.cluster_id}</strong><br/>Source: ${item.source_canonical_station_id}`
-          )
+            `<strong>${item.cluster_display_name || item.cluster_id}</strong><br/>Source: ${item.source_canonical_station_id}`,
+          ),
         )
         .addTo(map);
 
@@ -507,8 +568,8 @@ export function QAQueuePage() {
         .setLngLat([tLon, tLat])
         .setPopup(
           new maplibregl.Popup({ closeButton: false }).setHTML(
-            `<strong>${item.cluster_display_name || item.cluster_id}</strong><br/>Target: ${item.target_canonical_station_id}`
-          )
+            `<strong>${item.cluster_display_name || item.cluster_id}</strong><br/>Target: ${item.target_canonical_station_id}`,
+          ),
         )
         .addTo(map);
 
@@ -524,8 +585,16 @@ export function QAQueuePage() {
     const map = mapRef.current;
     if (!map || !activeItem) return;
 
-    const [sLon, sLat] = itemCoords(activeItem.source_canonical_station_id, activeItem.source_lat, activeItem.source_lon);
-    const [tLon, tLat] = itemCoords(activeItem.target_canonical_station_id, activeItem.target_lat, activeItem.target_lon);
+    const [sLon, sLat] = itemCoords(
+      activeItem.source_canonical_station_id,
+      activeItem.source_lat,
+      activeItem.source_lon,
+    );
+    const [tLon, tLat] = itemCoords(
+      activeItem.target_canonical_station_id,
+      activeItem.target_lat,
+      activeItem.target_lon,
+    );
 
     const bounds = new maplibregl.LngLatBounds();
     bounds.extend([sLon, sLat]);
@@ -562,11 +631,15 @@ export function QAQueuePage() {
       const srcLl = srcMarker.getLngLat();
       const tgtLl = tgtMarker.getLngLat();
       const srcInBox =
-        srcLl.lng >= sw.lng && srcLl.lng <= ne.lng &&
-        srcLl.lat >= sw.lat && srcLl.lat <= ne.lat;
+        srcLl.lng >= sw.lng &&
+        srcLl.lng <= ne.lng &&
+        srcLl.lat >= sw.lat &&
+        srcLl.lat <= ne.lat;
       const tgtInBox =
-        tgtLl.lng >= sw.lng && tgtLl.lng <= ne.lng &&
-        tgtLl.lat >= sw.lat && tgtLl.lat <= ne.lat;
+        tgtLl.lng >= sw.lng &&
+        tgtLl.lng <= ne.lng &&
+        tgtLl.lat >= sw.lat &&
+        tgtLl.lat <= ne.lat;
       if (srcInBox || tgtInBox) {
         newSelected.add(item.evidence_id);
       }
@@ -584,18 +657,32 @@ export function QAQueuePage() {
   async function applySingle(item, operation) {
     setBusyIds((b) => new Set([...b, item.evidence_id]));
     try {
-      const mutation = operation === "approve" ? APPROVE_MUTATION : REJECT_MUTATION;
+      const mutation =
+        operation === "approve" ? APPROVE_MUTATION : REJECT_MUTATION;
       await graphqlQuery(mutation, {
         clusterId: item.cluster_id,
         evidenceId: item.evidence_id,
       });
-      setItems((prev) => prev.filter((i) => i.evidence_id !== item.evidence_id));
-      setSelected((s) => { const n = new Set(s); n.delete(item.evidence_id); return n; });
+      setItems((prev) =>
+        prev.filter((i) => i.evidence_id !== item.evidence_id),
+      );
+      setSelected((s) => {
+        const n = new Set(s);
+        n.delete(item.evidence_id);
+        return n;
+      });
       if (activeItem?.evidence_id === item.evidence_id) setActiveItem(null);
     } catch (err) {
-      setBanner({ type: "error", msg: `Failed to ${operation}: ${err.message}` });
+      setBanner({
+        type: "error",
+        msg: `Failed to ${operation}: ${err.message}`,
+      });
     } finally {
-      setBusyIds((b) => { const n = new Set(b); n.delete(item.evidence_id); return n; });
+      setBusyIds((b) => {
+        const n = new Set(b);
+        n.delete(item.evidence_id);
+        return n;
+      });
     }
   }
 
@@ -607,11 +694,15 @@ export function QAQueuePage() {
     if (selected.size === 0) return;
     const targets = items.filter((i) => selected.has(i.evidence_id));
     setBusyIds(new Set(targets.map((i) => i.evidence_id)));
-    setBanner({ type: "info", msg: `Running bulk ${operation} on ${targets.length} items…` });
+    setBanner({
+      type: "info",
+      msg: `Running bulk ${operation} on ${targets.length} items…`,
+    });
 
     let ok = 0;
     let fail = 0;
-    const mutation = operation === "approve" ? APPROVE_MUTATION : REJECT_MUTATION;
+    const mutation =
+      operation === "approve" ? APPROVE_MUTATION : REJECT_MUTATION;
 
     for (const item of targets) {
       try {
@@ -620,7 +711,9 @@ export function QAQueuePage() {
           evidenceId: item.evidence_id,
         });
         ok++;
-        setItems((prev) => prev.filter((i) => i.evidence_id !== item.evidence_id));
+        setItems((prev) =>
+          prev.filter((i) => i.evidence_id !== item.evidence_id),
+        );
       } catch {
         fail++;
       }
@@ -640,12 +733,15 @@ export function QAQueuePage() {
 
   function toggleSort(col) {
     if (sortCol === col) setSortAsc((a) => !a);
-    else { setSortCol(col); setSortAsc(true); }
+    else {
+      setSortCol(col);
+      setSortAsc(true);
+    }
   }
 
   const sorted = [...items].sort((a, b) => {
-    let av = a[sortCol] ?? "";
-    let bv = b[sortCol] ?? "";
+    const av = a[sortCol] ?? "";
+    const bv = b[sortCol] ?? "";
     if (typeof av === "number" && typeof bv === "number") {
       return sortAsc ? av - bv : bv - av;
     }
@@ -657,8 +753,12 @@ export function QAQueuePage() {
   function thSort(col, label) {
     const arrow = sortCol === col ? (sortAsc ? " ↑" : " ↓") : "";
     return (
-      <th onClick={() => toggleSort(col)} style={{ cursor: "pointer", userSelect: "none" }}>
-        {label}{arrow}
+      <th
+        onClick={() => toggleSort(col)}
+        style={{ cursor: "pointer", userSelect: "none" }}
+      >
+        {label}
+        {arrow}
       </th>
     );
   }
@@ -675,8 +775,12 @@ export function QAQueuePage() {
     });
   }
 
-  function selectAll() { setSelected(new Set(items.map((i) => i.evidence_id))); }
-  function clearAll() { setSelected(new Set()); }
+  function selectAll() {
+    setSelected(new Set(items.map((i) => i.evidence_id)));
+  }
+  function clearAll() {
+    setSelected(new Set());
+  }
 
   const allChecked = items.length > 0 && selected.size === items.length;
 
@@ -689,17 +793,18 @@ export function QAQueuePage() {
       {/* ── Header ── */}
       <header className="qa-header">
         <div className="qa-header-left">
-          <a href="/curation.html" className="qa-back-link">← Station Curation</a>
+          <a href="/curation.html" className="qa-back-link">
+            ← Station Curation
+          </a>
           <h1 style={{ margin: 0 }}>QA Operator Interface</h1>
           <span className="muted" style={{ fontSize: "0.88rem" }}>
             AI match review queue
           </span>
         </div>
         <div className="qa-header-right">
-          {total > 0 && (
-            <span className="qa-total-badge">{total} pending</span>
-          )}
+          {total > 0 && <span className="qa-total-badge">{total} pending</span>}
           <button
+            type="button"
             className="btn-secondary"
             onClick={() => fetchQueue(0)}
             disabled={loading}
@@ -711,10 +816,13 @@ export function QAQueuePage() {
 
       {/* ── Banner ── */}
       {banner && (
-        <div className={`ui-notice ui-notice-${banner.type === "ok" ? "success" : banner.type === "error" ? "error" : "info"}`}
-          style={{ margin: "0 16px" }}>
+        <div
+          className={`ui-notice ui-notice-${banner.type === "ok" ? "success" : banner.type === "error" ? "error" : "info"}`}
+          style={{ margin: "0 16px" }}
+        >
           {banner.msg}
           <button
+            type="button"
             className="btn-secondary"
             style={{ marginLeft: 12, padding: "2px 10px", fontSize: "0.8rem" }}
             onClick={() => setBanner(null)}
@@ -727,20 +835,29 @@ export function QAQueuePage() {
       {/* ── Bulk action bar (visible when items selected) ── */}
       {selected.size > 0 && (
         <div className="bulk-action-bar">
-          <span>{selected.size} item{selected.size !== 1 ? "s" : ""} selected</span>
+          <span>
+            {selected.size} item{selected.size !== 1 ? "s" : ""} selected
+          </span>
           <button
+            type="button"
             className="qa-btn qa-btn-approve"
             onClick={() => applyBulk("approve")}
           >
             ✓ Bulk Approve
           </button>
           <button
+            type="button"
             className="qa-btn qa-btn-reject"
             onClick={() => applyBulk("reject")}
           >
             ✗ Bulk Reject
           </button>
-          <button className="btn-secondary" onClick={clearAll} style={{ padding: "4px 10px" }}>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={clearAll}
+            style={{ padding: "4px 10px" }}
+          >
             Clear selection
           </button>
         </div>
@@ -755,29 +872,59 @@ export function QAQueuePage() {
               Showing {sorted.length} of {total}
             </span>
             <div style={{ display: "flex", gap: 6 }}>
-              <button className="btn-secondary" style={{ padding: "4px 8px", fontSize: "0.8rem" }} onClick={selectAll}>
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{ padding: "4px 8px", fontSize: "0.8rem" }}
+                onClick={selectAll}
+              >
                 Select all
               </button>
-              <button className="btn-secondary" style={{ padding: "4px 8px", fontSize: "0.8rem" }} onClick={clearAll}>
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{ padding: "4px 8px", fontSize: "0.8rem" }}
+                onClick={clearAll}
+              >
                 Clear
               </button>
             </div>
           </div>
 
           {error && (
-            <div className="ui-notice ui-notice-error" style={{ margin: "8px 0" }}>
+            <div
+              className="ui-notice ui-notice-error"
+              style={{ margin: "8px 0" }}
+            >
               Error: {error}
-              <button className="btn-secondary" style={{ marginLeft: 8, padding: "2px 8px", fontSize: "0.8rem" }} onClick={() => fetchQueue(0)}>
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{
+                  marginLeft: 8,
+                  padding: "2px 8px",
+                  fontSize: "0.8rem",
+                }}
+                onClick={() => fetchQueue(0)}
+              >
                 Retry
               </button>
             </div>
           )}
 
-          {loading && <p className="muted" style={{ padding: 12 }}>Loading queue…</p>}
+          {loading && (
+            <p className="muted" style={{ padding: 12 }}>
+              Loading queue…
+            </p>
+          )}
 
           {!loading && sorted.length === 0 && !error && (
-            <div className="ui-notice ui-notice-info" style={{ margin: "8px 0" }}>
-              🎉 No low-confidence items in the queue. All matches have been reviewed!
+            <div
+              className="ui-notice ui-notice-info"
+              style={{ margin: "8px 0" }}
+            >
+              🎉 No low-confidence items in the queue. All matches have been
+              reviewed!
             </div>
           )}
 
@@ -823,6 +970,7 @@ export function QAQueuePage() {
           {total > PAGE_SIZE && (
             <div className="qa-pagination">
               <button
+                type="button"
                 className="btn-secondary"
                 disabled={offset === 0}
                 onClick={() => fetchQueue(Math.max(0, offset - PAGE_SIZE))}
@@ -830,9 +978,11 @@ export function QAQueuePage() {
                 ← Prev
               </button>
               <span className="muted tiny">
-                Page {Math.floor(offset / PAGE_SIZE) + 1} / {Math.ceil(total / PAGE_SIZE)}
+                Page {Math.floor(offset / PAGE_SIZE) + 1} /{" "}
+                {Math.ceil(total / PAGE_SIZE)}
               </span>
               <button
+                type="button"
                 className="btn-secondary"
                 disabled={offset + PAGE_SIZE >= total}
                 onClick={() => fetchQueue(offset + PAGE_SIZE)}
@@ -852,6 +1002,7 @@ export function QAQueuePage() {
                 : "Click a row to focus the map"}
             </span>
             <button
+              type="button"
               className={`qa-btn ${bboxDrawing ? "qa-btn-active" : "btn-secondary"}`}
               onClick={() => setBboxDrawing((d) => !d)}
               title="Draw a bounding box to select all stations inside it"
@@ -862,14 +1013,24 @@ export function QAQueuePage() {
           </div>
 
           {bboxDrawing && (
-            <div className="ui-notice ui-notice-info" style={{ borderRadius: 0, borderLeft: "none", borderRight: "none" }}>
-              Click and drag on the map to select all stations within the region.
+            <div
+              className="ui-notice ui-notice-info"
+              style={{
+                borderRadius: 0,
+                borderLeft: "none",
+                borderRight: "none",
+              }}
+            >
+              Click and drag on the map to select all stations within the
+              region.
             </div>
           )}
 
           <div
             ref={mapContainerRef}
             className="qa-map"
+            role="application"
+            aria-label="Station evidence map"
             style={{ cursor: bboxDrawing ? "crosshair" : "grab" }}
             onMouseDown={startBbox}
             onMouseUp={endBbox}
@@ -879,19 +1040,31 @@ export function QAQueuePage() {
             <div className="qa-map-detail">
               <div className="qa-detail-row">
                 <span className="qa-detail-label">Source</span>
-                <code className="qa-detail-val">{activeItem.source_canonical_station_id}</code>
+                <code className="qa-detail-val">
+                  {activeItem.source_canonical_station_id}
+                </code>
               </div>
               <div className="qa-detail-row">
                 <span className="qa-detail-label">Target</span>
-                <code className="qa-detail-val">{activeItem.target_canonical_station_id}</code>
+                <code className="qa-detail-val">
+                  {activeItem.target_canonical_station_id}
+                </code>
               </div>
               <div className="qa-detail-row">
                 <span className="qa-detail-label">Evidence type</span>
-                <span className="qa-detail-val">{activeItem.evidence_type}</span>
+                <span className="qa-detail-val">
+                  {activeItem.evidence_type}
+                </span>
               </div>
               <div className="qa-detail-row">
                 <span className="qa-detail-label">Confidence</span>
-                <span className="qa-detail-val" style={{ color: confidenceColor(activeItem.ai_confidence), fontWeight: 600 }}>
+                <span
+                  className="qa-detail-val"
+                  style={{
+                    color: confidenceColor(activeItem.ai_confidence),
+                    fontWeight: 600,
+                  }}
+                >
                   {activeItem.ai_confidence != null
                     ? `${Math.round(activeItem.ai_confidence * 100)}%`
                     : "—"}
@@ -899,6 +1072,7 @@ export function QAQueuePage() {
               </div>
               <div className="qa-detail-actions">
                 <button
+                  type="button"
                   className="qa-btn qa-btn-approve"
                   onClick={() => applySingle(activeItem, "approve")}
                   disabled={busyIds.has(activeItem.evidence_id)}
@@ -906,6 +1080,7 @@ export function QAQueuePage() {
                   ✓ Approve
                 </button>
                 <button
+                  type="button"
                   className="qa-btn qa-btn-reject"
                   onClick={() => applySingle(activeItem, "reject")}
                   disabled={busyIds.has(activeItem.evidence_id)}

@@ -14,7 +14,7 @@ async function run() {
   const handle = await client.workflow.start(processStationEntityWorkflow, {
     taskQueue: "entity-update",
     // In practice, use a meaningful business ID, like a station ID
-    workflowId: "test-station-workflow-" + Date.now(),
+    workflowId: `test-station-workflow-${Date.now()}`,
     args: [{ stationId: "8000105", name: "Frankfurt (Main) Hbf" }],
   });
 

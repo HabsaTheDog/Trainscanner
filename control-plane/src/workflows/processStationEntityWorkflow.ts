@@ -31,5 +31,5 @@ export async function processStationEntityWorkflow(
   // 3. Notify the Python AI Worker that this entity is ready for scoring/metadata enhancement
   await notifyPythonAiWorker(params.stationId, jobId);
 
-  return "Workflow completed successfully for station " + params.stationId;
+  return `Workflow completed successfully for station ${params.stationId}`;
 }

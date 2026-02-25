@@ -18,16 +18,25 @@ const TILE_EXTENT = 4096;
  * @param {number} y
  */
 function validateTileCoords(z, x, y) {
-    if (!Number.isInteger(z) || z < 0 || z > 20) {
-        throw Object.assign(new Error("Tile z must be an integer 0–20"), { code: "INVALID_REQUEST", statusCode: 400 });
-    }
-    const maxCoord = 2 ** z;
-    if (!Number.isInteger(x) || x < 0 || x >= maxCoord) {
-        throw Object.assign(new Error(`Tile x out of range for z=${z}`), { code: "INVALID_REQUEST", statusCode: 400 });
-    }
-    if (!Number.isInteger(y) || y < 0 || y >= maxCoord) {
-        throw Object.assign(new Error(`Tile y out of range for z=${y}`), { code: "INVALID_REQUEST", statusCode: 400 });
-    }
+  if (!Number.isInteger(z) || z < 0 || z > 20) {
+    throw Object.assign(new Error("Tile z must be an integer 0–20"), {
+      code: "INVALID_REQUEST",
+      statusCode: 400,
+    });
+  }
+  const maxCoord = 2 ** z;
+  if (!Number.isInteger(x) || x < 0 || x >= maxCoord) {
+    throw Object.assign(new Error(`Tile x out of range for z=${z}`), {
+      code: "INVALID_REQUEST",
+      statusCode: 400,
+    });
+  }
+  if (!Number.isInteger(y) || y < 0 || y >= maxCoord) {
+    throw Object.assign(new Error(`Tile y out of range for z=${y}`), {
+      code: "INVALID_REQUEST",
+      statusCode: 400,
+    });
+  }
 }
 
 /**
@@ -46,11 +55,11 @@ function validateTileCoords(z, x, y) {
  * @returns {Promise<Buffer>}
  */
 async function serveMvtTile(client, { z, x, y }) {
-    validateTileCoords(z, x, y);
+  validateTileCoords(z, x, y);
 
-    // Layer 1: canonical stations
-    const canonicalResult = await client.queryOne(
-        `
+  // Layer 1: canonical stations
+  const canonicalResult = await client.queryOne(
+    `
     SELECT ST_AsMVT(q.*, 'canonical', ${TILE_EXTENT}, 'geom') AS tile
     FROM (
       SELECT
@@ -71,12 +80,12 @@ async function serveMvtTile(client, { z, x, y }) {
     ) q
     WHERE q.geom IS NOT NULL
     `,
-        { z, x, y },
-    );
+    { z, x, y },
+  );
 
-    // Layer 2: staging stops (NeTEx raw ingested stops)
-    const stagingResult = await client.queryOne(
-        `
+  // Layer 2: staging stops (NeTEx raw ingested stops)
+  const stagingResult = await client.queryOne(
+    `
     SELECT ST_AsMVT(q.*, 'staging', ${TILE_EXTENT}, 'geom') AS tile
     FROM (
       SELECT
@@ -96,19 +105,21 @@ async function serveMvtTile(client, { z, x, y }) {
     ) q
     WHERE q.geom IS NOT NULL
     `,
-        { z, x, y },
-    );
+    { z, x, y },
+  );
 
-    const canonicalBuf = canonicalResult && canonicalResult.tile
-        ? Buffer.from(canonicalResult.tile, "hex")
-        : Buffer.alloc(0);
+  const canonicalBuf =
+    canonicalResult && canonicalResult.tile
+      ? Buffer.from(canonicalResult.tile, "hex")
+      : Buffer.alloc(0);
 
-    const stagingBuf = stagingResult && stagingResult.tile
-        ? Buffer.from(stagingResult.tile, "hex")
-        : Buffer.alloc(0);
+  const stagingBuf =
+    stagingResult && stagingResult.tile
+      ? Buffer.from(stagingResult.tile, "hex")
+      : Buffer.alloc(0);
 
-    // Concatenate both layers into one .pbf blob
-    return Buffer.concat([canonicalBuf, stagingBuf]);
+  // Concatenate both layers into one .pbf blob
+  return Buffer.concat([canonicalBuf, stagingBuf]);
 }
 
 module.exports = { serveMvtTile, validateTileCoords };
