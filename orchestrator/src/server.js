@@ -48,6 +48,7 @@ const MIME_TYPES = {
   ".woff": "font/woff",
   ".woff2": "font/woff2",
   ".ttf": "font/ttf",
+  ".pbf": "application/x-protobuf",
 };
 
 function sendJson(res, statusCode, payload) {
@@ -774,6 +775,41 @@ async function handleApi(req, res, url, requestLogger) {
       route: routeResponse.body,
     });
     return;
+  }
+
+  // --- Task 5.1: MVT Tile Endpoint -------------------------------------------
+  // GET /api/tiles/:z/:x/:y.pbf
+  // Serves dynamic Mapbox Vector Tiles from PostGIS using ST_AsMVT.
+  if (req.method === "GET") {
+    const tileMatch = url.pathname.match(
+      /^\/api\/tiles\/([^/]+)\/([^/]+)\/([^/]+)\.pbf$/,
+    );
+    if (tileMatch) {
+      const z = Number.parseInt(tileMatch[1], 10);
+      const x = Number.parseInt(tileMatch[2], 10);
+      const y = Number.parseInt(tileMatch[3], 10);
+      const { serveMvtTile } = require("./domains/qa/mvt");
+      const { createPostgisClient } = require("./data/postgis/client");
+
+      // Lazily initialise DB client for tile requests
+      if (!handleApi._tileDbClient) {
+        handleApi._tileDbClient = createPostgisClient();
+        await handleApi._tileDbClient.ensureReady();
+      }
+      const tileBuffer = await serveMvtTile(handleApi._tileDbClient, {
+        z,
+        x,
+        y,
+      });
+      res.writeHead(200, {
+        "content-type": "application/x-protobuf",
+        "content-length": tileBuffer.length,
+        "cache-control": "public, max-age=60",
+        "access-control-allow-origin": "*",
+      });
+      res.end(tileBuffer);
+      return;
+    }
   }
 
   throw new AppError({

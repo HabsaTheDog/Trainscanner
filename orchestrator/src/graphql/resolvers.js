@@ -2,7 +2,22 @@ const {
   getReviewClustersV2,
   getReviewClusterDetailV2,
 } = require("../domains/qa/api");
+const {
+  getLowConfidenceQueue,
+  recordAiMatchDecision,
+} = require("../domains/qa/ai-queue");
+const { createPostgisClient } = require("../data/postgis/client");
 const _crypto = require("node:crypto");
+
+// Lazily-initialised singleton DB client shared across resolver calls.
+let _dbClient = null;
+async function getDbClient() {
+  if (!_dbClient) {
+    _dbClient = createPostgisClient();
+    await _dbClient.ensureReady();
+  }
+  return _dbClient;
+}
 
 // Normally we would use fetch to hit the python service directly or via Temporal
 // We are mimicking the Temporal wrapper directly bridging the python FastAPI
@@ -77,6 +92,62 @@ const rootValue = {
       confidence_score: aiResult.confidence_score,
       suggested_action: aiResult.suggested_action,
       reasoning: aiResult.reasoning,
+    };
+  },
+
+  // --- Task 5.1: Low-Confidence Queue -----------------------------------------
+
+  lowConfidenceQueue: async ({ limit, offset }) => {
+    const client = await getDbClient();
+    return getLowConfidenceQueue(client, { limit, offset });
+  },
+
+  approveAiMatch: async ({ clusterId, evidenceId }) => {
+    const client = await getDbClient();
+    const result = await recordAiMatchDecision(client, {
+      clusterId,
+      evidenceId,
+      operation: "approve",
+      requestedBy: "operator",
+    });
+    return {
+      ok: true,
+      decision_id: result.decisionId,
+      cluster_id: result.clusterId,
+      operation: result.operation,
+    };
+  },
+
+  rejectAiMatch: async ({ clusterId, evidenceId }) => {
+    const client = await getDbClient();
+    const result = await recordAiMatchDecision(client, {
+      clusterId,
+      evidenceId,
+      operation: "reject",
+      requestedBy: "operator",
+    });
+    return {
+      ok: true,
+      decision_id: result.decisionId,
+      cluster_id: result.clusterId,
+      operation: result.operation,
+    };
+  },
+
+  overrideAiMatch: async ({ clusterId, evidenceId, targetClusterId }) => {
+    const client = await getDbClient();
+    const result = await recordAiMatchDecision(client, {
+      clusterId,
+      evidenceId,
+      operation: "override",
+      targetClusterId,
+      requestedBy: "operator",
+    });
+    return {
+      ok: true,
+      decision_id: result.decisionId,
+      cluster_id: result.clusterId,
+      operation: result.operation,
     };
   },
 };

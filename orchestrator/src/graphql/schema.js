@@ -5,10 +5,14 @@ const schema = buildSchema(`
     health: String
     clusters(country: String): [Cluster]
     cluster(id: ID!): ClusterDetail
+    lowConfidenceQueue(limit: Int, offset: Int): LowConfidenceQueueResult!
   }
 
   type Mutation {
     requestAiScore(clusterId: ID!): AiScoreResult
+    approveAiMatch(clusterId: ID!, evidenceId: ID!): AiMatchDecisionResult!
+    rejectAiMatch(clusterId: ID!, evidenceId: ID!): AiMatchDecisionResult!
+    overrideAiMatch(clusterId: ID!, evidenceId: ID!, targetClusterId: ID!): AiMatchDecisionResult!
   }
 
   type Cluster {
@@ -77,6 +81,29 @@ const schema = buildSchema(`
      confidence_score: Float
      suggested_action: String
      reasoning: String
+  }
+
+  type LowConfidenceQueueResult {
+    total: Int!
+    items: [LowConfidenceItem!]!
+  }
+
+  type LowConfidenceItem {
+    evidence_id: ID!
+    cluster_id: String!
+    source_canonical_station_id: String!
+    target_canonical_station_id: String!
+    evidence_type: String!
+    ai_confidence: Float
+    ai_suggested_action: String
+    cluster_display_name: String
+  }
+
+  type AiMatchDecisionResult {
+    ok: Boolean!
+    decision_id: ID!
+    cluster_id: String!
+    operation: String!
   }
 `);
 
