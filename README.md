@@ -33,6 +33,7 @@ npm run stop
 
 - `GET /api/gtfs/profiles`, `GET /api/gtfs/status`
 - `POST /api/gtfs/activate` (Switch profile)
+- `POST /api/gtfs/compile` (Trigger tiered GTFS artifact compilation workflow)
 - `GET /api/gtfs/stations`, `POST /api/routes`
 - `GET /api/qa/v2/clusters`, `POST /api/qa/v2/clusters/:id/decisions` (QA Curation)
 
@@ -44,3 +45,29 @@ npm run stop
 - `scripts/qa/build-profile.sh`: Build deterministic profile from Canonical PostGIS.
 - `scripts/data/fetch-dach-sources.sh`: Fetch raw DACH data snapshots.
 - `scripts/data/seed-base-spatial-data.sh`: Pre-seed `canonical_stations` from OSM/UIC base topology (cold-start mitigation).
+
+## Tiered GTFS Artifact Compilation
+
+Compile tier-constrained GTFS artifacts directly from canonical PostGIS:
+
+```bash
+# Tier 1
+python3 scripts/qa/export-canonical-gtfs.py --from-db --as-of 2026-02-20 --tier high-speed
+
+# Tier 2
+python3 scripts/qa/export-canonical-gtfs.py --from-db --as-of 2026-02-20 --tier regional
+
+# Tier 3
+python3 scripts/qa/export-canonical-gtfs.py --from-db --as-of 2026-02-20 --tier local
+
+# Combined feed (tier metadata in routes.txt route_desc)
+python3 scripts/qa/export-canonical-gtfs.py --from-db --as-of 2026-02-20 --tier all
+```
+
+Default outputs are written to `data/artifacts/` unless `--output-zip` / `--summary-json` are passed.
+
+Temporal integration:
+
+- Workflow name: `compileGtfsArtifact`
+- Task queue: `review-pipeline`
+- Activity name: `compileGtfsArtifact`

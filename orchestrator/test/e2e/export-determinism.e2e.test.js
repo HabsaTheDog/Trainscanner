@@ -156,3 +156,102 @@ test("group-aware export keeps user-facing parents and emits transfer links dete
     cwd: repoRoot,
   });
 });
+
+test("tiered export filters scoped stops and preserves route tier metadata", async () => {
+  const repoRoot = path.resolve(__dirname, "../../..");
+  const temp = await mkTempDir("export-tiers-");
+  const csvPath = path.join(temp, "stops-tiers.csv");
+  const highSpeedSummary = path.join(temp, "summary-high-speed.json");
+  const allSummary = path.join(temp, "summary-all.json");
+  const highSpeedZip = path.join(temp, "high-speed.zip");
+  const allZip = path.join(temp, "all.zip");
+
+  const csv = [
+    "stop_id,stop_name,country,stop_lat,stop_lon",
+    "hs_a,ICE Central,DE,48.100000,11.500000",
+    "hs_b,Railjet Ost,DE,48.200000,11.600000",
+    "lc_a,Metro Nord,DE,48.300000,11.700000",
+    "lc_b,Tram Sued,DE,48.400000,11.800000",
+  ].join("\n");
+  await fs.writeFile(csvPath, `${csv}\n`, "utf8");
+
+  const exportScript = path.join(
+    repoRoot,
+    "scripts",
+    "qa",
+    "export-canonical-gtfs.py",
+  );
+  const validateScript = path.join(
+    repoRoot,
+    "scripts",
+    "qa",
+    "validate-export.sh",
+  );
+
+  await execFileAsync("python3", [
+    exportScript,
+    "--stops-csv",
+    csvPath,
+    "--profile",
+    "fixture_profile",
+    "--as-of",
+    "2026-01-15",
+    "--tier",
+    "high-speed",
+    "--output-zip",
+    highSpeedZip,
+    "--summary-json",
+    highSpeedSummary,
+  ]);
+
+  const highSpeedReport = JSON.parse(
+    await fs.readFile(highSpeedSummary, "utf8"),
+  );
+  assert.equal(highSpeedReport.tier, "high-speed");
+  assert.equal(highSpeedReport.counts.stops, 2);
+  assert.equal(highSpeedReport.counts.routes, 1);
+
+  const highSpeedStops = await execFileAsync("unzip", [
+    "-p",
+    highSpeedZip,
+    "stops.txt",
+  ]);
+  assert.match(highSpeedStops.stdout, /hs_a/);
+  assert.match(highSpeedStops.stdout, /hs_b/);
+  assert.doesNotMatch(highSpeedStops.stdout, /lc_a/);
+  assert.doesNotMatch(highSpeedStops.stdout, /lc_b/);
+
+  const highSpeedRoutes = await execFileAsync("unzip", [
+    "-p",
+    highSpeedZip,
+    "routes.txt",
+  ]);
+  assert.match(highSpeedRoutes.stdout, /tier:high-speed/);
+
+  await execFileAsync("python3", [
+    exportScript,
+    "--stops-csv",
+    csvPath,
+    "--profile",
+    "fixture_profile",
+    "--as-of",
+    "2026-01-15",
+    "--tier",
+    "all",
+    "--output-zip",
+    allZip,
+    "--summary-json",
+    allSummary,
+  ]);
+
+  const allRoutes = await execFileAsync("unzip", ["-p", allZip, "routes.txt"]);
+  assert.match(allRoutes.stdout, /tier:high-speed/);
+  assert.match(allRoutes.stdout, /tier:local/);
+
+  await execFileAsync("bash", [validateScript, "--zip", highSpeedZip], {
+    cwd: repoRoot,
+  });
+  await execFileAsync("bash", [validateScript, "--zip", allZip], {
+    cwd: repoRoot,
+  });
+});

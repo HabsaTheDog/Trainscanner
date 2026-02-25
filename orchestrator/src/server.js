@@ -24,6 +24,9 @@ const {
   toTaggedStopId,
 } = require("./domains/routing/normalization");
 const { validateRouteRequestBody } = require("./domains/routing/contracts");
+const {
+  validateCompileGtfsRequest,
+} = require("./domains/export/compile-contracts");
 const { MetricsCollector } = require("./core/metrics");
 
 const execFileAsync = promisify(execFile);
@@ -574,6 +577,31 @@ async function handleApi(req, res, url, requestLogger) {
   if (req.method === "GET" && url.pathname === "/api/gtfs/profiles") {
     const payload = await switcher.getProfilesWithMeta();
     sendJson(res, 200, payload);
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/gtfs/compile") {
+    const body = await parseJsonBody(req);
+    const compileArgs = validateCompileGtfsRequest(body);
+
+    const { Connection, Client } = require("@temporalio/client");
+    const connection = await Connection.connect({
+      address: process.env.TEMPORAL_ADDRESS || "localhost:7233",
+    });
+    const client = new Client({ connection });
+
+    const workflowId = `gtfs-compile-${compileArgs.tier}-${Date.now()}`;
+    const handle = await client.workflow.start("compileGtfsArtifact", {
+      taskQueue: "review-pipeline",
+      workflowId,
+      args: [compileArgs],
+    });
+
+    sendJson(res, 202, {
+      message: "Temporal Workflow Accepted",
+      workflowId: handle.workflowId,
+      request: compileArgs,
+    });
     return;
   }
 

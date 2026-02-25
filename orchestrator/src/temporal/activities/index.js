@@ -1,2 +1,7 @@
 const { createIngestionActivities } = require("./ingestion");
-module.exports = { createIngestionActivities };
+const { createCompileActivities } = require("./compile");
+
+module.exports = {
+  createIngestionActivities,
+  createCompileActivities,
+};

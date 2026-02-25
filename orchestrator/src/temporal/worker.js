@@ -31,6 +31,7 @@ async function run() {
     workflowsPath: require.resolve("./workflows"),
     activities: {
       ...activities.createIngestionActivities(dbClient, config),
+      ...activities.createCompileActivities(dbClient, config),
     },
   });
 
