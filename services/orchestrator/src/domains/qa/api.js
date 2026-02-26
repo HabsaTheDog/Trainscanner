@@ -300,24 +300,10 @@ async function updateRefreshCheckpoint(updateCheckpoint, state, patch) {
   return next;
 }
 
-async function runRefreshPipelineSteps(input) {
-  const rootDir = input.rootDir || process.cwd();
-  const runId = String(input.runId || "").trim() || crypto.randomUUID();
-  const scope = normalizeRefreshScope(input.scope || {});
-  const updateCheckpoint =
-    typeof input.updateCheckpoint === "function"
-      ? input.updateCheckpoint
-      : async () => {};
-  const fetchProgressFile = path.join(
-    rootDir,
-    "state",
-    `qa-refresh-fetch-${runId}.json`,
-  );
-
-  await fs.rm(fetchProgressFile, { force: true }).catch(() => {});
-
+function createSerializedCheckpointPatcher(updateCheckpoint) {
   let checkpoint = {};
   let checkpointUpdateLock = Promise.resolve();
+
   async function patchCheckpoint(patch) {
     checkpointUpdateLock = checkpointUpdateLock.then(async () => {
       checkpoint = await updateRefreshCheckpoint(
@@ -330,20 +316,31 @@ async function runRefreshPipelineSteps(input) {
     return checkpoint;
   }
 
-  await patchCheckpoint({
-    status: "running",
-    step: "starting",
-    stepLabel: "Starting pipeline",
-    scope,
-    completedSteps: [],
-  });
+  return {
+    patchCheckpoint,
+    getCheckpoint: () => checkpoint,
+  };
+}
 
+async function readFetchStepProgress(fetchProgressFile) {
+  return normalizeDownloadProgress(
+    await readJsonObject(fetchProgressFile, {
+      onError: async (err) => {
+        process.stderr.write(
+          `[qa-refresh] WARN: ${err.message} (errorCode=${err.code})\n`,
+        );
+      },
+    }),
+  );
+}
+
+function buildRefreshSteps(rootDir, runId, scope, fetchProgressFile) {
   const fetchArgs = buildFetchArgs(scope);
   const ingestArgs = buildIngestArgs(scope);
   const canonicalArgs = buildCanonicalArgs(scope);
   const queueArgs = buildReviewQueueArgs(scope);
 
-  const steps = [
+  return [
     {
       id: "fetching_sources",
       label: "Fetching DACH sources",
@@ -356,16 +353,7 @@ async function runRefreshPipelineSteps(input) {
             FETCH_PROGRESS_FILE: fetchProgressFile,
           },
         }),
-      readProgress: async () =>
-        normalizeDownloadProgress(
-          await readJsonObject(fetchProgressFile, {
-            onError: async (err) => {
-              process.stderr.write(
-                `[qa-refresh] WARN: ${err.message} (errorCode=${err.code})\n`,
-              );
-            },
-          }),
-        ),
+      readProgress: () => readFetchStepProgress(fetchProgressFile),
     },
     {
       id: "ingesting_netex",
@@ -401,71 +389,114 @@ async function runRefreshPipelineSteps(input) {
         }),
     },
   ];
+}
+
+async function stopRefreshProgressPoller(stopProgressPoller) {
+  if (stopProgressPoller) {
+    await stopProgressPoller().catch(() => {});
+  }
+}
+
+async function runRefreshStep(
+  step,
+  patchCheckpoint,
+  getCheckpoint,
+  fetchProgressFile,
+) {
+  await patchCheckpoint({
+    step: step.id,
+    stepLabel: step.label,
+    downloadProgress: null,
+  });
+
+  let stopProgressPoller = null;
+  if (typeof step.readProgress === "function") {
+    stopProgressPoller = createProgressPoller({
+      pollMs: REFRESH_PROGRESS_POLL_MS,
+      readProgress: step.readProgress,
+      onProgress: async (progress) => {
+        await patchCheckpoint({
+          step: step.id,
+          stepLabel: step.label,
+          downloadProgress: progress,
+        });
+      },
+      onError: async (err) => {
+        process.stderr.write(
+          `[qa-refresh] WARN: Progress polling failed for step '${step.id}': ${err.message}\n`,
+        );
+        await patchCheckpoint({
+          progressWarning: {
+            step: step.id,
+            errorCode: err?.code || "INTERNAL_ERROR",
+            message: err?.message || "Progress polling failed",
+            at: new Date().toISOString(),
+          },
+        }).catch(() => {});
+      },
+    });
+  }
+
+  try {
+    await step.run();
+  } catch (err) {
+    await stopRefreshProgressPoller(stopProgressPoller);
+    const appErr = toAppError(err);
+    await patchCheckpoint({
+      status: "failed",
+      failedStep: step.id,
+      errorCode: appErr.code,
+      errorMessage: appErr.message,
+    }).catch(() => {});
+    await fs.rm(fetchProgressFile, { force: true }).catch(() => {});
+    throw err;
+  }
+
+  await stopRefreshProgressPoller(stopProgressPoller);
+  const completedSteps = Array.isArray(getCheckpoint().completedSteps)
+    ? getCheckpoint().completedSteps
+    : [];
+  await patchCheckpoint({
+    completedSteps: [...completedSteps, step.id],
+  });
+}
+
+async function runRefreshPipelineSteps(input) {
+  const rootDir = input.rootDir || process.cwd();
+  const runId = String(input.runId || "").trim() || crypto.randomUUID();
+  const scope = normalizeRefreshScope(input.scope || {});
+  const updateCheckpoint =
+    typeof input.updateCheckpoint === "function"
+      ? input.updateCheckpoint
+      : async () => {};
+  const fetchProgressFile = path.join(
+    rootDir,
+    "state",
+    `qa-refresh-fetch-${runId}.json`,
+  );
+
+  await fs.rm(fetchProgressFile, { force: true }).catch(() => {});
+
+  const { patchCheckpoint, getCheckpoint } =
+    createSerializedCheckpointPatcher(updateCheckpoint);
+
+  await patchCheckpoint({
+    status: "running",
+    step: "starting",
+    stepLabel: "Starting pipeline",
+    scope,
+    completedSteps: [],
+  });
+
+  const steps = buildRefreshSteps(rootDir, runId, scope, fetchProgressFile);
 
   for (const step of steps) {
-    await patchCheckpoint({
-      step: step.id,
-      stepLabel: step.label,
-      downloadProgress: null,
-    });
-
-    let stopProgressPoller = null;
-    if (typeof step.readProgress === "function") {
-      stopProgressPoller = createProgressPoller({
-        pollMs: REFRESH_PROGRESS_POLL_MS,
-        readProgress: step.readProgress,
-        onProgress: async (progress) => {
-          await patchCheckpoint({
-            step: step.id,
-            stepLabel: step.label,
-            downloadProgress: progress,
-          });
-        },
-        onError: async (err) => {
-          process.stderr.write(
-            `[qa-refresh] WARN: Progress polling failed for step '${step.id}': ${err.message}\n`,
-          );
-          await patchCheckpoint({
-            progressWarning: {
-              step: step.id,
-              errorCode: err?.code || "INTERNAL_ERROR",
-              message: err?.message || "Progress polling failed",
-              at: new Date().toISOString(),
-            },
-          }).catch(() => {});
-        },
-      });
-    }
-
-    try {
-      await step.run();
-    } catch (err) {
-      if (stopProgressPoller) {
-        await stopProgressPoller().catch(() => {});
-      }
-      const appErr = toAppError(err);
-      await patchCheckpoint({
-        status: "failed",
-        failedStep: step.id,
-        errorCode: appErr.code,
-        errorMessage: appErr.message,
-      }).catch(() => {});
-      await fs.rm(fetchProgressFile, { force: true }).catch(() => {});
-      throw err;
-    }
-
-    if (stopProgressPoller) {
-      await stopProgressPoller().catch(() => {});
-    }
-
-    await patchCheckpoint({
-      completedSteps: [
-        ...(Array.isArray(checkpoint.completedSteps)
-          ? checkpoint.completedSteps
-          : []),
-        step.id,
-      ],
-    });
+    await runRefreshStep(
+      step,
+      patchCheckpoint,
+      getCheckpoint,
+      fetchProgressFile,
+    );
   }
 
   await patchCheckpoint({
@@ -514,53 +545,141 @@ function addArrayValues(targetSet, value) {
   }
 }
 
-function deriveServiceContextFromRawRows(rows) {
-  const lineKeys = [
-    "line",
-    "route",
-    "service",
-    "trip",
-    "line_code",
-    "route_id",
-    "service_id",
-  ];
-  const lineArrayKeys = [
-    "lines",
-    "routes",
-    "services",
-    "trips",
-    "line_codes",
-    "route_ids",
-    "service_ids",
-  ];
-  const incomingKeys = [
-    "origin",
-    "from",
-    "arrives_from",
-    "arrival_from",
-    "previous_stop",
-    "previousStop",
-    "from_stop",
-  ];
-  const outgoingKeys = [
-    "destination",
-    "to",
-    "towards",
-    "headsign",
-    "next_stop",
-    "nextStop",
-    "to_stop",
-  ];
-  const directionKeys = [
-    "direction",
-    "travel_direction",
-    "direction_ref",
-    "directionRef",
-  ];
+const SERVICE_LINE_KEYS = [
+  "line",
+  "route",
+  "service",
+  "trip",
+  "line_code",
+  "route_id",
+  "service_id",
+];
+const SERVICE_LINE_ARRAY_KEYS = [
+  "lines",
+  "routes",
+  "services",
+  "trips",
+  "line_codes",
+  "route_ids",
+  "service_ids",
+];
+const SERVICE_INCOMING_KEYS = [
+  "origin",
+  "from",
+  "arrives_from",
+  "arrival_from",
+  "previous_stop",
+  "previousStop",
+  "from_stop",
+];
+const SERVICE_OUTGOING_KEYS = [
+  "destination",
+  "to",
+  "towards",
+  "headsign",
+  "next_stop",
+  "nextStop",
+  "to_stop",
+];
+const SERVICE_DIRECTION_KEYS = [
+  "direction",
+  "travel_direction",
+  "direction_ref",
+  "directionRef",
+];
 
-  const lines = new Set();
-  const incoming = new Set();
-  const outgoing = new Set();
+function getNestedServiceContext(payload) {
+  if (payload.service_context && typeof payload.service_context === "object") {
+    return payload.service_context;
+  }
+  if (payload.serviceContext && typeof payload.serviceContext === "object") {
+    return payload.serviceContext;
+  }
+  return {};
+}
+
+function collectServiceContextValues(payload, sets) {
+  for (const key of SERVICE_LINE_KEYS) {
+    pushUnique(sets.lines, payload[key]);
+  }
+  for (const key of SERVICE_LINE_ARRAY_KEYS) {
+    addArrayValues(sets.lines, payload[key]);
+  }
+  for (const key of SERVICE_INCOMING_KEYS) {
+    pushUnique(sets.incoming, payload[key]);
+  }
+  for (const key of SERVICE_OUTGOING_KEYS) {
+    pushUnique(sets.outgoing, payload[key]);
+  }
+
+  const nestedServiceContext = getNestedServiceContext(payload);
+  addArrayValues(sets.lines, nestedServiceContext.lines);
+  addArrayValues(sets.incoming, nestedServiceContext.incoming);
+  addArrayValues(sets.outgoing, nestedServiceContext.outgoing);
+}
+
+function applyServiceDirectionHints(payload, sets) {
+  const directionText = SERVICE_DIRECTION_KEYS
+    .map((key) => toCleanString(payload[key]).toLowerCase())
+    .find(Boolean);
+  if (!directionText) {
+    return;
+  }
+
+  const label = toCleanString(
+    payload.headsign ||
+      payload.destination ||
+      payload.to ||
+      payload.towards ||
+      directionText,
+  );
+  if (directionText.includes("inbound") || directionText.includes("incoming")) {
+    pushUnique(sets.incoming, label);
+    return;
+  }
+  if (directionText.includes("outbound") || directionText.includes("outgoing")) {
+    pushUnique(sets.outgoing, label);
+  }
+}
+
+function listSorted(set) {
+  return Array.from(set).sort((a, b) => a.localeCompare(b));
+}
+
+function deriveCompleteness(sampledRows, lineList, incomingList, outgoingList) {
+  if (sampledRows <= 0) {
+    return {
+      status: "none",
+      notes: "No source payload rows available for this candidate.",
+    };
+  }
+  if (incomingList.length > 0 || outgoingList.length > 0) {
+    return {
+      status:
+        incomingList.length > 0 && outgoingList.length > 0 ? "full" : "partial",
+      notes:
+        "Incoming and outgoing service context derived from canonical source payload fields.",
+    };
+  }
+  if (lineList.length > 0) {
+    return {
+      status: "partial",
+      notes:
+        "Line context derived from source payload rows; directional fields were incomplete.",
+    };
+  }
+  return {
+    status: "incomplete",
+    notes: "Source rows exist but did not provide directional service keys.",
+  };
+}
+
+function deriveServiceContextFromRawRows(rows) {
+  const sets = {
+    lines: new Set(),
+    incoming: new Set(),
+    outgoing: new Set(),
+  };
 
   let sampledRows = 0;
   for (const row of rows) {
@@ -570,98 +689,38 @@ function deriveServiceContextFromRawRows(rows) {
       continue;
     }
     sampledRows += 1;
+    collectServiceContextValues(payload, sets);
+    applyServiceDirectionHints(payload, sets);
+  }
 
-    for (const key of lineKeys) {
-      pushUnique(lines, payload[key]);
-    }
-    for (const key of lineArrayKeys) {
-      addArrayValues(lines, payload[key]);
-    }
-
-    for (const key of incomingKeys) {
-      pushUnique(incoming, payload[key]);
-    }
-    for (const key of outgoingKeys) {
-      pushUnique(outgoing, payload[key]);
-    }
-
-    let nestedServiceContext = {};
-    if (
-      payload.service_context &&
-      typeof payload.service_context === "object"
-    ) {
-      nestedServiceContext = payload.service_context;
-    } else if (
-      payload.serviceContext &&
-      typeof payload.serviceContext === "object"
-    ) {
-      nestedServiceContext = payload.serviceContext;
-    }
-    addArrayValues(lines, nestedServiceContext.lines);
-    addArrayValues(incoming, nestedServiceContext.incoming);
-    addArrayValues(outgoing, nestedServiceContext.outgoing);
-
-    const directionText = directionKeys
-      .map((key) => toCleanString(payload[key]).toLowerCase())
-      .find(Boolean);
-    if (directionText) {
-      const label = toCleanString(
-        payload.headsign ||
-          payload.destination ||
-          payload.to ||
-          payload.towards ||
-          directionText,
-      );
-      if (
-        directionText.includes("inbound") ||
-        directionText.includes("incoming")
-      ) {
-        pushUnique(incoming, label);
-      } else if (
-        directionText.includes("outbound") ||
-        directionText.includes("outgoing")
-      ) {
-        pushUnique(outgoing, label);
-      }
+  if (
+    sets.incoming.size === 0 &&
+    sets.outgoing.size === 0 &&
+    sets.lines.size > 0
+  ) {
+    for (const line of sets.lines) {
+      sets.outgoing.add(`line:${line}`);
     }
   }
 
-  if (incoming.size === 0 && outgoing.size === 0 && lines.size > 0) {
-    for (const line of lines) {
-      outgoing.add(`line:${line}`);
-    }
-  }
-
-  const incomingList = Array.from(incoming).sort((a, b) => a.localeCompare(b));
-  const outgoingList = Array.from(outgoing).sort((a, b) => a.localeCompare(b));
-  const lineList = Array.from(lines).sort((a, b) => a.localeCompare(b));
-
-  let completenessStatus = "none";
-  let completenessNotes =
-    "No source payload rows available for this candidate.";
-  if (sampledRows > 0 && (incomingList.length > 0 || outgoingList.length > 0)) {
-    completenessStatus =
-      incomingList.length > 0 && outgoingList.length > 0 ? "full" : "partial";
-    completenessNotes =
-      "Incoming and outgoing service context derived from canonical source payload fields.";
-  } else if (sampledRows > 0 && lineList.length > 0) {
-    completenessStatus = "partial";
-    completenessNotes =
-      "Line context derived from source payload rows; directional fields were incomplete.";
-  } else if (sampledRows > 0) {
-    completenessStatus = "incomplete";
-    completenessNotes =
-      "Source rows exist but did not provide directional service keys.";
-  }
+  const incomingList = listSorted(sets.incoming);
+  const outgoingList = listSorted(sets.outgoing);
+  const lineList = listSorted(sets.lines);
+  const completeness = deriveCompleteness(
+    sampledRows,
+    lineList,
+    incomingList,
+    outgoingList,
+  );
 
   return {
     lines: lineList,
     incoming: incomingList,
     outgoing: outgoingList,
     completeness: {
-      status: completenessStatus,
+      status: completeness.status,
       sampled_rows: sampledRows,
-      notes: completenessNotes,
+      notes: completeness.notes,
     },
   };
 }
