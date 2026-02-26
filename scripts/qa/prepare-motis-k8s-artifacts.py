@@ -17,16 +17,25 @@ import zipfile
 from typing import NoReturn
 
 TIER_CHOICES = ("all", "high-speed", "regional", "local")
+AGENCY_FILE = "agency.txt"
+STOPS_FILE = "stops.txt"
+ROUTES_FILE = "routes.txt"
+TRIPS_FILE = "trips.txt"
+STOP_TIMES_FILE = "stop_times.txt"
+CALENDAR_FILE = "calendar.txt"
+CALENDAR_DATES_FILE = "calendar_dates.txt"
+TRANSFERS_FILE = "transfers.txt"
+FEED_INFO_FILE = "feed_info.txt"
 GTFS_TABLES = (
-    "agency.txt",
-    "stops.txt",
-    "routes.txt",
-    "trips.txt",
-    "stop_times.txt",
-    "calendar.txt",
-    "calendar_dates.txt",
-    "transfers.txt",
-    "feed_info.txt",
+    AGENCY_FILE,
+    STOPS_FILE,
+    ROUTES_FILE,
+    TRIPS_FILE,
+    STOP_TIMES_FILE,
+    CALENDAR_FILE,
+    CALENDAR_DATES_FILE,
+    TRANSFERS_FILE,
+    FEED_INFO_FILE,
 )
 LOCAL_ROUTE_TYPES = {
     "0",
@@ -316,14 +325,14 @@ def filter_feed_by_routes(
     tables: dict[str, list[dict[str, str]]],
     tier: str,
 ) -> dict[str, list[dict[str, str]]]:
-    routes_rows = tables["routes.txt"]
-    trips_rows = tables["trips.txt"]
-    stop_times_rows = tables["stop_times.txt"]
-    stops_rows = tables["stops.txt"]
-    calendar_rows = tables["calendar.txt"]
-    calendar_dates_rows = tables["calendar_dates.txt"]
-    agency_rows = tables["agency.txt"]
-    transfers_rows = tables["transfers.txt"]
+    routes_rows = tables[ROUTES_FILE]
+    trips_rows = tables[TRIPS_FILE]
+    stop_times_rows = tables[STOP_TIMES_FILE]
+    stops_rows = tables[STOPS_FILE]
+    calendar_rows = tables[CALENDAR_FILE]
+    calendar_dates_rows = tables[CALENDAR_DATES_FILE]
+    agency_rows = tables[AGENCY_FILE]
+    transfers_rows = tables[TRANSFERS_FILE]
 
     route_tiers = {
         (row.get("route_id") or "").strip(): parse_route_tier(row)
@@ -390,14 +399,14 @@ def filter_feed_by_routes(
 
     return {
         **tables,
-        "routes.txt": filtered_routes,
-        "trips.txt": filtered_trips,
-        "stop_times.txt": filtered_stop_times,
-        "stops.txt": filtered_stops,
-        "calendar.txt": filtered_calendar,
-        "calendar_dates.txt": filtered_calendar_dates,
-        "agency.txt": filtered_agency,
-        "transfers.txt": filtered_transfers,
+        ROUTES_FILE: filtered_routes,
+        TRIPS_FILE: filtered_trips,
+        STOP_TIMES_FILE: filtered_stop_times,
+        STOPS_FILE: filtered_stops,
+        CALENDAR_FILE: filtered_calendar,
+        CALENDAR_DATES_FILE: filtered_calendar_dates,
+        AGENCY_FILE: filtered_agency,
+        TRANSFERS_FILE: filtered_transfers,
     }
 
 
@@ -407,14 +416,14 @@ def micro_scope_feed(
     padding_km: float,
 ) -> tuple[dict[str, list[dict[str, str]]], set[str]]:
     expanded = expand_bbox(bbox, padding_km)
-    stops_rows = tables["stops.txt"]
-    trips_rows = tables["trips.txt"]
-    stop_times_rows = tables["stop_times.txt"]
-    routes_rows = tables["routes.txt"]
-    calendar_rows = tables["calendar.txt"]
-    calendar_dates_rows = tables["calendar_dates.txt"]
-    agency_rows = tables["agency.txt"]
-    transfers_rows = tables["transfers.txt"]
+    stops_rows = tables[STOPS_FILE]
+    trips_rows = tables[TRIPS_FILE]
+    stop_times_rows = tables[STOP_TIMES_FILE]
+    routes_rows = tables[ROUTES_FILE]
+    calendar_rows = tables[CALENDAR_FILE]
+    calendar_dates_rows = tables[CALENDAR_DATES_FILE]
+    agency_rows = tables[AGENCY_FILE]
+    transfers_rows = tables[TRANSFERS_FILE]
 
     stop_by_id = index_rows(stops_rows, "stop_id")
     bbox_stop_ids: set[str] = set()
@@ -501,14 +510,14 @@ def micro_scope_feed(
     return (
         {
             **tables,
-            "routes.txt": filtered_routes,
-            "trips.txt": filtered_trips,
-            "stop_times.txt": filtered_stop_times,
-            "stops.txt": filtered_stops,
-            "calendar.txt": filtered_calendar,
-            "calendar_dates.txt": filtered_calendar_dates,
-            "agency.txt": filtered_agency,
-            "transfers.txt": filtered_transfers,
+            ROUTES_FILE: filtered_routes,
+            TRIPS_FILE: filtered_trips,
+            STOP_TIMES_FILE: filtered_stop_times,
+            STOPS_FILE: filtered_stops,
+            CALENDAR_FILE: filtered_calendar,
+            CALENDAR_DATES_FILE: filtered_calendar_dates,
+            AGENCY_FILE: filtered_agency,
+            TRANSFERS_FILE: filtered_transfers,
         },
         unresolved_bbox_stops,
     )
@@ -519,11 +528,11 @@ def build_micro_queries(
     bbox_stop_ids: set[str],
     max_queries: int,
 ) -> list[dict[str, object]]:
-    stops_rows = tables["stops.txt"]
-    trips_rows = tables["trips.txt"]
-    stop_times_rows = tables["stop_times.txt"]
-    calendar_rows = tables["calendar.txt"]
-    calendar_dates_rows = tables["calendar_dates.txt"]
+    stops_rows = tables[STOPS_FILE]
+    trips_rows = tables[TRIPS_FILE]
+    stop_times_rows = tables[STOP_TIMES_FILE]
+    calendar_rows = tables[CALENDAR_FILE]
+    calendar_dates_rows = tables[CALENDAR_DATES_FILE]
     target_date = choose_active_date(calendar_rows, calendar_dates_rows)
 
     service_by_trip = {
@@ -604,7 +613,7 @@ def build_macro_queries(
     tables: dict[str, list[dict[str, str]]],
 ) -> list[dict[str, object]]:
     target_date = choose_active_date(
-        tables["calendar.txt"], tables["calendar_dates.txt"]
+        tables[CALENDAR_FILE], tables[CALENDAR_DATES_FILE]
     )
     date_obj = dt.datetime.strptime(target_date, "%Y%m%d")
     q1 = (date_obj + dt.timedelta(hours=8)).isoformat() + "Z"
@@ -674,7 +683,7 @@ def load_tables(
             rows, names = parse_csv_table(zf, table)
             tables[table] = rows
             fieldnames[table] = names
-    required = ("stops.txt", "routes.txt", "trips.txt", "stop_times.txt")
+    required = (STOPS_FILE, ROUTES_FILE, TRIPS_FILE, STOP_TIMES_FILE)
     for table in required:
         if not fieldnames.get(table):
             fail(f"input GTFS missing required table or header: {table}")
@@ -703,11 +712,11 @@ def main() -> None:
     else:
         queries = build_macro_queries(scoped)
 
-    if len(scoped["stops.txt"]) < 2:
+    if len(scoped[STOPS_FILE]) < 2:
         fail("scoped feed has fewer than 2 stops")
-    if len(scoped["trips.txt"]) < 1:
+    if len(scoped[TRIPS_FILE]) < 1:
         fail("scoped feed has no trips")
-    if len(scoped["stop_times.txt"]) < 2:
+    if len(scoped[STOP_TIMES_FILE]) < 2:
         fail("scoped feed has fewer than 2 stop_times rows")
 
     if os.path.normpath(input_zip) != os.path.normpath(output_zip):
@@ -730,10 +739,10 @@ def main() -> None:
         "outputZip": output_zip,
         "queriesJson": queries_path,
         "counts": {
-            "stops": len(scoped["stops.txt"]),
-            "routes": len(scoped["routes.txt"]),
-            "trips": len(scoped["trips.txt"]),
-            "stop_times": len(scoped["stop_times.txt"]),
+            "stops": len(scoped[STOPS_FILE]),
+            "routes": len(scoped[ROUTES_FILE]),
+            "trips": len(scoped[TRIPS_FILE]),
+            "stop_times": len(scoped[STOP_TIMES_FILE]),
             "queries": len(queries),
         },
     }

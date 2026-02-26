@@ -66,6 +66,62 @@ function validateRuntimeDescriptor(runtime, contextPath) {
   }
 }
 
+function validateStaticProfilePath(name, entry) {
+  if (!entry.trim()) {
+    throw new AppError({
+      code: "INVALID_CONFIG",
+      message: `Profile '${name}' static path cannot be empty`,
+    });
+  }
+}
+
+function validateProfileObject(name, entry) {
+  if (!entry || typeof entry !== "object") {
+    throw new AppError({
+      code: "INVALID_CONFIG",
+      message: `Profile '${name}' must be a string path or object`,
+    });
+  }
+
+  validateOrThrow(entry, profileObjectSchema, {
+    message: `Invalid GTFS profile object '${name}'`,
+    code: "INVALID_CONFIG",
+  });
+
+  if (entry.runtime) {
+    validateRuntimeDescriptor(entry.runtime, `profiles.${name}`);
+    return;
+  }
+
+  const zipPath =
+    (typeof entry.zipPath === "string" && entry.zipPath.trim()) ||
+    (typeof entry.zip === "string" && entry.zip.trim()) ||
+    "";
+
+  if (!zipPath) {
+    throw new AppError({
+      code: "INVALID_CONFIG",
+      message: `Profile '${name}' must define zipPath/zip or runtime descriptor`,
+    });
+  }
+}
+
+function validateProfileEntry(name, entry) {
+  if (!name.trim()) {
+    throw new AppError({
+      code: "INVALID_CONFIG",
+      message: "GTFS profile names must be non-empty strings",
+    });
+  }
+
+  if (typeof entry === "string") {
+    validateStaticProfilePath(name, entry);
+    return;
+  }
+
+  validateProfileObject(name, entry);
+}
+
 function validateGtfsProfilesConfig(raw) {
   const source = raw && typeof raw === "object" ? raw.profiles || raw : null;
   if (!source || typeof source !== "object" || Array.isArray(source)) {
@@ -77,51 +133,7 @@ function validateGtfsProfilesConfig(raw) {
   }
 
   for (const [name, entry] of Object.entries(source)) {
-    if (!name.trim()) {
-      throw new AppError({
-        code: "INVALID_CONFIG",
-        message: "GTFS profile names must be non-empty strings",
-      });
-    }
-
-    if (typeof entry === "string") {
-      if (!entry.trim()) {
-        throw new AppError({
-          code: "INVALID_CONFIG",
-          message: `Profile '${name}' static path cannot be empty`,
-        });
-      }
-      continue;
-    }
-
-    if (!entry || typeof entry !== "object") {
-      throw new AppError({
-        code: "INVALID_CONFIG",
-        message: `Profile '${name}' must be a string path or object`,
-      });
-    }
-
-    validateOrThrow(entry, profileObjectSchema, {
-      message: `Invalid GTFS profile object '${name}'`,
-      code: "INVALID_CONFIG",
-    });
-
-    if (entry.runtime) {
-      validateRuntimeDescriptor(entry.runtime, `profiles.${name}`);
-      continue;
-    }
-
-    const zipPath =
-      (typeof entry.zipPath === "string" && entry.zipPath.trim()) ||
-      (typeof entry.zip === "string" && entry.zip.trim()) ||
-      "";
-
-    if (!zipPath) {
-      throw new AppError({
-        code: "INVALID_CONFIG",
-        message: `Profile '${name}' must define zipPath/zip or runtime descriptor`,
-      });
-    }
+    validateProfileEntry(name, entry);
   }
 
   return source;

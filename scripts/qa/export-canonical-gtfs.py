@@ -25,6 +25,8 @@ REQUIRED_COLUMNS = {
 VALID_COUNTRIES = {"DE", "AT", "CH"}
 SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT_DIR = SCRIPT_DIR.parent.parent
+PSQL_ON_ERROR_STOP = "ON_ERROR_STOP=1"
+TRANSFERS_FILE = "transfers.txt"
 TIER_SEQUENCE = ["high-speed", "regional", "local"]
 TIER_LABELS = {
     "high-speed": "High-Speed / Long-Distance",
@@ -262,7 +264,7 @@ def run_psql_csv(query: str):
         )
 
         if db_url:
-            cmd = ["psql", db_url, "-X", "-v", "ON_ERROR_STOP=1", "--csv", "-c", query]
+            cmd = ["psql", db_url, "-X", "-v", PSQL_ON_ERROR_STOP, "--csv", "-c", query]
         else:
             cmd = [
                 "psql",
@@ -276,7 +278,7 @@ def run_psql_csv(query: str):
                 "-d",
                 db_name,
                 "-v",
-                "ON_ERROR_STOP=1",
+                PSQL_ON_ERROR_STOP,
                 "--csv",
                 "-c",
                 query,
@@ -320,7 +322,7 @@ def run_psql_csv(query: str):
             docker_service,
             "psql",
             "-v",
-            "ON_ERROR_STOP=1",
+            PSQL_ON_ERROR_STOP,
             "-U",
             db_user,
             "-d",
@@ -958,7 +960,7 @@ def build_tables(profile: str, requested_tier: str, stops, agency_url: str):
     }
 
     if transfer_rows:
-        files["transfers.txt"] = csv_text(
+        files[TRANSFERS_FILE] = csv_text(
             ["from_stop_id", "to_stop_id", "transfer_type", "min_transfer_time"],
             transfer_rows,
         )
@@ -999,8 +1001,8 @@ def write_deterministic_zip(files, output_zip: str, as_of: str):
         "stop_times.txt",
         "calendar.txt",
     ]
-    if "transfers.txt" in files:
-        ordered_names.append("transfers.txt")
+    if TRANSFERS_FILE in files:
+        ordered_names.append(TRANSFERS_FILE)
 
     output_path = Path(output_zip)
     output_path.parent.mkdir(parents=True, exist_ok=True)

@@ -143,13 +143,11 @@ async function run() {
   throw new Error(`Unknown command '${args.command}'`);
 }
 
-async function main() {
-  try {
-    await run();
-  } catch (err) {
+function main() {
+  return run().catch((err) => {
     process.stderr.write(`[profile-runtime] ERROR: ${err.message}\n`);
     process.exit(1);
-  }
+  });
 }
 
 void main();

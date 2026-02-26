@@ -38,6 +38,51 @@ function printReportReviewQueueUsage() {
   process.stdout.write("  -h, --help           Show this help\n");
 }
 
+function readRequiredTokenValue(tokens, index, flagName) {
+  const value = String(tokens[index + 1] || "").trim();
+  if (!value) {
+    throw new AppError({
+      code: "INVALID_REQUEST",
+      message: `Missing value for ${flagName}`,
+    });
+  }
+  return value;
+}
+
+function parseCountry(value) {
+  const normalized = String(value || "")
+    .trim()
+    .toUpperCase();
+  if (!["DE", "AT", "CH"].includes(normalized)) {
+    throw new AppError({
+      code: "INVALID_REQUEST",
+      message: "Invalid --country value (expected 'DE', 'AT', or 'CH')",
+    });
+  }
+  return normalized;
+}
+
+function parseAsOf(value) {
+  if (!isStrictIsoDate(value)) {
+    throw new AppError({
+      code: "INVALID_REQUEST",
+      message: "Invalid --as-of value (expected YYYY-MM-DD)",
+    });
+  }
+  return value;
+}
+
+function parsePositiveInt(value, flagName) {
+  const parsedValue = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsedValue) || parsedValue <= 0) {
+    throw new AppError({
+      code: "INVALID_REQUEST",
+      message: `${flagName} must be a positive integer`,
+    });
+  }
+  return parsedValue;
+}
+
 function parseReportReviewQueueArgs(args = []) {
   const parsed = {
     helpRequested: false,
@@ -51,80 +96,35 @@ function parseReportReviewQueueArgs(args = []) {
   for (let i = 0; i < tokens.length; i += 1) {
     const token = String(tokens[i] || "");
 
-    if (token === "-h" || token === "--help") {
-      parsed.helpRequested = true;
-      continue;
+    switch (token) {
+      case "-h":
+      case "--help":
+        parsed.helpRequested = true;
+        break;
+      case "--country":
+        parsed.country = parseCountry(readRequiredTokenValue(tokens, i, "--country"));
+        i += 1;
+        break;
+      case "--as-of":
+        parsed.asOf = parseAsOf(readRequiredTokenValue(tokens, i, "--as-of"));
+        i += 1;
+        break;
+      case "--all-scopes":
+        parsed.allScopes = true;
+        break;
+      case "--limit":
+        parsed.limitRows = parsePositiveInt(
+          readRequiredTokenValue(tokens, i, "--limit"),
+          "--limit",
+        );
+        i += 1;
+        break;
+      default:
+        throw new AppError({
+          code: "INVALID_REQUEST",
+          message: `Unknown argument: ${token}`,
+        });
     }
-
-    if (token === "--country") {
-      const value = String(tokens[i + 1] || "")
-        .trim()
-        .toUpperCase();
-      if (!value) {
-        throw new AppError({
-          code: "INVALID_REQUEST",
-          message: "Missing value for --country",
-        });
-      }
-      if (!["DE", "AT", "CH"].includes(value)) {
-        throw new AppError({
-          code: "INVALID_REQUEST",
-          message: "Invalid --country value (expected 'DE', 'AT', or 'CH')",
-        });
-      }
-      parsed.country = value;
-      i += 1;
-      continue;
-    }
-
-    if (token === "--as-of") {
-      const value = String(tokens[i + 1] || "").trim();
-      if (!value) {
-        throw new AppError({
-          code: "INVALID_REQUEST",
-          message: "Missing value for --as-of",
-        });
-      }
-      if (!isStrictIsoDate(value)) {
-        throw new AppError({
-          code: "INVALID_REQUEST",
-          message: "Invalid --as-of value (expected YYYY-MM-DD)",
-        });
-      }
-      parsed.asOf = value;
-      i += 1;
-      continue;
-    }
-
-    if (token === "--all-scopes") {
-      parsed.allScopes = true;
-      continue;
-    }
-
-    if (token === "--limit") {
-      const value = String(tokens[i + 1] || "").trim();
-      if (!value) {
-        throw new AppError({
-          code: "INVALID_REQUEST",
-          message: "Missing value for --limit",
-        });
-      }
-      const parsedLimit = Number.parseInt(value, 10);
-      if (!Number.isFinite(parsedLimit) || parsedLimit <= 0) {
-        throw new AppError({
-          code: "INVALID_REQUEST",
-          message: "--limit must be a positive integer",
-        });
-      }
-      parsed.limitRows = parsedLimit;
-      i += 1;
-      continue;
-    }
-
-    throw new AppError({
-      code: "INVALID_REQUEST",
-      message: `Unknown argument: ${token}`,
-    });
   }
 
   return parsed;

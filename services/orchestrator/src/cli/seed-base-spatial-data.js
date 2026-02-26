@@ -709,6 +709,84 @@ function printHelp() {
   process.stdout.write("  -h, --help               Show this help\n");
 }
 
+function readRequiredSeedArg(tokens, index, flagName) {
+  const value = String(tokens[index + 1] || "").trim();
+  if (!value) {
+    throw new AppError({
+      code: "INVALID_REQUEST",
+      message: `Missing value for ${flagName}`,
+    });
+  }
+  return value;
+}
+
+function parseSeedArgsToken(parsed, tokens, index) {
+  const token = String(tokens[index] || "").trim();
+
+  switch (token) {
+    case "-h":
+    case "--help":
+      parsed.helpRequested = true;
+      return index;
+    case "--country":
+      parsed.countries.push(
+        ...parseCountryTokens(readRequiredSeedArg(tokens, index, "--country")),
+      );
+      return index + 1;
+    case "--countries":
+      parsed.countries = parseCountryTokens(
+        readRequiredSeedArg(tokens, index, "--countries"),
+      );
+      return index + 1;
+    case "--as-of": {
+      const value = readRequiredSeedArg(tokens, index, "--as-of");
+      if (!isStrictIsoDate(value)) {
+        throw new AppError({
+          code: "INVALID_REQUEST",
+          message: "Invalid --as-of value (expected YYYY-MM-DD)",
+        });
+      }
+      parsed.asOf = value;
+      return index + 1;
+    }
+    case "--uic-file":
+      parsed.uicFile = readRequiredSeedArg(tokens, index, "--uic-file");
+      return index + 1;
+    case "--uic-url":
+      parsed.uicUrl = readRequiredSeedArg(tokens, index, "--uic-url");
+      return index + 1;
+    case "--osm-endpoint":
+      parsed.osmEndpoint = readRequiredSeedArg(tokens, index, "--osm-endpoint");
+      return index + 1;
+    case "--overpass-timeout-sec":
+      parsed.overpassTimeoutSec = parsePositiveInteger(
+        readRequiredSeedArg(tokens, index, "--overpass-timeout-sec"),
+        "--overpass-timeout-sec",
+      );
+      return index + 1;
+    case "--output-dir":
+      parsed.outputDir = readRequiredSeedArg(tokens, index, "--output-dir");
+      return index + 1;
+    case "--offline":
+      parsed.offline = true;
+      return index;
+    case "--dry-run":
+      parsed.dryRun = true;
+      return index;
+    case "--limit":
+      parsed.limit = parsePositiveInteger(
+        readRequiredSeedArg(tokens, index, "--limit"),
+        "--limit",
+      );
+      return index + 1;
+    default:
+      throw new AppError({
+        code: "INVALID_REQUEST",
+        message: `Unknown argument: ${token}`,
+      });
+  }
+}
+
 function parseSeedArgs(args = []) {
   const parsed = {
     helpRequested: false,
@@ -727,153 +805,7 @@ function parseSeedArgs(args = []) {
   const tokens = Array.isArray(args) ? args : [];
 
   for (let i = 0; i < tokens.length; i += 1) {
-    const token = String(tokens[i] || "").trim();
-
-    if (token === "-h" || token === "--help") {
-      parsed.helpRequested = true;
-      continue;
-    }
-
-    if (token === "--country") {
-      const value = String(tokens[i + 1] || "").trim();
-      if (!value) {
-        throw new AppError({
-          code: "INVALID_REQUEST",
-          message: "Missing value for --country",
-        });
-      }
-      parsed.countries.push(...parseCountryTokens(value));
-      i += 1;
-      continue;
-    }
-
-    if (token === "--countries") {
-      const value = String(tokens[i + 1] || "").trim();
-      if (!value) {
-        throw new AppError({
-          code: "INVALID_REQUEST",
-          message: "Missing value for --countries",
-        });
-      }
-      parsed.countries = parseCountryTokens(value);
-      i += 1;
-      continue;
-    }
-
-    if (token === "--as-of") {
-      const value = String(tokens[i + 1] || "").trim();
-      if (!value) {
-        throw new AppError({
-          code: "INVALID_REQUEST",
-          message: "Missing value for --as-of",
-        });
-      }
-      if (!isStrictIsoDate(value)) {
-        throw new AppError({
-          code: "INVALID_REQUEST",
-          message: "Invalid --as-of value (expected YYYY-MM-DD)",
-        });
-      }
-      parsed.asOf = value;
-      i += 1;
-      continue;
-    }
-
-    if (token === "--uic-file") {
-      const value = String(tokens[i + 1] || "").trim();
-      if (!value) {
-        throw new AppError({
-          code: "INVALID_REQUEST",
-          message: "Missing value for --uic-file",
-        });
-      }
-      parsed.uicFile = value;
-      i += 1;
-      continue;
-    }
-
-    if (token === "--uic-url") {
-      const value = String(tokens[i + 1] || "").trim();
-      if (!value) {
-        throw new AppError({
-          code: "INVALID_REQUEST",
-          message: "Missing value for --uic-url",
-        });
-      }
-      parsed.uicUrl = value;
-      i += 1;
-      continue;
-    }
-
-    if (token === "--osm-endpoint") {
-      const value = String(tokens[i + 1] || "").trim();
-      if (!value) {
-        throw new AppError({
-          code: "INVALID_REQUEST",
-          message: "Missing value for --osm-endpoint",
-        });
-      }
-      parsed.osmEndpoint = value;
-      i += 1;
-      continue;
-    }
-
-    if (token === "--overpass-timeout-sec") {
-      const value = String(tokens[i + 1] || "").trim();
-      if (!value) {
-        throw new AppError({
-          code: "INVALID_REQUEST",
-          message: "Missing value for --overpass-timeout-sec",
-        });
-      }
-      parsed.overpassTimeoutSec = parsePositiveInteger(
-        value,
-        "--overpass-timeout-sec",
-      );
-      i += 1;
-      continue;
-    }
-
-    if (token === "--output-dir") {
-      const value = String(tokens[i + 1] || "").trim();
-      if (!value) {
-        throw new AppError({
-          code: "INVALID_REQUEST",
-          message: "Missing value for --output-dir",
-        });
-      }
-      parsed.outputDir = value;
-      i += 1;
-      continue;
-    }
-
-    if (token === "--offline") {
-      parsed.offline = true;
-      continue;
-    }
-
-    if (token === "--dry-run") {
-      parsed.dryRun = true;
-      continue;
-    }
-
-    if (token === "--limit") {
-      const value = String(tokens[i + 1] || "").trim();
-      if (!value) {
-        throw new AppError({
-          code: "INVALID_REQUEST",
-          message: "Missing value for --limit",
-        });
-      }
-      parsed.limit = parsePositiveInteger(value, "--limit");
-      i += 1;
-      continue;
-    }
-
-    throw new AppError({
-      code: "INVALID_REQUEST",
-      message: `Unknown argument: ${token}`,
-    });
+    i = parseSeedArgsToken(parsed, tokens, i);
   }
 
   if (parsed.countries.length === 0) {

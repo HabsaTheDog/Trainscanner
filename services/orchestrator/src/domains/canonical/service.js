@@ -63,6 +63,51 @@ function printBuildCanonicalUsage() {
   process.stdout.write("  -h, --help           Show this help\n");
 }
 
+function readRequiredTokenValue(tokens, index, flagName) {
+  const value = String(tokens[index + 1] || "").trim();
+  if (!value) {
+    throw new AppError({
+      code: "INVALID_REQUEST",
+      message: `Missing value for ${flagName}`,
+    });
+  }
+  return value;
+}
+
+function parseCountryScope(value) {
+  const normalized = String(value || "")
+    .trim()
+    .toUpperCase();
+  if (!["DE", "AT", "CH"].includes(normalized)) {
+    throw new AppError({
+      code: "INVALID_REQUEST",
+      message: "Invalid --country value (expected 'DE', 'AT', or 'CH')",
+    });
+  }
+  return normalized;
+}
+
+function parseAsOfScope(value) {
+  if (!isStrictIsoDate(value)) {
+    throw new AppError({
+      code: "INVALID_REQUEST",
+      message: "Invalid --as-of value (expected YYYY-MM-DD)",
+    });
+  }
+  return value;
+}
+
+function parseGeoThreshold(value) {
+  const parsedInt = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsedInt) || parsedInt < 0) {
+    throw new AppError({
+      code: "INVALID_REQUEST",
+      message: "--geo-threshold-m must be a non-negative integer",
+    });
+  }
+  return parsedInt;
+}
+
 function parseBuildCanonicalArgs(args = []) {
   const parsed = {
     helpRequested: false,
@@ -77,68 +122,33 @@ function parseBuildCanonicalArgs(args = []) {
   for (let i = 0; i < tokens.length; i += 1) {
     const token = String(tokens[i] || "");
 
-    if (token === "-h" || token === "--help") {
-      parsed.helpRequested = true;
-      continue;
+    switch (token) {
+      case "-h":
+      case "--help":
+        parsed.helpRequested = true;
+        break;
+      case "--country":
+        parsed.scope.country = parseCountryScope(
+          readRequiredTokenValue(tokens, i, "--country"),
+        );
+        i += 1;
+        break;
+      case "--as-of":
+        parsed.scope.asOf = parseAsOfScope(
+          readRequiredTokenValue(tokens, i, "--as-of"),
+        );
+        i += 1;
+        break;
+      case "--source-id":
+        parsed.scope.sourceId = readRequiredTokenValue(tokens, i, "--source-id");
+        i += 1;
+        break;
+      default:
+        throw new AppError({
+          code: "INVALID_REQUEST",
+          message: `Unknown argument: ${token}`,
+        });
     }
-
-    if (token === "--country") {
-      const value = String(tokens[i + 1] || "")
-        .trim()
-        .toUpperCase();
-      if (!value) {
-        throw new AppError({
-          code: "INVALID_REQUEST",
-          message: "Missing value for --country",
-        });
-      }
-      if (!["DE", "AT", "CH"].includes(value)) {
-        throw new AppError({
-          code: "INVALID_REQUEST",
-          message: "Invalid --country value (expected 'DE', 'AT', or 'CH')",
-        });
-      }
-      parsed.scope.country = value;
-      i += 1;
-      continue;
-    }
-
-    if (token === "--as-of") {
-      const value = String(tokens[i + 1] || "").trim();
-      if (!value) {
-        throw new AppError({
-          code: "INVALID_REQUEST",
-          message: "Missing value for --as-of",
-        });
-      }
-      if (!isStrictIsoDate(value)) {
-        throw new AppError({
-          code: "INVALID_REQUEST",
-          message: "Invalid --as-of value (expected YYYY-MM-DD)",
-        });
-      }
-      parsed.scope.asOf = value;
-      i += 1;
-      continue;
-    }
-
-    if (token === "--source-id") {
-      const value = String(tokens[i + 1] || "").trim();
-      if (!value) {
-        throw new AppError({
-          code: "INVALID_REQUEST",
-          message: "Missing value for --source-id",
-        });
-      }
-      parsed.scope.sourceId = value;
-      i += 1;
-      continue;
-    }
-
-    throw new AppError({
-      code: "INVALID_REQUEST",
-      message: `Unknown argument: ${token}`,
-    });
   }
 
   return parsed;
@@ -159,85 +169,41 @@ function parseBuildReviewQueueArgs(args = []) {
   for (let i = 0; i < tokens.length; i += 1) {
     const token = String(tokens[i] || "");
 
-    if (token === "-h" || token === "--help") {
-      parsed.helpRequested = true;
-      continue;
-    }
-
-    if (token === "--country") {
-      const value = String(tokens[i + 1] || "")
-        .trim()
-        .toUpperCase();
-      if (!value) {
+    switch (token) {
+      case "-h":
+      case "--help":
+        parsed.helpRequested = true;
+        break;
+      case "--country":
+        parsed.scope.country = parseCountryScope(
+          readRequiredTokenValue(tokens, i, "--country"),
+        );
+        i += 1;
+        break;
+      case "--as-of":
+        parsed.scope.asOf = parseAsOfScope(
+          readRequiredTokenValue(tokens, i, "--as-of"),
+        );
+        i += 1;
+        break;
+      case "--geo-threshold-m":
+        parsed.scope.geoThresholdMeters = parseGeoThreshold(
+          readRequiredTokenValue(tokens, i, "--geo-threshold-m"),
+        );
+        i += 1;
+        break;
+      case "--close-missing":
+        parsed.scope.closeMissing = true;
+        break;
+      case "--no-close-missing":
+        parsed.scope.closeMissing = false;
+        break;
+      default:
         throw new AppError({
           code: "INVALID_REQUEST",
-          message: "Missing value for --country",
+          message: `Unknown argument: ${token}`,
         });
-      }
-      if (!["DE", "AT", "CH"].includes(value)) {
-        throw new AppError({
-          code: "INVALID_REQUEST",
-          message: "Invalid --country value (expected 'DE', 'AT', or 'CH')",
-        });
-      }
-      parsed.scope.country = value;
-      i += 1;
-      continue;
     }
-
-    if (token === "--as-of") {
-      const value = String(tokens[i + 1] || "").trim();
-      if (!value) {
-        throw new AppError({
-          code: "INVALID_REQUEST",
-          message: "Missing value for --as-of",
-        });
-      }
-      if (!isStrictIsoDate(value)) {
-        throw new AppError({
-          code: "INVALID_REQUEST",
-          message: "Invalid --as-of value (expected YYYY-MM-DD)",
-        });
-      }
-      parsed.scope.asOf = value;
-      i += 1;
-      continue;
-    }
-
-    if (token === "--geo-threshold-m") {
-      const value = String(tokens[i + 1] || "").trim();
-      if (!value) {
-        throw new AppError({
-          code: "INVALID_REQUEST",
-          message: "Missing value for --geo-threshold-m",
-        });
-      }
-      const parsedInt = Number.parseInt(value, 10);
-      if (!Number.isFinite(parsedInt) || parsedInt < 0) {
-        throw new AppError({
-          code: "INVALID_REQUEST",
-          message: "--geo-threshold-m must be a non-negative integer",
-        });
-      }
-      parsed.scope.geoThresholdMeters = parsedInt;
-      i += 1;
-      continue;
-    }
-
-    if (token === "--close-missing") {
-      parsed.scope.closeMissing = true;
-      continue;
-    }
-
-    if (token === "--no-close-missing") {
-      parsed.scope.closeMissing = false;
-      continue;
-    }
-
-    throw new AppError({
-      code: "INVALID_REQUEST",
-      message: `Unknown argument: ${token}`,
-    });
   }
 
   return parsed;

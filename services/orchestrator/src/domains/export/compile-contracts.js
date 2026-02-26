@@ -28,13 +28,34 @@ function isIsoDate(value) {
   );
 }
 
+function invalidRequest(message) {
+  throw new AppError({
+    code: "INVALID_REQUEST",
+    statusCode: 400,
+    message,
+  });
+}
+
+function readOptionalField(body, fieldName) {
+  if (body[fieldName] === undefined) {
+    return { provided: false, value: "" };
+  }
+  return { provided: true, value: String(body[fieldName]).trim() };
+}
+
+function readRequiredNonEmptyOptional(body, fieldName) {
+  const field = readOptionalField(body, fieldName);
+  if (field.provided && !field.value) {
+    invalidRequest(
+      `Field '${fieldName}' must be a non-empty string when provided`,
+    );
+  }
+  return field.value || undefined;
+}
+
 function validateCompileGtfsRequest(body) {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
-    throw new AppError({
-      code: "INVALID_REQUEST",
-      statusCode: 400,
-      message: "Compile request body must be a JSON object",
-    });
+    invalidRequest("Compile request body must be a JSON object");
   }
 
   const profileRaw =
@@ -42,20 +63,12 @@ function validateCompileGtfsRequest(body) {
       ? "canonical_runtime"
       : String(body.profile).trim();
   if (!profileRaw) {
-    throw new AppError({
-      code: "INVALID_REQUEST",
-      statusCode: 400,
-      message: "Field 'profile' must be a non-empty string when provided",
-    });
+    invalidRequest("Field 'profile' must be a non-empty string when provided");
   }
 
   const tier = normalizeTier(body.tier);
   if (!VALID_TIERS.has(tier)) {
-    throw new AppError({
-      code: "INVALID_REQUEST",
-      statusCode: 400,
-      message: "Field 'tier' must be one of: high-speed, regional, local, all",
-    });
+    invalidRequest("Field 'tier' must be one of: high-speed, regional, local, all");
   }
 
   const asOfRaw =
@@ -63,66 +76,28 @@ function validateCompileGtfsRequest(body) {
       ? todayUtcIsoDate()
       : String(body.asOf).trim();
   if (!isIsoDate(asOfRaw)) {
-    throw new AppError({
-      code: "INVALID_REQUEST",
-      statusCode: 400,
-      message: "Field 'asOf' must use YYYY-MM-DD format",
-    });
+    invalidRequest("Field 'asOf' must use YYYY-MM-DD format");
   }
 
-  let country;
-  if (
-    body.country !== undefined &&
-    body.country !== null &&
-    body.country !== ""
-  ) {
-    country = String(body.country).trim().toUpperCase();
-    if (!VALID_COUNTRIES.has(country)) {
-      throw new AppError({
-        code: "INVALID_REQUEST",
-        statusCode: 400,
-        message: "Field 'country' must be one of: DE, AT, CH",
-      });
-    }
+  const countryRaw = String(body.country || "")
+    .trim()
+    .toUpperCase();
+  if (countryRaw && !VALID_COUNTRIES.has(countryRaw)) {
+    invalidRequest("Field 'country' must be one of: DE, AT, CH");
   }
 
-  const outputDir =
-    body.outputDir === undefined ? "" : String(body.outputDir).trim();
-  const outputZip =
-    body.outputZip === undefined ? "" : String(body.outputZip).trim();
-  const summaryJson =
-    body.summaryJson === undefined ? "" : String(body.summaryJson).trim();
-
-  if (body.outputDir !== undefined && !outputDir) {
-    throw new AppError({
-      code: "INVALID_REQUEST",
-      statusCode: 400,
-      message: "Field 'outputDir' must be a non-empty string when provided",
-    });
-  }
-  if (body.outputZip !== undefined && !outputZip) {
-    throw new AppError({
-      code: "INVALID_REQUEST",
-      statusCode: 400,
-      message: "Field 'outputZip' must be a non-empty string when provided",
-    });
-  }
-  if (body.summaryJson !== undefined && !summaryJson) {
-    throw new AppError({
-      code: "INVALID_REQUEST",
-      statusCode: 400,
-      message: "Field 'summaryJson' must be a non-empty string when provided",
-    });
-  }
+  const outputDir = readRequiredNonEmptyOptional(body, "outputDir");
+  const outputZip = readRequiredNonEmptyOptional(body, "outputZip");
+  const summaryJson = readRequiredNonEmptyOptional(body, "summaryJson");
 
   return {
     profile: profileRaw,
     tier,
     asOf: asOfRaw,
-    country: country || undefined,
-    outputDir: outputDir || undefined,
-    outputZip: outputZip || undefined,
-    summaryJson: summaryJson || undefined,
+    country: countryRaw || undefined,
+    outputDir,
+    outputZip,
+    summaryJson,
   };
 }
 

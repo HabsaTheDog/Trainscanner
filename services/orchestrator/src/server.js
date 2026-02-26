@@ -957,27 +957,28 @@ async function ensureBootstrapFiles() {
   }
 }
 
-async function startServer() {
-  try {
-    await ensureBootstrapFiles();
-    server.listen(config.port, () => {
-      logger.info("Orchestrator started", {
-        step: "startup",
-        port: config.port,
-        motisBaseUrl: config.motisBaseUrl,
-        configDir: config.configDir,
-        stateDir: config.stateDir,
-        dataDir: config.dataDir,
-        frontendDir: config.frontendDir,
+function startServer() {
+  return ensureBootstrapFiles()
+    .then(() => {
+      server.listen(config.port, () => {
+        logger.info("Orchestrator started", {
+          step: "startup",
+          port: config.port,
+          motisBaseUrl: config.motisBaseUrl,
+          configDir: config.configDir,
+          stateDir: config.stateDir,
+          dataDir: config.dataDir,
+          frontendDir: config.frontendDir,
+        });
       });
+    })
+    .catch((err) => {
+      logger.error("Failed to bootstrap orchestrator", {
+        step: "startup",
+        error: err.message,
+      });
+      process.exitCode = 1;
     });
-  } catch (err) {
-    logger.error("Failed to bootstrap orchestrator", {
-      step: "startup",
-      error: err.message,
-    });
-    process.exitCode = 1;
-  }
 }
 
 void startServer();

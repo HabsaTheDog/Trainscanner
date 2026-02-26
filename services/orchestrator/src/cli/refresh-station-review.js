@@ -91,6 +91,94 @@ function assertStepId(stepId, flagName) {
   });
 }
 
+function readRequiredValue(tokens, index, flagName) {
+  const value = String(tokens[index + 1] || "").trim();
+  if (!value) {
+    throw new AppError({
+      code: "INVALID_REQUEST",
+      message: `Missing value for ${flagName}`,
+    });
+  }
+  return value;
+}
+
+function applyOptionWithValue(options, tokens, index, flagName, applyValue) {
+  const value = readRequiredValue(tokens, index, flagName);
+  applyValue(value);
+  return index + 1;
+}
+
+function parseArgsToken(options, tokens, index) {
+  const arg = tokens[index];
+  const skipFlags = {
+    "--skip-fetch": "fetch",
+    "--skip-ingest": "ingest",
+    "--skip-canonical": "canonical",
+    "--skip-review-queue": "review-queue",
+  };
+
+  switch (arg) {
+    case "-h":
+    case "--help":
+      options.help = true;
+      return index;
+    case "--country":
+      return applyOptionWithValue(
+        options,
+        tokens,
+        index,
+        "--country",
+        (value) => {
+          options.country = value.toUpperCase();
+        },
+      );
+    case "--as-of":
+      return applyOptionWithValue(options, tokens, index, "--as-of", (value) => {
+        options.asOf = value;
+      });
+    case "--source-id":
+      return applyOptionWithValue(
+        options,
+        tokens,
+        index,
+        "--source-id",
+        (value) => {
+          options.sourceId = value;
+        },
+      );
+    case "--only":
+      return applyOptionWithValue(options, tokens, index, "--only", (value) => {
+        options.onlySteps.push(...tokenizeStepList(value));
+      });
+    case "--from-step":
+      return applyOptionWithValue(
+        options,
+        tokens,
+        index,
+        "--from-step",
+        (value) => {
+          options.fromStep = parseStepToken(value);
+        },
+      );
+    case "--to-step":
+      return applyOptionWithValue(options, tokens, index, "--to-step", (value) => {
+        options.toStep = parseStepToken(value);
+      });
+    case "--dry-run":
+      options.dryRun = true;
+      return index;
+    default:
+      if (skipFlags[arg]) {
+        options.skipSteps.add(skipFlags[arg]);
+        return index;
+      }
+      throw new AppError({
+        code: "INVALID_REQUEST",
+        message: `Unknown argument: ${arg}`,
+      });
+  }
+}
+
 function parseArgs(argv = []) {
   const parsed = parsePipelineCliArgs(argv);
   const passthrough = Array.isArray(parsed.passthroughArgs)
@@ -111,122 +199,7 @@ function parseArgs(argv = []) {
   };
 
   for (let i = 0; i < passthrough.length; i += 1) {
-    const arg = passthrough[i];
-
-    if (arg === "-h" || arg === "--help") {
-      options.help = true;
-      continue;
-    }
-
-    if (arg === "--country") {
-      const value = String(passthrough[i + 1] || "")
-        .trim()
-        .toUpperCase();
-      if (!value) {
-        throw new AppError({
-          code: "INVALID_REQUEST",
-          message: "Missing value for --country",
-        });
-      }
-      options.country = value;
-      i += 1;
-      continue;
-    }
-
-    if (arg === "--as-of") {
-      const value = String(passthrough[i + 1] || "").trim();
-      if (!value) {
-        throw new AppError({
-          code: "INVALID_REQUEST",
-          message: "Missing value for --as-of",
-        });
-      }
-      options.asOf = value;
-      i += 1;
-      continue;
-    }
-
-    if (arg === "--source-id") {
-      const value = String(passthrough[i + 1] || "").trim();
-      if (!value) {
-        throw new AppError({
-          code: "INVALID_REQUEST",
-          message: "Missing value for --source-id",
-        });
-      }
-      options.sourceId = value;
-      i += 1;
-      continue;
-    }
-
-    if (arg === "--only") {
-      const value = String(passthrough[i + 1] || "").trim();
-      if (!value) {
-        throw new AppError({
-          code: "INVALID_REQUEST",
-          message: "Missing value for --only",
-        });
-      }
-      options.onlySteps.push(...tokenizeStepList(value));
-      i += 1;
-      continue;
-    }
-
-    if (arg === "--from-step") {
-      const value = parseStepToken(passthrough[i + 1]);
-      if (!value) {
-        throw new AppError({
-          code: "INVALID_REQUEST",
-          message: "Missing value for --from-step",
-        });
-      }
-      options.fromStep = value;
-      i += 1;
-      continue;
-    }
-
-    if (arg === "--to-step") {
-      const value = parseStepToken(passthrough[i + 1]);
-      if (!value) {
-        throw new AppError({
-          code: "INVALID_REQUEST",
-          message: "Missing value for --to-step",
-        });
-      }
-      options.toStep = value;
-      i += 1;
-      continue;
-    }
-
-    if (arg === "--skip-fetch") {
-      options.skipSteps.add("fetch");
-      continue;
-    }
-
-    if (arg === "--skip-ingest") {
-      options.skipSteps.add("ingest");
-      continue;
-    }
-
-    if (arg === "--skip-canonical") {
-      options.skipSteps.add("canonical");
-      continue;
-    }
-
-    if (arg === "--skip-review-queue") {
-      options.skipSteps.add("review-queue");
-      continue;
-    }
-
-    if (arg === "--dry-run") {
-      options.dryRun = true;
-      continue;
-    }
-
-    throw new AppError({
-      code: "INVALID_REQUEST",
-      message: `Unknown argument: ${arg}`,
-    });
+    i = parseArgsToken(options, passthrough, i);
   }
 
   if (options.help) {
@@ -367,71 +340,74 @@ function formatArgs(args = []) {
   return args.join(" ");
 }
 
-async function run() {
-  try {
-    const options = parseArgs(process.argv.slice(2));
-    if (options.help) {
-      printUsage();
-      return;
-    }
+function run() {
+  return (async () => {
+    try {
+      const options = parseArgs(process.argv.slice(2));
+      if (options.help) {
+        printUsage();
+        return;
+      }
 
-    const selectedSteps = filterSelectedSteps(options);
-    const stepDefs = toStepDefinitions(options);
-    const runIdBase = String(options.runId || "").trim() || crypto.randomUUID();
+      const selectedSteps = filterSelectedSteps(options);
+      const stepDefs = toStepDefinitions(options);
+      const runIdBase =
+        String(options.runId || "").trim() || crypto.randomUUID();
 
-    process.stdout.write(`[refresh-station-review] runId=${runIdBase}\n`);
-    process.stdout.write(
-      `[refresh-station-review] scope country=${options.country || "ALL"} as-of=${options.asOf || "latest"} source-id=${options.sourceId || "ALL"}\n`,
-    );
-    process.stdout.write(
-      `[refresh-station-review] selected steps: ${selectedSteps.join(" -> ")}\n`,
-    );
+      process.stdout.write(`[refresh-station-review] runId=${runIdBase}\n`);
+      process.stdout.write(
+        `[refresh-station-review] scope country=${options.country || "ALL"} as-of=${options.asOf || "latest"} source-id=${options.sourceId || "ALL"}\n`,
+      );
+      process.stdout.write(
+        `[refresh-station-review] selected steps: ${selectedSteps.join(" -> ")}\n`,
+      );
 
-    if (options.dryRun) {
-      for (const stepId of selectedSteps) {
+      if (options.dryRun) {
+        for (const stepId of selectedSteps) {
+          const def = stepDefs[stepId];
+          process.stdout.write(
+            `[refresh-station-review] dry-run ${stepId}: ${def.label} ${formatArgs(def.args)}\n`,
+          );
+        }
+        return;
+      }
+
+      const startedAt = Date.now();
+      for (let index = 0; index < selectedSteps.length; index += 1) {
+        const stepId = selectedSteps[index];
         const def = stepDefs[stepId];
+        const stepRunId = `${runIdBase}-${stepId.replaceAll(/[^a-z0-9]+/gi, "-")}`;
+        const stepStartedAt = Date.now();
+
         process.stdout.write(
-          `[refresh-station-review] dry-run ${stepId}: ${def.label} ${formatArgs(def.args)}\n`,
+          `[refresh-station-review] (${index + 1}/${selectedSteps.length}) ${stepId}: ${def.label} ${formatArgs(def.args)}\n`,
+        );
+
+        await def.run({
+          rootDir: options.rootDir,
+          runId: stepRunId,
+          args: def.args,
+        });
+
+        const elapsedMs = Date.now() - stepStartedAt;
+        process.stdout.write(
+          `[refresh-station-review] completed ${stepId} in ${(elapsedMs / 1000).toFixed(1)}s\n`,
         );
       }
-      return;
-    }
 
-    const startedAt = Date.now();
-    for (let index = 0; index < selectedSteps.length; index += 1) {
-      const stepId = selectedSteps[index];
-      const def = stepDefs[stepId];
-      const stepRunId = `${runIdBase}-${stepId.replaceAll(/[^a-z0-9]+/gi, "-")}`;
-      const stepStartedAt = Date.now();
-
+      const totalMs = Date.now() - startedAt;
       process.stdout.write(
-        `[refresh-station-review] (${index + 1}/${selectedSteps.length}) ${stepId}: ${def.label} ${formatArgs(def.args)}\n`,
+        `[refresh-station-review] done in ${(totalMs / 1000).toFixed(1)}s\n`,
       );
-
-      await def.run({
-        rootDir: options.rootDir,
-        runId: stepRunId,
-        args: def.args,
-      });
-
-      const elapsedMs = Date.now() - stepStartedAt;
-      process.stdout.write(
-        `[refresh-station-review] completed ${stepId} in ${(elapsedMs / 1000).toFixed(1)}s\n`,
+    } catch (err) {
+      printCliError(
+        "refresh-station-review",
+        err,
+        "Station review refresh pipeline failed",
       );
+      process.exit(1);
     }
-
-    const totalMs = Date.now() - startedAt;
-    process.stdout.write(
-      `[refresh-station-review] done in ${(totalMs / 1000).toFixed(1)}s\n`,
-    );
-  } catch (err) {
-    printCliError(
-      "refresh-station-review",
-      err,
-      "Station review refresh pipeline failed",
-    );
-    process.exit(1);
-  }
+  })();
 }
 
 void run();
