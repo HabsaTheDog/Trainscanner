@@ -76,6 +76,7 @@ to_node_path() {
   fail "path '$local_path' is outside mapped prefix '$MAP_LOCAL_PREFIX' for --node-path-map"
 }
 
+# shellcheck disable=SC2329 # invoked via trap on EXIT
 cleanup() {
   if [[ "$KEEP_RESOURCES" == "true" ]]; then
     return 0
@@ -88,7 +89,7 @@ cleanup() {
   fi
 }
 
-trap cleanup EXIT
+trap 'cleanup' EXIT
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
