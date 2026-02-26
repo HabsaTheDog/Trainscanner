@@ -286,7 +286,7 @@ function normalizeUicCode(raw) {
   if (digits.length < 5 || digits.length > 12) {
     return "";
   }
-  const trimmed = digits.replaceAll(/^0+(?=\d)/, "");
+  const trimmed = digits.replace(/^0+(?=\d)/, "");
   return trimmed.length >= 5 ? trimmed : "";
 }
 

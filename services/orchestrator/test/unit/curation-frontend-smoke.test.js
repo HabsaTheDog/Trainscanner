@@ -18,7 +18,9 @@ test("curation frontend includes staged conflict editor and map mode hooks", asy
     "utf8",
   );
 
-  assert.match(html, /src="\/src\/main-curation\.jsx"/);
+  const hasLegacyScriptTag = /src="\/src\/main-curation\.jsx"/.test(html);
+  const hasModuleImport = /import\s+"\.\/src\/main-curation\.jsx";/.test(html);
+  assert.ok(hasLegacyScriptTag || hasModuleImport);
 
   assert.match(pageJsx, /id="mapModeDefaultBtn"/);
   assert.match(pageJsx, /id="mapModeSatelliteBtn"/);
