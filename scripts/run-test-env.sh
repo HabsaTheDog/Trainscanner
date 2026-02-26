@@ -35,7 +35,6 @@ USAGE
 fail() {
   printf '[run-test-env] ERROR: %s\n' "$*" >&2
   exit 1
-  return 1
 }
 
 log() {

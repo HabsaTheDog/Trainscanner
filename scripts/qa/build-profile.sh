@@ -38,7 +38,6 @@ log() {
 fail() {
   printf '[build-profile] ERROR: %s\n' "$*" >&2
   exit 1
-  return 1
 }
 
 is_iso_date() {

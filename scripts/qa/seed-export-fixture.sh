@@ -21,7 +21,6 @@ USAGE
 fail() {
   printf '[seed-export-fixture] ERROR: %s\n' "$*" >&2
   exit 1
-  return 1
 }
 
 while [[ $# -gt 0 ]]; do
