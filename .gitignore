@@ -75,3 +75,6 @@ target/
 
 # Python linting
 .ruff_cache/
+
+# Playwright CLI artifacts
+.playwright-cli/
