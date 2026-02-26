@@ -383,6 +383,42 @@ function withRouteMeta(response, routePath) {
   };
 }
 
+function buildRouteRequestUrl(config, planPath, params) {
+  const url = new URL(joinUrl(config.motisBaseUrl, planPath));
+  for (const [key, value] of Object.entries(params)) {
+    url.searchParams.set(key, value);
+  }
+  return url;
+}
+
+async function requestRouteVariant(config, planPath, params, attempts) {
+  const url = buildRouteRequestUrl(config, planPath, params);
+  const response = await requestJson(
+    url.toString(),
+    { method: "GET" },
+    config.motisRequestTimeoutMs,
+  );
+  addRequestAttempt(attempts, {
+    path: planPath,
+    params,
+    status: response.status,
+  });
+  return response;
+}
+
+function classifyFallbackRouteResponse(response, planPath) {
+  if (response.status === 404 && isEndpointNotFound(response)) {
+    return {
+      routeNotFound: withRouteMeta(response, planPath),
+      nonNotFound: null,
+    };
+  }
+  return {
+    routeNotFound: null,
+    nonNotFound: withRouteMeta(response, planPath),
+  };
+}
+
 async function probePlanPath(config, planPath, attempts) {
   const probeUrl = new URL(joinUrl(config.motisBaseUrl, planPath));
   const probe = await requestJson(
@@ -414,21 +450,12 @@ async function tryRouteRequestsForPath({
     for (const destination of destinationCandidates) {
       for (const buildParams of QUERY_VARIANTS) {
         const params = buildParams(origin, destination, datetime);
-        const url = new URL(joinUrl(config.motisBaseUrl, planPath));
-        for (const [key, value] of Object.entries(params)) {
-          url.searchParams.set(key, value);
-        }
-
-        const response = await requestJson(
-          url.toString(),
-          { method: "GET" },
-          config.motisRequestTimeoutMs,
-        );
-        addRequestAttempt(attempts, {
-          path: planPath,
+        const response = await requestRouteVariant(
+          config,
+          planPath,
           params,
-          status: response.status,
-        });
+          attempts,
+        );
 
         if (response.ok) {
           return {
@@ -443,15 +470,12 @@ async function tryRouteRequestsForPath({
           };
         }
 
-        if (response.status === 404 && isEndpointNotFound(response)) {
-          if (!firstRouteNotFound) {
-            firstRouteNotFound = withRouteMeta(response, planPath);
-          }
-          continue;
+        const fallback = classifyFallbackRouteResponse(response, planPath);
+        if (!firstRouteNotFound && fallback.routeNotFound) {
+          firstRouteNotFound = fallback.routeNotFound;
         }
-
-        if (!firstNonNotFound) {
-          firstNonNotFound = withRouteMeta(response, planPath);
+        if (!firstNonNotFound && fallback.nonNotFound) {
+          firstNonNotFound = fallback.nonNotFound;
         }
       }
     }

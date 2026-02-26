@@ -81,6 +81,54 @@ function isRunningSlotConflictError(err) {
   );
 }
 
+function validateRunJobInput(input = {}) {
+  const jobType = String(input.jobType || "").trim();
+  const idempotencyKey = String(input.idempotencyKey || "").trim();
+  const runContext =
+    input.runContext && typeof input.runContext === "object"
+      ? input.runContext
+      : {};
+  const maxAttempts = Number.isFinite(input.maxAttempts)
+    ? Math.max(1, input.maxAttempts)
+    : 3;
+  const maxConcurrent = Number.isFinite(input.maxConcurrent)
+    ? Math.max(1, input.maxConcurrent)
+    : 1;
+  const execute = input.execute;
+
+  if (!jobType) {
+    throw new AppError({
+      code: "INVALID_REQUEST",
+      message: "jobType is required",
+    });
+  }
+
+  if (!idempotencyKey) {
+    throw new AppError({
+      code: "INVALID_REQUEST",
+      message: "idempotencyKey is required",
+    });
+  }
+
+  if (typeof execute !== "function") {
+    throw new AppError({
+      code: "INVALID_REQUEST",
+      message: "execute callback is required",
+    });
+  }
+
+  return {
+    jobType,
+    idempotencyKey,
+    runContext,
+    maxAttempts,
+    maxConcurrent,
+    execute,
+    backoff: input.backoff || {},
+    jobId: input.jobId || crypto.randomUUID(),
+  };
+}
+
 function createJobOrchestrator(options = {}) {
   const jobsRepo = options.jobsRepo;
   const logger = options.logger || {
@@ -108,54 +156,6 @@ function createJobOrchestrator(options = {}) {
           "INGEST_FAILED",
         ],
   );
-
-  function validateRunJobInput(input = {}) {
-    const jobType = String(input.jobType || "").trim();
-    const idempotencyKey = String(input.idempotencyKey || "").trim();
-    const runContext =
-      input.runContext && typeof input.runContext === "object"
-        ? input.runContext
-        : {};
-    const maxAttempts = Number.isFinite(input.maxAttempts)
-      ? Math.max(1, input.maxAttempts)
-      : 3;
-    const maxConcurrent = Number.isFinite(input.maxConcurrent)
-      ? Math.max(1, input.maxConcurrent)
-      : 1;
-    const execute = input.execute;
-
-    if (!jobType) {
-      throw new AppError({
-        code: "INVALID_REQUEST",
-        message: "jobType is required",
-      });
-    }
-
-    if (!idempotencyKey) {
-      throw new AppError({
-        code: "INVALID_REQUEST",
-        message: "idempotencyKey is required",
-      });
-    }
-
-    if (typeof execute !== "function") {
-      throw new AppError({
-        code: "INVALID_REQUEST",
-        message: "execute callback is required",
-      });
-    }
-
-    return {
-      jobType,
-      idempotencyKey,
-      runContext,
-      maxAttempts,
-      maxConcurrent,
-      execute,
-      backoff: input.backoff || {},
-      jobId: input.jobId || crypto.randomUUID(),
-    };
-  }
 
   function resolveExistingJob(existingJob, context) {
     if (!existingJob) {
@@ -441,7 +441,10 @@ function createJobOrchestrator(options = {}) {
 
     let job = initialJob;
     let attempt = Math.max(0, job.attempt || 0);
-    let checkpoint = { ...(job.checkpoint || {}) };
+    let checkpoint =
+      job.checkpoint && typeof job.checkpoint === "object"
+        ? { ...job.checkpoint }
+        : {};
 
     while (attempt < context.maxAttempts) {
       attempt += 1;
