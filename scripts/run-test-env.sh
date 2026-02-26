@@ -83,7 +83,7 @@ done
 "${ROOT_DIR}/scripts/validate-config.sh" --only profiles >/dev/null
 
 if [[ -z "$PROFILE" ]]; then
-  PROFILE="$(node "${ROOT_DIR}/orchestrator/src/cli/profile-runtime.js" resolve-default-profile --root "$ROOT_DIR" 2>/dev/null || true)"
+  PROFILE="$(node "${ROOT_DIR}/services/orchestrator/src/cli/profile-runtime.js" resolve-default-profile --root "$ROOT_DIR" 2>/dev/null || true)"
 fi
 
 [[ -n "$PROFILE" ]] || fail "No profile detected. Set one in config/gtfs-profiles.json or pass --profile."

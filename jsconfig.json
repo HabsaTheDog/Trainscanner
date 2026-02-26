@@ -12,13 +12,16 @@
     "moduleResolution": "node",
     "typeRoots": ["./node_modules/@types"]
   },
-  "include": ["scripts/**/*.js", "services/**/*.js", "workers/**/*.js"],
+  "include": ["scripts/**/*.js", "services/**/*.js"],
   "exclude": [
     "node_modules",
+    "**/node_modules",
+    "**/node_modules/**",
     "dist",
+    "**/dist",
     "frontend",
-    "orchestrator",
-    "control-plane",
+    "services/control-plane",
+    "services/orchestrator",
     "**/*.test.js"
   ]
 }

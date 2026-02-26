@@ -9,7 +9,7 @@ on:
       - "config/gtfs-profiles.json"
       - "config/active-gtfs.json"
       - "db/migrations/**"
-      - "orchestrator/src/temporal/**"
+      - "services/orchestrator/src/temporal/**"
       - ".github/workflows/motis-k8s-micro-pr.yml"
   workflow_dispatch:
 

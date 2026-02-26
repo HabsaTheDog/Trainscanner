@@ -49,7 +49,7 @@ jobs:
         run: |
           npm audit --audit-level=high
           cargo install cargo-audit
-          cargo audit --manifest-path workers/rust-ingestion/Cargo.toml
+          cargo audit --manifest-path services/rust-ingestion-worker/Cargo.toml
 
       - name: Validate config contracts
         run: scripts/validate-config.sh
@@ -60,7 +60,6 @@ jobs:
 
       - name: Orchestrator lint + unit + integration
         run: |
-          cd orchestrator
-          npm run check
-          npm run test:unit
-          npm run test:integration
+          npm run check:orchestrator
+          npm run test:orchestrator:unit
+          npm run test:orchestrator:integration

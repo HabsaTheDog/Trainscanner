@@ -111,7 +111,7 @@ def choose_date(calendar_rows, cal_dates_rows):
     return today.strftime('%Y%m%d')
 
 
-active_path = os.path.join(ROOT_DIR, 'state', 'active-gtfs.json')
+active_path = os.path.join(ROOT_DIR, 'services', 'orchestrator', 'state', 'active-gtfs.json')
 if not os.path.isfile(active_path):
     active_path = os.path.join(ROOT_DIR, 'config', 'active-gtfs.json')
 active = read_json(active_path)

@@ -22,7 +22,7 @@ What it does:
   3) Generates data/motis/config.yml using MOTIS config command
   4) Applies MVP-safe config defaults (disable street/geocoding/tiles unless MOTIS_DISABLE_STREET_FEATURES=false)
   5) Runs MOTIS import (unless --skip-import)
-  6) Updates state/active-gtfs.json
+  6) Updates services/orchestrator/state/active-gtfs.json
 USAGE
 }
 
@@ -69,7 +69,7 @@ fi
 
 "${ROOT_DIR}/scripts/validate-config.sh" --only profiles >/dev/null
 
-PROFILE_ARTIFACT_INFO="$(node "${ROOT_DIR}/orchestrator/src/cli/profile-runtime.js" resolve-artifact --root "$ROOT_DIR" --profile "$PROFILE")" || {
+PROFILE_ARTIFACT_INFO="$(node "${ROOT_DIR}/services/orchestrator/src/cli/profile-runtime.js" resolve-artifact --root "$ROOT_DIR" --profile "$PROFILE")" || {
   echo "Profile '$PROFILE' not found/invalid or runtime artifact unresolved in config/gtfs-profiles.json" >&2
   exit 1
 }
@@ -225,7 +225,7 @@ if [[ "$SKIP_IMPORT" != "true" ]]; then
   run_motis_cli import
 fi
 
-node - <<'NODE' "$ROOT_DIR/state/active-gtfs.json" "$PROFILE" "$PROFILE_ZIP_RELATIVE"
+node - <<'NODE' "$ROOT_DIR/services/orchestrator/state/active-gtfs.json" "$PROFILE" "$PROFILE_ZIP_RELATIVE"
 const fs = require('node:fs');
 const file = process.argv[2];
 const profile = process.argv[3];

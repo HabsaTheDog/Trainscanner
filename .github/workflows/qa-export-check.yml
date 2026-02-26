@@ -9,8 +9,8 @@ on:
       - "scripts/data/db-migrate.sh"
       - "db/migrations/**"
       - "config/gtfs-profiles.json"
-      - "orchestrator/src/**"
-      - "orchestrator/package.json"
+      - "services/orchestrator/src/**"
+      - "services/orchestrator/package.json"
   pull_request:
     paths:
       - ".github/workflows/qa-export-check.yml"
@@ -19,8 +19,8 @@ on:
       - "scripts/data/db-migrate.sh"
       - "db/migrations/**"
       - "config/gtfs-profiles.json"
-      - "orchestrator/src/**"
-      - "orchestrator/package.json"
+      - "services/orchestrator/src/**"
+      - "services/orchestrator/package.json"
   workflow_dispatch:
 
 jobs:
@@ -48,10 +48,10 @@ jobs:
 
       - name: Script + syntax checks
         run: |
+          npm ci
           bash -n scripts/*.sh scripts/data/*.sh scripts/qa/*.sh
           python3 -m py_compile scripts/qa/export-canonical-gtfs.py
-          cd orchestrator
-          npm run check
+          npm run check:orchestrator
 
       - name: Seed fixture + export determinism check
         run: |

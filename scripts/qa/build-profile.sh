@@ -112,7 +112,7 @@ const path = require('node:path');
 const rootDir = process.argv[2];
 const profileName = process.argv[3];
 const profilesPath = path.join(rootDir, 'config', 'gtfs-profiles.json');
-const { normalizeProfiles } = require(path.join(rootDir, 'orchestrator', 'src', 'profile-resolver.js'));
+const { normalizeProfiles } = require(path.join(rootDir, 'services', 'orchestrator', 'src', 'profile-resolver.js'));
 
 let raw;
 try {

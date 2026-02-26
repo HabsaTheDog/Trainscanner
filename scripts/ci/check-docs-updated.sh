@@ -18,7 +18,7 @@ fi
 REQUIRES_DOCS=0
 while IFS= read -r file; do
   [[ -z "$file" ]] && continue
-  if [[ "$file" =~ ^(orchestrator/|frontend/|scripts/|config/|db/|docker-compose\.yml|README\.md|AGENTS\.md)$ ]]; then
+  if [[ "$file" =~ ^(services/|frontend/|scripts/|config/|db/|docker-compose\.yml|README\.md|docs/agents/AGENTS\.md)$ ]]; then
     REQUIRES_DOCS=1
     break
   fi
@@ -31,9 +31,10 @@ fi
 
 required_docs=(
   "README.md"
-  "AGENTS.md"
-  "orchestrator/AGENTS.md"
-  "frontend/AGENTS.md"
+  "docs/agents/AGENTS.md"
+  "docs/agents/tests.AGENTS.md"
+  "docs/planning/Project Scope.md"
+  "docs/planning/Agent_Migration_Plan.md"
 )
 
 missing=()

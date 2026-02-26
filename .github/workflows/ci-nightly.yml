@@ -37,9 +37,8 @@ jobs:
 
       - name: Orchestrator full test suite
         run: |
-          cd orchestrator
-          npm run check
-          npm test
+          npm run check:orchestrator
+          npm run test:orchestrator
 
       - name: Canonical export full determinism check
         run: |

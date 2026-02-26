@@ -5,6 +5,9 @@ GTFS profile switching and route debugging with MOTIS.
 ## Quickstart
 
 ```bash
+# Install Node workspaces once (frontend + orchestrator + control-plane)
+npm ci
+
 # Start dev environment (Frontend: http://localhost:3000, MOTIS: http://localhost:8080)
 npm run dev -- --profile sample_de
 
@@ -14,10 +17,11 @@ npm run stop
 
 ## Architecture & State
 
+- **Node Tooling**: npm workspaces with root task runner (`frontend`, `services/orchestrator`, `services/control-plane`).
 - **Frontend**: React + Vite (MapLibre GL JS mapping).
 - **Backend**: Node.js Orchestrator API.
 - **Routing Engine**: MOTIS in Docker.
-- **State**: PostgreSQL (PostGIS) for `system_state` and canonical GTFS data, with JSON file fallbacks in `state/`.
+- **State**: PostgreSQL (PostGIS) for `system_state` and canonical GTFS data, with JSON file fallbacks in `services/orchestrator/state/`.
 - **Profiles**: Configured in `config/gtfs-profiles.json`. Includes static ZIPs or dynamic runtime exports.
 
 ## Core Features

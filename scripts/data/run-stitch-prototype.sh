@@ -9,7 +9,7 @@ source "${SCRIPT_DIR}/lib-db.sh"
 
 OJP_JSON="${SCRIPT_DIR}/samples/ojp-feeder-sample.json"
 MOTIS_JSON="${SCRIPT_DIR}/samples/motis-backbone-sample.json"
-OUTPUT_JSON="${ROOT_DIR}/state/stitch-prototype-report.json"
+OUTPUT_JSON="${ROOT_DIR}/services/orchestrator/state/stitch-prototype-report.json"
 TOP_N="5"
 COUNTRY_FILTER=""
 AS_OF=""
@@ -24,7 +24,7 @@ Run offline stitching prototype from feeder + backbone samples.
 Options:
   --ojp-json PATH         OJP feeder segments JSON (default: scripts/data/samples/ojp-feeder-sample.json)
   --motis-json PATH       MOTIS backbone JSON (default: scripts/data/samples/motis-backbone-sample.json)
-  --output PATH           Output report path (default: state/stitch-prototype-report.json)
+  --output PATH           Output report path (default: services/orchestrator/state/stitch-prototype-report.json)
   --top-n N               Number of ranked itineraries (default: 5)
   --country DE|AT|CH      Restrict to one country
   --as-of YYYY-MM-DD      Evaluate transfer rules as-of date (default: current date)

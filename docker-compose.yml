@@ -74,7 +74,7 @@ services:
   orchestrator:
     build:
       context: .
-      dockerfile: orchestrator/Dockerfile
+      dockerfile: services/orchestrator/Dockerfile
     container_name: orchestrator
     restart: unless-stopped
     env_file:
@@ -112,7 +112,7 @@ services:
       TEMPORAL_ADDRESS: temporal:7233
     volumes:
       - ./config:/app/config
-      - ./state:/app/state
+      - ./services/orchestrator/state:/app/state
       - ./data:/app/data
       - /var/run/docker.sock:/var/run/docker.sock
 

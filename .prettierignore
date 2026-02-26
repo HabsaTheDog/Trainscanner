@@ -2,6 +2,8 @@ node_modules
 dist
 data
 db
-state
 .playwright-cli
-workers/rust-ingestion/target
+services/rust-ingestion-worker/target
+services/orchestrator/state
+AGENTS.md
+docs/planning/cleanup.md

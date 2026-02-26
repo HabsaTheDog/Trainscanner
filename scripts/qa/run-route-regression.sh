@@ -5,8 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 API_URL="${API_URL:-http://localhost:3000}"
-CASES_FILE="${ROOT_DIR}/tests/routes/regression_cases.json"
-BASELINES_DIR="${ROOT_DIR}/tests/routes/baselines"
+CASES_FILE="${ROOT_DIR}/services/orchestrator/test/routes/regression_cases.json"
+BASELINES_DIR="${ROOT_DIR}/services/orchestrator/test/routes/baselines"
 REPORT_DIR="${ROOT_DIR}/reports/qa"
 FAIL_ON_DIFF="true"
 
@@ -18,8 +18,8 @@ Run route regression suite against /api/routes and compare with baselines.
 
 Options:
   --api-url URL           API base URL (default: http://localhost:3000)
-  --cases PATH            Regression case file (default: tests/routes/regression_cases.json)
-  --baselines-dir PATH    Baselines directory (default: tests/routes/baselines)
+  --cases PATH            Regression case file (default: services/orchestrator/test/routes/regression_cases.json)
+  --baselines-dir PATH    Baselines directory (default: services/orchestrator/test/routes/baselines)
   --report-dir PATH       Report output directory (default: reports/qa)
   --no-fail-on-diff       Exit 0 even when mismatches are found
   -h, --help              Show this help
@@ -60,7 +60,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 ARGS=(
-  "${ROOT_DIR}/orchestrator/src/cli/run-route-regression.js"
+  "${ROOT_DIR}/services/orchestrator/src/cli/run-route-regression.js"
   --api-url "$API_URL"
   --cases "$CASES_FILE"
   --baselines-dir "$BASELINES_DIR"

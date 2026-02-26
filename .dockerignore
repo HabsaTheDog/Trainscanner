@@ -1,0 +1,11 @@
+.git
+.github
+.vscode
+.playwright-cli
+node_modules
+**/node_modules
+**/dist
+data
+reports
+coverage
+*.log

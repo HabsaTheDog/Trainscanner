@@ -1,15 +1,7 @@
-import { useEffect } from "react";
-import { initCurationApp } from "./legacy/curation-logic";
+import { useCurationPageRuntime } from "./useCurationPageRuntime";
 
 export function CurationPage() {
-  useEffect(() => {
-    const cleanup = initCurationApp();
-    return () => {
-      if (typeof cleanup === "function") {
-        cleanup();
-      }
-    };
-  }, []);
+  useCurationPageRuntime();
 
   return (
     <div className="curation-container">

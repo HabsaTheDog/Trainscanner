@@ -1,5 +1,6 @@
 # Dependencies
 node_modules/
+**/node_modules/
 .pnp
 .pnp.js
 
@@ -17,6 +18,7 @@ build/
 data/gtfs_raw/
 data/osm/
 data/gtfs_filtered/
+data/gtfs/
 data/raw/
 data/postgis/
 *.osm.pbf
@@ -51,13 +53,13 @@ __pycache__/
 venv/
 
 # MVP runtime artifacts
-state/*.lock
-state/*.tmp
-state/active-gtfs.json
-state/gtfs-switch-status.json
-state/gtfs-switch.log
-state/stitch-prototype-report.json
-state/stitch-report-*.json
+services/orchestrator/state/*.lock
+services/orchestrator/state/*.tmp
+services/orchestrator/state/active-gtfs.json
+services/orchestrator/state/gtfs-switch-status.json
+services/orchestrator/state/gtfs-switch.log
+services/orchestrator/state/stitch-prototype-report.json
+services/orchestrator/state/stitch-report-*.json
 data/motis/active-gtfs.zip
 data/motis/config.yml
 data/motis/*.bin
@@ -66,7 +68,7 @@ data/motis/osm.pbf
 data/motis/data/
 data/gtfs/*.zip
 data/gtfs/runtime/
-data/gtfs for testing (manualy downloaded)/
+data/test-fixtures/
 
 # Rust
 target/

@@ -1,15 +1,7 @@
-import { useEffect } from "react";
-import { initHomeApp } from "./legacy/home-logic";
+import { useHomePageRuntime } from "./useHomePageRuntime";
 
 export function HomePage() {
-  useEffect(() => {
-    const cleanup = initHomeApp();
-    return () => {
-      if (typeof cleanup === "function") {
-        cleanup();
-      }
-    };
-  }, []);
+  useHomePageRuntime();
 
   return (
     <main className="page">
