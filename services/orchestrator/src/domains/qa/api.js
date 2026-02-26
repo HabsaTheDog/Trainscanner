@@ -901,47 +901,37 @@ function inferSectionTypeFromLabel(label) {
   return "other";
 }
 
-function buildGroupModelFromDecision(
-  clusterId,
-  country,
-  decision,
-  stationToSegment = new Map(),
-) {
+function hasSplitSections(decision) {
   if (
     !decision?.operation ||
     decision.operation !== "split" ||
     !Array.isArray(decision.groups) ||
     decision.groups.length < 2
   ) {
-    return null;
+    return false;
   }
+  return decision.groups.some((group) => Boolean(group?.hasSectionMetadata));
+}
 
-  const hasExplicitSections = decision.groups.some((group) =>
-    Boolean(group?.hasSectionMetadata),
-  );
-  if (!hasExplicitSections) {
-    return null;
-  }
-
-  const filteredGroups = decision.groups.filter(
+function listNonEmptyDecisionGroups(groups) {
+  return (Array.isArray(groups) ? groups : []).filter(
     (group) =>
-      Array.isArray(group.memberStationIds) &&
-      group.memberStationIds.length > 0,
+      Array.isArray(group.memberStationIds) && group.memberStationIds.length > 0,
   );
-  if (filteredGroups.length < 2) {
-    return null;
-  }
+}
 
-  const sectionSignature = filteredGroups
+function buildSectionSignature(groups) {
+  return groups
     .map(
       (group) =>
         `${group.sectionType || inferSectionTypeFromLabel(group.groupLabel)}|${group.sectionName || group.groupLabel}|${group.memberStationIds.join(",")}`,
     )
     .join("|");
-  const groupId = hashStableId("grp", `${clusterId}|${sectionSignature}`);
+}
 
+function buildGroupSections(groups, groupId, stationToSegment) {
   const segmentToSection = new Map();
-  const sections = filteredGroups.map((group, index) => {
+  const sections = groups.map((group, index) => {
     const sectionType =
       group.sectionType || inferSectionTypeFromLabel(group.groupLabel);
     const sectionName =
@@ -956,10 +946,8 @@ function buildGroupModelFromDecision(
       stationToSegment.has(stationId),
     );
     const segmentId = mappedStation ? stationToSegment.get(mappedStation) : "";
-    if (segmentId) {
-      if (!segmentToSection.has(segmentId)) {
-        segmentToSection.set(segmentId, sectionId);
-      }
+    if (segmentId && !segmentToSection.has(segmentId)) {
+      segmentToSection.set(segmentId, sectionId);
     }
 
     return {
@@ -969,62 +957,111 @@ function buildGroupModelFromDecision(
       memberStationIds: group.memberStationIds,
     };
   });
+  return { sections, segmentToSection };
+}
 
+function normalizeWalkLinks(segmentAction) {
+  if (Array.isArray(segmentAction?.walk_links)) {
+    return segmentAction.walk_links;
+  }
+  if (Array.isArray(segmentAction?.walkLinks)) {
+    return segmentAction.walkLinks;
+  }
+  return [];
+}
+
+function parseWalkLink(rawLink) {
+  const input = rawLink && typeof rawLink === "object" ? rawLink : {};
+  const fromSegmentId = toCleanString(input.from_segment_id || input.fromSegmentId);
+  const toSegmentId = toCleanString(input.to_segment_id || input.toSegmentId);
+  if (!fromSegmentId || !toSegmentId || fromSegmentId === toSegmentId) {
+    return null;
+  }
+
+  let minWalkMinutes = Number.parseInt(
+    input.min_walk_minutes ?? input.minWalkMinutes ?? 0,
+    10,
+  );
+  if (!Number.isFinite(minWalkMinutes) || minWalkMinutes < 0) {
+    minWalkMinutes = 0;
+  }
+
+  return {
+    fromSegmentId,
+    toSegmentId,
+    minWalkMinutes,
+    bidirectional: Boolean(input.bidirectional),
+    metadata:
+      input.metadata && typeof input.metadata === "object"
+        ? { ...input.metadata }
+        : {},
+  };
+}
+
+function buildGroupSectionLinks(groups, segmentToSection) {
   const links = [];
   const seen = new Set();
-  for (const group of filteredGroups) {
-    const segmentAction =
-      group && typeof group.segmentAction === "object"
-        ? group.segmentAction
-        : {};
-    const walkLinks = Array.isArray(segmentAction.walk_links)
-      ? segmentAction.walk_links
-      : [];
-    for (const link of walkLinks) {
-      const fromSegmentId = toCleanString(
-        link && (link.from_segment_id || link.fromSegmentId),
-      );
-      const toSegmentId = toCleanString(
-        link && (link.to_segment_id || link.toSegmentId),
-      );
-      const fromSectionId = segmentToSection.get(fromSegmentId);
-      const toSectionId = segmentToSection.get(toSegmentId);
+
+  for (const group of groups) {
+    for (const rawLink of normalizeWalkLinks(group?.segmentAction || {})) {
+      const parsed = parseWalkLink(rawLink);
+      if (!parsed) {
+        continue;
+      }
+      const fromSectionId = segmentToSection.get(parsed.fromSegmentId);
+      const toSectionId = segmentToSection.get(parsed.toSegmentId);
       if (!fromSectionId || !toSectionId || fromSectionId === toSectionId) {
         continue;
       }
 
-      const minWalkMinutes = Math.max(
-        0,
-        Number.parseInt(
-          String(link && (link.min_walk_minutes ?? link.minWalkMinutes ?? 0)),
-          10,
-        ) || 0,
-      );
-      const bidirectional = Boolean(link?.bidirectional);
-      const key = `${fromSectionId}|${toSectionId}|${minWalkMinutes}|${bidirectional ? "b" : "s"}`;
+      const key = `${fromSectionId}|${toSectionId}|${parsed.minWalkMinutes}|${parsed.bidirectional ? "b" : "s"}`;
       if (seen.has(key)) {
         continue;
       }
       seen.add(key);
-      const linkMetadata =
-        link.metadata && typeof link.metadata === "object"
-          ? link.metadata
-          : undefined;
+
       links.push({
         fromSectionId,
         toSectionId,
-        minWalkMinutes,
+        minWalkMinutes: parsed.minWalkMinutes,
         metadata: {
-          ...linkMetadata,
+          ...parsed.metadata,
           source: "cluster_decision",
-          from_segment_id: fromSegmentId,
-          to_segment_id: toSegmentId,
-          bidirectional,
+          from_segment_id: parsed.fromSegmentId,
+          to_segment_id: parsed.toSegmentId,
+          bidirectional: parsed.bidirectional,
         },
-        bidirectional,
+        bidirectional: parsed.bidirectional,
       });
     }
   }
+
+  return links;
+}
+
+function buildGroupModelFromDecision(
+  clusterId,
+  country,
+  decision,
+  stationToSegment = new Map(),
+) {
+  if (!hasSplitSections(decision)) {
+    return null;
+  }
+
+  const filteredGroups = listNonEmptyDecisionGroups(decision.groups);
+  if (filteredGroups.length < 2) {
+    return null;
+  }
+
+  const sectionSignature = buildSectionSignature(filteredGroups);
+  const groupId = hashStableId("grp", `${clusterId}|${sectionSignature}`);
+  const { sections, segmentToSection } = buildGroupSections(
+    filteredGroups,
+    groupId,
+    stationToSegment,
+  );
+  const links = buildGroupSectionLinks(filteredGroups, segmentToSection);
 
   return {
     groupId,
@@ -1844,32 +1881,20 @@ function buildDecisionMembersPayload(decision) {
     });
   }
 
-  if (decision.groups.length > 0) {
-    for (const group of decision.groups) {
-      for (const stationId of group.memberStationIds) {
-        pushRow(
-          stationId,
-          group.groupLabel,
-          decision.operation === "merge" ? "merge_member" : "candidate",
-          {
-            rename_to: group.renameTo || null,
-            segment_action: group.segmentAction || {},
-            line_action: group.lineAction || {},
-          },
-        );
-      }
+  const memberAction = decision.operation === "merge" ? "merge_member" : "candidate";
+  for (const group of decision.groups) {
+    for (const stationId of group.memberStationIds) {
+      pushRow(stationId, group.groupLabel, memberAction, {
+        rename_to: group.renameTo || null,
+        segment_action: group.segmentAction || {},
+        line_action: group.lineAction || {},
+      });
     }
   }
 
-  if (decision.groups.length === 0 && decision.selectedStationIds.length > 0) {
-    if (decision.operation === "merge") {
-      for (const stationId of decision.selectedStationIds) {
-        pushRow(stationId, "selected", "merge_member");
-      }
-    } else {
-      for (const stationId of decision.selectedStationIds) {
-        pushRow(stationId, "selected", "candidate");
-      }
+  if (decision.groups.length === 0) {
+    for (const stationId of decision.selectedStationIds) {
+      pushRow(stationId, "selected", memberAction);
     }
   }
 
@@ -1911,70 +1936,40 @@ function buildSegmentWalkLinks(decision) {
   const seen = new Set();
 
   for (const group of decision.groups) {
-    const segmentAction =
-      group && typeof group.segmentAction === "object"
-        ? group.segmentAction
-        : {};
-    let rawLinks = [];
-    if (Array.isArray(segmentAction.walk_links)) {
-      rawLinks = segmentAction.walk_links;
-    } else if (Array.isArray(segmentAction.walkLinks)) {
-      rawLinks = segmentAction.walkLinks;
-    }
-
-    for (const rawLink of rawLinks) {
-      const input = rawLink && typeof rawLink === "object" ? rawLink : {};
-      const fromSegmentId = String(
-        input.from_segment_id || input.fromSegmentId || "",
-      ).trim();
-      const toSegmentId = String(
-        input.to_segment_id || input.toSegmentId || "",
-      ).trim();
-      if (!fromSegmentId || !toSegmentId || fromSegmentId === toSegmentId) {
+    for (const rawLink of normalizeWalkLinks(group?.segmentAction || {})) {
+      const parsed = parseWalkLink(rawLink);
+      if (!parsed) {
         continue;
       }
 
-      let minWalkMinutes = Number.parseInt(
-        input.min_walk_minutes ?? input.minWalkMinutes ?? 0,
-        10,
-      );
-      if (!Number.isFinite(minWalkMinutes) || minWalkMinutes < 0) {
-        minWalkMinutes = 0;
-      }
-
-      const bidirectional = Boolean(input.bidirectional);
-      const metadata =
-        input.metadata && typeof input.metadata === "object"
-          ? { ...input.metadata }
-          : {};
       const baseMetadata = {
-        ...metadata,
+        ...parsed.metadata,
         group_label: group.groupLabel || "",
         operation: decision.operation,
       };
 
-      const forwardKey = `${fromSegmentId}|${toSegmentId}`;
+      const forwardKey = `${parsed.fromSegmentId}|${parsed.toSegmentId}`;
       if (!seen.has(forwardKey)) {
         seen.add(forwardKey);
         links.push({
-          fromSegmentId,
-          toSegmentId,
-          minWalkMinutes,
+          fromSegmentId: parsed.fromSegmentId,
+          toSegmentId: parsed.toSegmentId,
+          minWalkMinutes: parsed.minWalkMinutes,
           metadata: {
             ...baseMetadata,
-            bidirectional,
+            bidirectional: parsed.bidirectional,
           },
         });
       }
 
-      if (bidirectional) {
-        const reverseKey = `${toSegmentId}|${fromSegmentId}`;
+      if (parsed.bidirectional) {
+        const reverseKey = `${parsed.toSegmentId}|${parsed.fromSegmentId}`;
         if (!seen.has(reverseKey)) {
           seen.add(reverseKey);
           links.push({
-            fromSegmentId: toSegmentId,
-            toSegmentId: fromSegmentId,
-            minWalkMinutes,
+            fromSegmentId: parsed.toSegmentId,
+            toSegmentId: parsed.fromSegmentId,
+            minWalkMinutes: parsed.minWalkMinutes,
             metadata: {
               ...baseMetadata,
               bidirectional: true,

@@ -109,7 +109,7 @@ function createJobOrchestrator(options = {}) {
         ],
   );
 
-  async function runJob(input = {}) {
+  function validateRunJobInput(input = {}) {
     const jobType = String(input.jobType || "").trim();
     const idempotencyKey = String(input.idempotencyKey || "").trim();
     const runContext =
@@ -145,281 +145,331 @@ function createJobOrchestrator(options = {}) {
       });
     }
 
-    function resolveExistingJob(existingJob) {
-      if (!existingJob) {
-        return null;
-      }
+    return {
+      jobType,
+      idempotencyKey,
+      runContext,
+      maxAttempts,
+      maxConcurrent,
+      execute,
+      backoff: input.backoff || {},
+      jobId: input.jobId || crypto.randomUUID(),
+    };
+  }
 
-      if (existingJob.status === "running") {
-        logger.info("job idempotency reused in-flight job", {
-          jobType,
-          jobId: existingJob.jobId,
-          idempotencyKey,
-          status: existingJob.status,
-        });
-        return {
-          accepted: true,
-          reused: true,
-          inFlight: true,
-          job: existingJob,
-        };
-      }
+  function resolveExistingJob(existingJob, context) {
+    if (!existingJob) {
+      return null;
+    }
+    const { jobType, idempotencyKey } = context;
 
-      if (
-        existingJob.status === "queued" ||
-        existingJob.status === "retry_wait"
-      ) {
-        logger.info("job idempotency resumed pending job", {
-          jobType,
-          jobId: existingJob.jobId,
-          idempotencyKey,
-          status: existingJob.status,
-        });
-        return null;
-      }
+    if (existingJob.status === "running") {
+      logger.info("job idempotency reused in-flight job", {
+        jobType,
+        jobId: existingJob.jobId,
+        idempotencyKey,
+        status: existingJob.status,
+      });
+      return {
+        accepted: true,
+        reused: true,
+        inFlight: true,
+        job: existingJob,
+      };
+    }
 
-      if (existingJob.status === "succeeded") {
-        logger.info("job idempotency reused completed job", {
-          jobType,
-          jobId: existingJob.jobId,
-          idempotencyKey,
-        });
-        return {
-          accepted: true,
-          reused: true,
-          inFlight: false,
-          job: existingJob,
-        };
-      }
-
-      if (existingJob.status === "failed") {
-        logger.info("job idempotency reused failed job", {
-          jobType,
-          jobId: existingJob.jobId,
-          idempotencyKey,
-          errorCode: existingJob.errorCode || null,
-        });
-
-        throw new AppError({
-          code: existingJob.errorCode || "INTERNAL_ERROR",
-          message:
-            existingJob.errorMessage || `Job '${jobType}' previously failed`,
-          details: {
-            jobId: existingJob.jobId,
-            jobType,
-            idempotencyKey,
-            attempt: existingJob.attempt || 0,
-            reused: true,
-            terminalStatus: existingJob.status,
-          },
-        });
-      }
-
+    if (existingJob.status === "queued" || existingJob.status === "retry_wait") {
+      logger.info("job idempotency resumed pending job", {
+        jobType,
+        jobId: existingJob.jobId,
+        idempotencyKey,
+        status: existingJob.status,
+      });
       return null;
     }
 
-    let job = await jobsRepo.getByIdempotency(jobType, idempotencyKey);
-    const existingOutcome = resolveExistingJob(job);
-    if (existingOutcome) {
-      return existingOutcome;
-    }
-
-    const runningForType = await jobsRepo.countRunningByType(jobType);
-    if (runningForType >= maxConcurrent) {
-      throw new AppError({
-        code: "JOB_BACKPRESSURE",
-        message: `Backpressure active for jobType '${jobType}' (running=${runningForType}, limit=${maxConcurrent})`,
-        details: {
-          jobType,
-          running: runningForType,
-          limit: maxConcurrent,
-        },
+    if (existingJob.status === "succeeded") {
+      logger.info("job idempotency reused completed job", {
+        jobType,
+        jobId: existingJob.jobId,
+        idempotencyKey,
       });
+      return {
+        accepted: true,
+        reused: true,
+        inFlight: false,
+        job: existingJob,
+      };
     }
 
-    if (!job) {
-      const jobId = input.jobId || crypto.randomUUID();
-      try {
-        job = await jobsRepo.createQueuedJob({
-          jobId,
-          jobType,
-          idempotencyKey,
-          runContext,
-          checkpoint: {},
+    if (existingJob.status !== "failed") {
+      return null;
+    }
+
+    logger.info("job idempotency reused failed job", {
+      jobType,
+      jobId: existingJob.jobId,
+      idempotencyKey,
+      errorCode: existingJob.errorCode || null,
+    });
+
+    throw new AppError({
+      code: existingJob.errorCode || "INTERNAL_ERROR",
+      message: existingJob.errorMessage || `Job '${jobType}' previously failed`,
+      details: {
+        jobId: existingJob.jobId,
+        jobType,
+        idempotencyKey,
+        attempt: existingJob.attempt || 0,
+        reused: true,
+        terminalStatus: existingJob.status,
+      },
+    });
+  }
+
+  async function assertJobTypeCapacity(jobType, maxConcurrent) {
+    const runningForType = await jobsRepo.countRunningByType(jobType);
+    if (runningForType < maxConcurrent) {
+      return;
+    }
+    throw new AppError({
+      code: "JOB_BACKPRESSURE",
+      message: `Backpressure active for jobType '${jobType}' (running=${runningForType}, limit=${maxConcurrent})`,
+      details: {
+        jobType,
+        running: runningForType,
+        limit: maxConcurrent,
+      },
+    });
+  }
+
+  async function findOrCreateJob(context) {
+    let job = await jobsRepo.getByIdempotency(context.jobType, context.idempotencyKey);
+    const existingOutcome = resolveExistingJob(job, context);
+    if (existingOutcome) {
+      return { outcome: existingOutcome, job: null };
+    }
+
+    await assertJobTypeCapacity(context.jobType, context.maxConcurrent);
+    if (job) {
+      return { outcome: null, job };
+    }
+
+    try {
+      job = await jobsRepo.createQueuedJob({
+        jobId: context.jobId,
+        jobType: context.jobType,
+        idempotencyKey: context.idempotencyKey,
+        runContext: context.runContext,
+        checkpoint: {},
+      });
+      return { outcome: null, job };
+    } catch (err) {
+      if (!isDuplicateIdempotencyError(err)) {
+        throw err;
+      }
+      job = await jobsRepo.getByIdempotency(context.jobType, context.idempotencyKey);
+      const racedOutcome = resolveExistingJob(job, context);
+      if (racedOutcome) {
+        return { outcome: racedOutcome, job: null };
+      }
+      if (job) {
+        return { outcome: null, job };
+      }
+      throw err;
+    }
+  }
+
+  async function claimRunningJob(job, context, attempt) {
+    try {
+      return typeof jobsRepo.claimRunning === "function"
+        ? await jobsRepo.claimRunning({
+            jobId: job.jobId,
+            jobType: context.jobType,
+            attempt,
+            maxConcurrent: context.maxConcurrent,
+          })
+        : await jobsRepo.markRunning({ jobId: job.jobId, attempt });
+    } catch (err) {
+      if (!isRunningSlotConflictError(err)) {
+        throw err;
+      }
+      return null;
+    }
+  }
+
+  async function throwBackpressureForClaim(job, context) {
+    if (typeof jobsRepo.getById === "function") {
+      const latest = await jobsRepo.getById(job.jobId).catch(() => null);
+      const latestOutcome = resolveExistingJob(latest, context);
+      if (latestOutcome) {
+        return latestOutcome;
+      }
+    }
+
+    const currentRunning = await jobsRepo
+      .countRunningByType(context.jobType)
+      .catch(() => context.maxConcurrent);
+    throw new AppError({
+      code: "JOB_BACKPRESSURE",
+      message: `Backpressure active for jobType '${context.jobType}' (running=${currentRunning}, limit=${context.maxConcurrent})`,
+      details: {
+        jobId: job.jobId,
+        jobType: context.jobType,
+        running: currentRunning,
+        limit: context.maxConcurrent,
+      },
+    });
+  }
+
+  async function runSingleAttempt(job, context, attempt, checkpoint) {
+    logger.info("job attempt started", {
+      jobType: context.jobType,
+      jobId: job.jobId,
+      idempotencyKey: context.idempotencyKey,
+      attempt,
+    });
+
+    const result = await context.execute({
+      job,
+      attempt,
+      runContext: context.runContext,
+      checkpoint,
+      async updateCheckpoint(nextCheckpoint) {
+        const next =
+          nextCheckpoint && typeof nextCheckpoint === "object"
+            ? nextCheckpoint
+            : checkpoint;
+        await jobsRepo.updateCheckpoint({
+          jobId: job.jobId,
+          checkpoint: next,
         });
-      } catch (err) {
-        if (!isDuplicateIdempotencyError(err)) {
-          throw err;
+        if (next !== checkpoint) {
+          for (const key of Object.keys(checkpoint)) {
+            delete checkpoint[key];
+          }
+          Object.assign(checkpoint, next);
         }
+      },
+    });
 
-        job = await jobsRepo.getByIdempotency(jobType, idempotencyKey);
-        const racedOutcome = resolveExistingJob(job);
-        if (racedOutcome) {
-          return racedOutcome;
-        }
+    const succeededJob = await jobsRepo.markSucceeded({
+      jobId: job.jobId,
+      resultContext:
+        result && typeof result === "object"
+          ? result
+          : {
+              result,
+            },
+    });
 
-        if (!job) {
-          throw err;
-        }
-      }
+    logger.info("job attempt succeeded", {
+      jobType: context.jobType,
+      jobId: succeededJob.jobId,
+      idempotencyKey: context.idempotencyKey,
+      attempt,
+    });
+
+    return {
+      accepted: true,
+      reused: false,
+      inFlight: false,
+      job: succeededJob,
+    };
+  }
+
+  async function handleAttemptFailure(err, job, context, attempt) {
+    const appErr = toAppError(err);
+    const transient = isTransientError(err, transientCodes);
+
+    if (transient && attempt < context.maxAttempts) {
+      const retryJob = await jobsRepo.markRetryWait({
+        jobId: job.jobId,
+        errorCode: appErr.code,
+        errorMessage: appErr.message,
+      });
+
+      const delayMs = computeBackoffMs(attempt, context.backoff);
+      logger.warn("job attempt failed with transient error; retry scheduled", {
+        jobType: context.jobType,
+        jobId: retryJob.jobId,
+        idempotencyKey: context.idempotencyKey,
+        attempt,
+        errorCode: appErr.code,
+        delayMs,
+      });
+      await sleep(delayMs);
+      return {
+        shouldRetry: true,
+        job: retryJob,
+      };
     }
 
+    const failedJob = await jobsRepo.markFailed({
+      jobId: job.jobId,
+      errorCode: appErr.code,
+      errorMessage: appErr.message,
+    });
+
+    logger.error("job failed", {
+      jobType: context.jobType,
+      jobId: failedJob.jobId,
+      idempotencyKey: context.idempotencyKey,
+      attempt,
+      errorCode: appErr.code,
+    });
+
+    throw new AppError({
+      code: appErr.code,
+      message: appErr.message,
+      details: {
+        jobId: failedJob.jobId,
+        jobType: context.jobType,
+        idempotencyKey: context.idempotencyKey,
+        attempt,
+      },
+      cause: appErr,
+    });
+  }
+
+  async function runJob(input = {}) {
+    const context = validateRunJobInput(input);
+    const { outcome, job: initialJob } = await findOrCreateJob(context);
+    if (outcome) {
+      return outcome;
+    }
+
+    let job = initialJob;
     let attempt = Math.max(0, job.attempt || 0);
-    let checkpoint = job.checkpoint || {};
+    let checkpoint = { ...(job.checkpoint || {}) };
 
-    while (attempt < maxAttempts) {
+    while (attempt < context.maxAttempts) {
       attempt += 1;
-      const jobId = job.jobId;
-      let runningJob = null;
-
-      try {
-        runningJob =
-          typeof jobsRepo.claimRunning === "function"
-            ? await jobsRepo.claimRunning({
-                jobId,
-                jobType,
-                attempt,
-                maxConcurrent,
-              })
-            : await jobsRepo.markRunning({ jobId, attempt });
-      } catch (err) {
-        if (!isRunningSlotConflictError(err)) {
-          throw err;
-        }
-      }
+      const runningJob = await claimRunningJob(job, context, attempt);
 
       if (!runningJob) {
-        if (typeof jobsRepo.getById === "function") {
-          const latest = await jobsRepo.getById(jobId).catch(() => null);
-          const latestOutcome = resolveExistingJob(latest);
-          if (latestOutcome) {
-            return latestOutcome;
-          }
+        const backpressureOutcome = await throwBackpressureForClaim(job, context);
+        if (backpressureOutcome) {
+          return backpressureOutcome;
         }
-
-        const currentRunning = await jobsRepo
-          .countRunningByType(jobType)
-          .catch(() => maxConcurrent);
-        throw new AppError({
-          code: "JOB_BACKPRESSURE",
-          message: `Backpressure active for jobType '${jobType}' (running=${currentRunning}, limit=${maxConcurrent})`,
-          details: {
-            jobId,
-            jobType,
-            running: currentRunning,
-            limit: maxConcurrent,
-          },
-        });
       }
 
       job = runningJob;
 
       try {
-        logger.info("job attempt started", {
-          jobType,
-          jobId: job.jobId,
-          idempotencyKey,
-          attempt,
-        });
-
-        const result = await execute({
-          job,
-          attempt,
-          runContext,
-          checkpoint,
-          async updateCheckpoint(nextCheckpoint) {
-            checkpoint =
-              nextCheckpoint && typeof nextCheckpoint === "object"
-                ? nextCheckpoint
-                : checkpoint;
-            await jobsRepo.updateCheckpoint({
-              jobId: job.jobId,
-              checkpoint,
-            });
-          },
-        });
-
-        job = await jobsRepo.markSucceeded({
-          jobId: job.jobId,
-          resultContext:
-            result && typeof result === "object"
-              ? result
-              : {
-                  result,
-                },
-        });
-
-        logger.info("job attempt succeeded", {
-          jobType,
-          jobId: job.jobId,
-          idempotencyKey,
-          attempt,
-        });
-
-        return {
-          accepted: true,
-          reused: false,
-          inFlight: false,
-          job,
-        };
+        return await runSingleAttempt(job, context, attempt, checkpoint);
       } catch (err) {
-        const appErr = toAppError(err);
-        const transient = isTransientError(err, transientCodes);
-
-        if (transient && attempt < maxAttempts) {
-          job = await jobsRepo.markRetryWait({
-            jobId: job.jobId,
-            errorCode: appErr.code,
-            errorMessage: appErr.message,
-          });
-
-          const delayMs = computeBackoffMs(attempt, input.backoff || {});
-          logger.warn(
-            "job attempt failed with transient error; retry scheduled",
-            {
-              jobType,
-              jobId: job.jobId,
-              idempotencyKey,
-              attempt,
-              errorCode: appErr.code,
-              delayMs,
-            },
-          );
-          await sleep(delayMs);
+        const retry = await handleAttemptFailure(err, job, context, attempt);
+        if (retry?.shouldRetry) {
+          job = retry.job;
           continue;
         }
-
-        job = await jobsRepo.markFailed({
-          jobId: job.jobId,
-          errorCode: appErr.code,
-          errorMessage: appErr.message,
-        });
-
-        logger.error("job failed", {
-          jobType,
-          jobId: job.jobId,
-          idempotencyKey,
-          attempt,
-          errorCode: appErr.code,
-        });
-
-        throw new AppError({
-          code: appErr.code,
-          message: appErr.message,
-          details: {
-            jobId: job.jobId,
-            jobType,
-            idempotencyKey,
-            attempt,
-          },
-          cause: appErr,
-        });
       }
     }
 
     throw new AppError({
       code: "INTERNAL_ERROR",
-      message: `Job '${jobType}' exceeded max attempts without terminal result`,
+      message: `Job '${context.jobType}' exceeded max attempts without terminal result`,
     });
   }
 

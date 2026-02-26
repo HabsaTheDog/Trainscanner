@@ -304,148 +304,199 @@ async function waitForMotisReady(config, logger) {
   return { ok: false, health: lastHealth };
 }
 
+const DEFAULT_PLAN_PATHS = [
+  "/api/v5/plan",
+  "/v5/plan",
+  "/api/v4/plan",
+  "/v4/plan",
+  "/api/v3/plan",
+  "/v3/plan",
+  "/api/v2/plan",
+  "/v2/plan",
+  "/api/v1/plan",
+  "/v1/plan",
+  "/api/plan",
+  "/plan",
+];
+
+const QUERY_VARIANTS = [
+  (from, to, t) => ({
+    fromPlace: from,
+    toPlace: to,
+    time: t,
+    detailedTransfers: true,
+  }),
+  (from, to, t) => ({
+    fromPlace: from,
+    toPlace: to,
+    time: t,
+    detailed_transfers: true,
+  }),
+  (from, to, t) => ({
+    from_place: from,
+    to_place: to,
+    time: t,
+    detailed_transfers: true,
+  }),
+  (from, to, t) => ({
+    from,
+    to,
+    time: t,
+    detailed_transfers: true,
+  }),
+  (from, to, t) => ({
+    from,
+    to,
+    departure_time: t,
+    detailed_transfers: true,
+  }),
+  (from, to, t) => ({
+    from,
+    to,
+    departureTime: t,
+    detailed_transfers: true,
+  }),
+];
+
+function toConfiguredPlanPath(config) {
+  return config.motisRoutePath.startsWith("/")
+    ? config.motisRoutePath
+    : `/${config.motisRoutePath}`;
+}
+
+function buildPlanPaths(config) {
+  return uniqueList([toConfiguredPlanPath(config), ...DEFAULT_PLAN_PATHS]);
+}
+
+function addRequestAttempt(attempts, attempt) {
+  attempts.push({
+    method: "GET",
+    ...attempt,
+  });
+}
+
+function withRouteMeta(response, routePath) {
+  return {
+    ...response,
+    routePath,
+    routeMethod: "GET",
+  };
+}
+
+async function probePlanPath(config, planPath, attempts) {
+  const probeUrl = new URL(joinUrl(config.motisBaseUrl, planPath));
+  const probe = await requestJson(
+    probeUrl.toString(),
+    { method: "GET" },
+    config.motisRequestTimeoutMs,
+  );
+  addRequestAttempt(attempts, {
+    path: planPath,
+    params: {},
+    status: probe.status,
+    probe: true,
+  });
+  return probe;
+}
+
+async function tryRouteRequestsForPath({
+  config,
+  planPath,
+  originCandidates,
+  destinationCandidates,
+  datetime,
+  attempts,
+}) {
+  let firstNonNotFound = null;
+  let firstRouteNotFound = null;
+
+  for (const origin of originCandidates) {
+    for (const destination of destinationCandidates) {
+      for (const buildParams of QUERY_VARIANTS) {
+        const params = buildParams(origin, destination, datetime);
+        const url = new URL(joinUrl(config.motisBaseUrl, planPath));
+        for (const [key, value] of Object.entries(params)) {
+          url.searchParams.set(key, value);
+        }
+
+        const response = await requestJson(
+          url.toString(),
+          { method: "GET" },
+          config.motisRequestTimeoutMs,
+        );
+        addRequestAttempt(attempts, {
+          path: planPath,
+          params,
+          status: response.status,
+        });
+
+        if (response.ok) {
+          return {
+            success: {
+              ...response,
+              routePath: planPath,
+              routeMethod: "GET",
+              routeAttempts: attempts,
+            },
+            firstRouteNotFound,
+            firstNonNotFound,
+          };
+        }
+
+        if (response.status === 404 && isEndpointNotFound(response)) {
+          if (!firstRouteNotFound) {
+            firstRouteNotFound = withRouteMeta(response, planPath);
+          }
+          continue;
+        }
+
+        if (!firstNonNotFound) {
+          firstNonNotFound = withRouteMeta(response, planPath);
+        }
+      }
+    }
+  }
+
+  return {
+    success: null,
+    firstRouteNotFound,
+    firstNonNotFound,
+  };
+}
+
 async function queryMotisRoute(config, payload) {
   const originCandidates = stationCandidates(payload.origin);
   const destinationCandidates = stationCandidates(payload.destination);
   const datetime = String(payload.datetime || "").trim();
-
-  const defaultPlanPaths = [
-    "/api/v5/plan",
-    "/v5/plan",
-    "/api/v4/plan",
-    "/v4/plan",
-    "/api/v3/plan",
-    "/v3/plan",
-    "/api/v2/plan",
-    "/v2/plan",
-    "/api/v1/plan",
-    "/v1/plan",
-    "/api/plan",
-    "/plan",
-  ];
-
-  const configuredPath = config.motisRoutePath.startsWith("/")
-    ? config.motisRoutePath
-    : `/${config.motisRoutePath}`;
-  const planPaths = uniqueList([configuredPath, ...defaultPlanPaths]);
+  const configuredPath = toConfiguredPlanPath(config);
+  const planPaths = buildPlanPaths(config);
 
   const attempts = [];
   let firstNonNotFound = null;
   let firstRouteNotFound = null;
 
   for (const planPath of planPaths) {
-    // Probe endpoint existence without params.
-    const probeUrl = new URL(joinUrl(config.motisBaseUrl, planPath));
-    const probe = await requestJson(
-      probeUrl.toString(),
-      { method: "GET" },
-      config.motisRequestTimeoutMs,
-    );
-    attempts.push({
-      method: "GET",
-      path: planPath,
-      params: {},
-      status: probe.status,
-      probe: true,
-    });
-
-    // Missing endpoint: skip to next path.
+    const probe = await probePlanPath(config, planPath, attempts);
     if (probe.status === 404 && isEndpointNotFound(probe)) {
       continue;
     }
 
-    const queryVariants = [
-      // MOTIS instance in this stack responds to camelCase place params.
-      (from, to, t) => ({
-        fromPlace: from,
-        toPlace: to,
-        time: t,
-        detailedTransfers: true,
-      }),
-      (from, to, t) => ({
-        fromPlace: from,
-        toPlace: to,
-        time: t,
-        detailed_transfers: true,
-      }),
-      // Alternate styles for compatibility across builds.
-      (from, to, t) => ({
-        from_place: from,
-        to_place: to,
-        time: t,
-        detailed_transfers: true,
-      }),
-      (from, to, t) => ({
-        from: from,
-        to: to,
-        time: t,
-        detailed_transfers: true,
-      }),
-      (from, to, t) => ({
-        from: from,
-        to: to,
-        departure_time: t,
-        detailed_transfers: true,
-      }),
-      (from, to, t) => ({
-        from: from,
-        to: to,
-        departureTime: t,
-        detailed_transfers: true,
-      }),
-    ];
-
-    for (const origin of originCandidates) {
-      for (const destination of destinationCandidates) {
-        for (const buildParams of queryVariants) {
-          const params = buildParams(origin, destination, datetime);
-          const url = new URL(joinUrl(config.motisBaseUrl, planPath));
-          for (const [key, value] of Object.entries(params)) {
-            url.searchParams.set(key, value);
-          }
-
-          const response = await requestJson(
-            url.toString(),
-            { method: "GET" },
-            config.motisRequestTimeoutMs,
-          );
-          attempts.push({
-            method: "GET",
-            path: planPath,
-            params,
-            status: response.status,
-          });
-
-          if (response.ok) {
-            return {
-              ...response,
-              routePath: planPath,
-              routeMethod: "GET",
-              routeAttempts: attempts,
-            };
-          }
-
-          if (response.status === 404 && isEndpointNotFound(response)) {
-            // Endpoint exists (probe succeeded), so this is likely "no route found".
-            if (!firstRouteNotFound) {
-              firstRouteNotFound = {
-                ...response,
-                routePath: planPath,
-                routeMethod: "GET",
-              };
-            }
-            continue;
-          }
-
-          if (!firstNonNotFound) {
-            firstNonNotFound = {
-              ...response,
-              routePath: planPath,
-              routeMethod: "GET",
-            };
-          }
-        }
-      }
+    const result = await tryRouteRequestsForPath({
+      config,
+      planPath,
+      originCandidates,
+      destinationCandidates,
+      datetime,
+      attempts,
+    });
+    if (result.success) {
+      return result.success;
+    }
+    if (!firstRouteNotFound && result.firstRouteNotFound) {
+      firstRouteNotFound = result.firstRouteNotFound;
+    }
+    if (!firstNonNotFound && result.firstNonNotFound) {
+      firstNonNotFound = result.firstNonNotFound;
     }
   }
 
