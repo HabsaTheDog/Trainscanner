@@ -7,56 +7,53 @@ CREATE TABLE IF NOT EXISTS qa_cluster_scoring_config_v2 (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE OR REPLACE FUNCTION qa_jsonb_is_array(p_value jsonb)
+RETURNS boolean
+LANGUAGE sql
+IMMUTABLE
+AS $$
+  SELECT COALESCE(jsonb_typeof(p_value) = 'array', false);
+$$;
+
+CREATE OR REPLACE FUNCTION qa_jsonb_array_or_empty(p_value jsonb)
+RETURNS jsonb
+LANGUAGE sql
+IMMUTABLE
+AS $$
+  SELECT CASE WHEN qa_jsonb_is_array(p_value) THEN p_value ELSE '[]'::jsonb END;
+$$;
+
+CREATE OR REPLACE FUNCTION qa_is_iso_country_code(p_country text)
+RETURNS boolean
+LANGUAGE sql
+IMMUTABLE
+AS $$
+  SELECT char_length(COALESCE(p_country, '')) = 2
+    AND p_country = upper(p_country);
+$$;
+
 INSERT INTO qa_cluster_scoring_config_v2 (scope_key, config)
-VALUES
-  (
-    'default',
-    jsonb_build_object(
-      'name_similarity_weight', 0.35,
-      'distance_weight', 0.25,
-      'hard_id_weight', 0.20,
-      'provider_overlap_weight', 0.10,
-      'service_overlap_weight', 0.10,
-      'distance_threshold_meters', 1500,
-      'max_cluster_candidates', 40
-    )
-  ),
-  (
-    'DE',
-    jsonb_build_object(
-      'name_similarity_weight', 0.35,
-      'distance_weight', 0.25,
-      'hard_id_weight', 0.20,
-      'provider_overlap_weight', 0.10,
-      'service_overlap_weight', 0.10,
-      'distance_threshold_meters', 1500,
-      'max_cluster_candidates', 40
-    )
-  ),
-  (
-    'AT',
-    jsonb_build_object(
-      'name_similarity_weight', 0.35,
-      'distance_weight', 0.25,
-      'hard_id_weight', 0.20,
-      'provider_overlap_weight', 0.10,
-      'service_overlap_weight', 0.10,
-      'distance_threshold_meters', 1500,
-      'max_cluster_candidates', 40
-    )
-  ),
-  (
-    'CH',
-    jsonb_build_object(
-      'name_similarity_weight', 0.35,
-      'distance_weight', 0.25,
-      'hard_id_weight', 0.20,
-      'provider_overlap_weight', 0.10,
-      'service_overlap_weight', 0.10,
-      'distance_threshold_meters', 1500,
-      'max_cluster_candidates', 40
-    )
-  )
+SELECT
+  v.scope_key,
+  seed_config.config
+FROM (
+  VALUES
+    ('default'),
+    ('DE'),
+    ('AT'),
+    ('CH')
+) AS v(scope_key)
+CROSS JOIN (
+  SELECT jsonb_build_object(
+    'name_similarity_weight', 0.35,
+    'distance_weight', 0.25,
+    'hard_id_weight', 0.20,
+    'provider_overlap_weight', 0.10,
+    'service_overlap_weight', 0.10,
+    'distance_threshold_meters', 1500,
+    'max_cluster_candidates', 40
+  ) AS config
+) AS seed_config
 ON CONFLICT (scope_key) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS qa_station_naming_overrides_v2 (
@@ -73,7 +70,7 @@ CREATE TABLE IF NOT EXISTS qa_station_naming_overrides_v2 (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CHECK (display_name <> ''),
-  CHECK (jsonb_typeof(aliases) = 'array')
+  CHECK (qa_jsonb_is_array(aliases))
 );
 
 CREATE INDEX IF NOT EXISTS idx_qa_station_naming_overrides_v2_station
@@ -92,7 +89,7 @@ CREATE TABLE IF NOT EXISTS qa_station_display_names_v2 (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CHECK (display_name <> ''),
-  CHECK (jsonb_typeof(aliases) = 'array')
+  CHECK (qa_jsonb_is_array(aliases))
 );
 
 CREATE INDEX IF NOT EXISTS idx_qa_station_display_names_v2_lookup
@@ -100,7 +97,7 @@ CREATE INDEX IF NOT EXISTS idx_qa_station_display_names_v2_lookup
 
 CREATE TABLE IF NOT EXISTS qa_station_complexes_v2 (
   complex_id text PRIMARY KEY,
-  country char(2) NOT NULL CHECK (country ~ '^[A-Z]{2}$'),
+  country char(2) NOT NULL CHECK (qa_is_iso_country_code(country)),
   complex_name text NOT NULL,
   display_name text,
   metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -157,7 +154,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_qa_station_segment_links_v2_unique
 
 CREATE TABLE IF NOT EXISTS canonical_line_identities_v2 (
   line_identity_id text PRIMARY KEY,
-  country char(2) NOT NULL CHECK (country ~ '^[A-Z]{2}$'),
+  country char(2) NOT NULL CHECK (qa_is_iso_country_code(country)),
   provider_id text,
   line_code text,
   line_name text,
@@ -184,10 +181,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_station_segment_line_links_v2_unique
 CREATE TABLE IF NOT EXISTS qa_station_clusters_v2 (
   cluster_id text PRIMARY KEY,
   cluster_key text NOT NULL UNIQUE,
-  country char(2) NOT NULL CHECK (country ~ '^[A-Z]{2}$'),
+  country char(2) NOT NULL CHECK (qa_is_iso_country_code(country)),
   scope_tag text NOT NULL,
   scope_as_of date,
-  severity text NOT NULL CHECK (severity IN ('low', 'medium', 'high')),
+  severity text NOT NULL CHECK (severity ~ '^(low|medium|high)$'),
   status text NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'in_review', 'resolved', 'dismissed')),
   candidate_count integer NOT NULL DEFAULT 0 CHECK (candidate_count >= 0),
   issue_count integer NOT NULL DEFAULT 0 CHECK (issue_count >= 0),
@@ -221,7 +218,7 @@ CREATE TABLE IF NOT EXISTS qa_station_cluster_candidates_v2 (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (cluster_id, canonical_station_id),
-  CHECK (jsonb_typeof(aliases) = 'array')
+  CHECK (qa_jsonb_is_array(aliases))
 );
 
 CREATE INDEX IF NOT EXISTS idx_qa_station_cluster_candidates_v2_rank
@@ -303,6 +300,9 @@ LANGUAGE plpgsql
 AS $$
 DECLARE
   v_count integer := 0;
+  v_default_naming_strategy constant text := 'canonical_name';
+  v_source_ref_canonical_name_key constant text := v_default_naming_strategy;
+  v_source_ref_country_key constant text := 'country';
 BEGIN
   INSERT INTO qa_station_display_names_v2 (
     canonical_station_id,
@@ -322,12 +322,12 @@ BEGIN
     COALESCE(NULLIF(ov.locale, ''), 'und') AS locale,
     CASE
       WHEN ov.naming_override_id IS NOT NULL THEN 'manual_override'
-      ELSE 'canonical_name'
+      ELSE v_default_naming_strategy
     END AS naming_strategy,
     COALESCE(NULLIF(ov.reason, ''), 'Derived from canonical station aggregate') AS naming_reason,
     jsonb_build_object(
-      'canonical_name', cs.canonical_name,
-      'country', cs.country,
+      v_source_ref_canonical_name_key, cs.canonical_name,
+      v_source_ref_country_key, cs.country,
       'override_id', ov.naming_override_id
     ) AS source_refs,
     COALESCE(
@@ -398,6 +398,12 @@ DECLARE
   v_scope_tag text := COALESCE(to_char(p_as_of, 'YYYY-MM-DD'), 'latest');
   v_country text := upper(COALESCE(p_country, ''));
   v_detected integer := 0;
+  v_country_key constant text := 'country';
+  v_lines_key constant text := 'lines';
+  v_default_naming_strategy constant text := 'canonical_name';
+  v_source_ref_canonical_name_key constant text := v_default_naming_strategy;
+  v_max_cluster_candidates_key constant text := 'max_cluster_candidates';
+  v_distance_threshold_meters_key constant text := 'distance_threshold_meters';
 BEGIN
   PERFORM qa_refresh_station_display_names_v2(NULLIF(v_country, ''));
 
@@ -421,7 +427,7 @@ BEGIN
   IF (SELECT COUNT(*) FROM _issue_scope_v2) = 0 THEN
     RETURN jsonb_build_object(
       'scopeTag', v_scope_tag,
-      'country', NULLIF(v_country, ''),
+      v_country_key, NULLIF(v_country, ''),
       'clusters', 0,
       'candidates', 0,
       'issues', 0
@@ -541,7 +547,7 @@ BEGIN
         ) x
       ) expanded
       ORDER BY canonical_station_id
-      LIMIT COALESCE((qa_effective_scoring_config_v2(s.country) ->> 'max_cluster_candidates')::integer, 40)
+      LIMIT COALESCE((qa_effective_scoring_config_v2(s.country) ->> v_max_cluster_candidates_key)::integer, 40)
     ) AS station_ids
   FROM _issue_station_sets_v2 s;
 
@@ -745,7 +751,7 @@ BEGIN
     COALESCE(dn.display_name, cs.canonical_name) AS display_name,
     jsonb_build_object(
       'locale', COALESCE(dn.locale, 'und'),
-      'strategy', COALESCE(dn.naming_strategy, 'canonical_name'),
+      'strategy', COALESCE(dn.naming_strategy, v_default_naming_strategy),
       'reason', COALESCE(dn.naming_reason, 'Derived from canonical station aggregate'),
       'source_refs', COALESCE(dn.source_refs, '{}'::jsonb)
     ) AS naming,
@@ -799,18 +805,18 @@ BEGIN
           UNION ALL
           SELECT raw_payload ->> 'trip' AS value FROM src
           UNION ALL
-          SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof(raw_payload -> 'lines') = 'array' THEN raw_payload -> 'lines' ELSE '[]'::jsonb END) FROM src
+          SELECT jsonb_array_elements_text(qa_jsonb_array_or_empty(raw_payload -> v_lines_key)) FROM src
           UNION ALL
-          SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof(raw_payload -> 'routes') = 'array' THEN raw_payload -> 'routes' ELSE '[]'::jsonb END) FROM src
+          SELECT jsonb_array_elements_text(qa_jsonb_array_or_empty(raw_payload -> 'routes')) FROM src
           UNION ALL
-          SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof(raw_payload -> 'services') = 'array' THEN raw_payload -> 'services' ELSE '[]'::jsonb END) FROM src
+          SELECT jsonb_array_elements_text(qa_jsonb_array_or_empty(raw_payload -> 'services')) FROM src
           UNION ALL
-          SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof(raw_payload -> 'trips') = 'array' THEN raw_payload -> 'trips' ELSE '[]'::jsonb END) FROM src
+          SELECT jsonb_array_elements_text(qa_jsonb_array_or_empty(raw_payload -> 'trips')) FROM src
         ) v
         WHERE NULLIF(v.value, '') IS NOT NULL
       )
       SELECT jsonb_build_object(
-        'lines', COALESCE((SELECT jsonb_agg(l.line ORDER BY l.line) FROM lines l), '[]'::jsonb),
+        v_lines_key, COALESCE((SELECT jsonb_agg(l.line ORDER BY l.line) FROM lines l), '[]'::jsonb),
         'incoming', '[]'::jsonb,
         'outgoing', '[]'::jsonb,
         'completeness', jsonb_build_object(
@@ -852,7 +858,7 @@ BEGIN
       LIMIT 1
     ) AS segment_context,
     jsonb_build_object(
-      'canonical_name', cs.canonical_name,
+      v_source_ref_canonical_name_key, cs.canonical_name,
       'match_method', cs.match_method,
       'member_count', cs.member_count
     ) AS metadata,
@@ -925,11 +931,11 @@ BEGIN
     'distance_proximity',
     CASE
       WHEN d.dist_m IS NULL THEN NULL
-      ELSE GREATEST(0::numeric, LEAST(1::numeric, 1 - (d.dist_m / GREATEST(1, COALESCE((qa_effective_scoring_config_v2(cl.country) ->> 'distance_threshold_meters')::numeric, 1500)))))
+      ELSE GREATEST(0::numeric, LEAST(1::numeric, 1 - (d.dist_m / GREATEST(1, COALESCE((qa_effective_scoring_config_v2(cl.country) ->> v_distance_threshold_meters_key)::numeric, 1500)))))
     END,
     jsonb_build_object(
       'distance_meters', d.dist_m,
-      'threshold_meters', COALESCE((qa_effective_scoring_config_v2(cl.country) ->> 'distance_threshold_meters')::integer, 1500)
+      'threshold_meters', COALESCE((qa_effective_scoring_config_v2(cl.country) ->> v_distance_threshold_meters_key)::integer, 1500)
     ),
     now()
   FROM (
@@ -1076,8 +1082,8 @@ BEGIN
       b.canonical_station_id AS target_station_id,
       ARRAY(
         SELECT DISTINCT l1.value
-        FROM jsonb_array_elements_text(COALESCE(a.service_context -> 'lines', '[]'::jsonb)) l1(value)
-        JOIN jsonb_array_elements_text(COALESCE(b.service_context -> 'lines', '[]'::jsonb)) l2(value)
+        FROM jsonb_array_elements_text(qa_jsonb_array_or_empty(a.service_context -> v_lines_key)) l1(value)
+        JOIN jsonb_array_elements_text(qa_jsonb_array_or_empty(b.service_context -> v_lines_key)) l2(value)
           ON l2.value = l1.value
         ORDER BY l1.value
       ) AS shared_lines,
@@ -1085,8 +1091,8 @@ BEGIN
         SELECT COUNT(*)
         FROM (
           SELECT DISTINCT l1.value
-          FROM jsonb_array_elements_text(COALESCE(a.service_context -> 'lines', '[]'::jsonb)) l1(value)
-          JOIN jsonb_array_elements_text(COALESCE(b.service_context -> 'lines', '[]'::jsonb)) l2(value)
+          FROM jsonb_array_elements_text(qa_jsonb_array_or_empty(a.service_context -> v_lines_key)) l1(value)
+          JOIN jsonb_array_elements_text(qa_jsonb_array_or_empty(b.service_context -> v_lines_key)) l2(value)
             ON l2.value = l1.value
         ) x
       ) AS overlap_count
@@ -1144,7 +1150,7 @@ BEGIN
 
   RETURN jsonb_build_object(
     'scopeTag', v_scope_tag,
-    'country', NULLIF(v_country, ''),
+    v_country_key, NULLIF(v_country, ''),
     'clusters', v_detected,
     'candidates', (
       SELECT COUNT(*)

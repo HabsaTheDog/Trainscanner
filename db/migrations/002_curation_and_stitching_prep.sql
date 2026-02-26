@@ -97,7 +97,7 @@ CREATE INDEX IF NOT EXISTS idx_canonical_station_overrides_target
 
 CREATE TABLE IF NOT EXISTS station_transfer_rules (
   rule_id bigserial PRIMARY KEY,
-  rule_scope text NOT NULL CHECK (rule_scope IN ('country_default', 'hub', 'station')),
+  rule_scope text NOT NULL CHECK (rule_scope ~ '^(country_default|hub|station)$'),
   country char(2) NOT NULL CHECK (country IN ('DE', 'AT', 'CH')),
   canonical_station_id text,
   hub_name text,

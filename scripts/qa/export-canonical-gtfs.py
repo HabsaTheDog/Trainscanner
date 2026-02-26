@@ -78,6 +78,11 @@ LOCAL_PATTERNS = [
     re.compile(r"\bbus\b"),
 ]
 
+LOCAL_SECTION_TYPES = {"subway", "tram", "bus"}
+REGIONAL_SECTION_TYPES = {"main", "secondary"}
+LOCAL_ROUTE_TYPE_HINTS = {0, 1, 3, 4, 5, 6, 7, 11, 12}
+REGIONAL_ROUTE_TYPE_HINTS = {2, 100, 101, 102, 103, 106, 107}
+
 
 def fail(msg: str) -> NoReturn:
     print(f"[export-canonical-gtfs] ERROR: {msg}", file=sys.stderr)
@@ -214,168 +219,144 @@ def load_rows_from_csv(path: str):
         return list(reader)
 
 
-def run_psql_csv(query: str):
-    def _run_command(cmd, *, env=None, cwd=None):
-        return subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            check=True,
-            env=env,
-            cwd=cwd,
-        )
+def _run_command(cmd, *, env=None, cwd=None):
+    return subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        check=True,
+        env=env,
+        cwd=cwd,
+    )
 
-    def _format_error(err):
-        if isinstance(err, FileNotFoundError):
-            return str(err)
-        stderr = (getattr(err, "stderr", "") or "").strip()
-        stdout = (getattr(err, "stdout", "") or "").strip()
-        return stderr or stdout or str(err)
 
-    def _run_direct_psql():
-        if shutil.which("psql") is None:
-            raise FileNotFoundError("psql")
+def _format_error(err):
+    if isinstance(err, FileNotFoundError):
+        return str(err)
+    stderr = (getattr(err, "stderr", "") or "").strip()
+    stdout = (getattr(err, "stdout", "") or "").strip()
+    return stderr or stdout or str(err)
 
-        db_url = (
-            os.environ.get("CANONICAL_DB_URL") or os.environ.get("DATABASE_URL") or ""
-        ).strip()
-        db_host = (
-            os.environ.get("CANONICAL_DB_HOST")
-            or os.environ.get("PGHOST")
-            or "localhost"
-        ).strip()
-        db_port = (
-            os.environ.get("CANONICAL_DB_PORT") or os.environ.get("PGPORT") or "5432"
-        ).strip()
-        db_user = (
-            os.environ.get("CANONICAL_DB_USER")
-            or os.environ.get("PGUSER")
-            or "trainscanner"
-        ).strip()
-        db_name = (
-            os.environ.get("CANONICAL_DB_NAME")
-            or os.environ.get("PGDATABASE")
-            or "trainscanner"
-        ).strip()
-        db_password = (
-            os.environ.get("CANONICAL_DB_PASSWORD")
-            or os.environ.get("PGPASSWORD")
-            or "trainscanner"
-        )
 
-        if db_url:
-            cmd = ["psql", db_url, "-X", "-v", PSQL_ON_ERROR_STOP, "--csv", "-c", query]
-        else:
-            cmd = [
-                "psql",
-                "-X",
-                "-h",
-                db_host,
-                "-p",
-                db_port,
-                "-U",
-                db_user,
-                "-d",
-                db_name,
-                "-v",
-                PSQL_ON_ERROR_STOP,
-                "--csv",
-                "-c",
-                query,
-            ]
+def _parse_psql_csv(content: str):
+    reader = csv.DictReader(io.StringIO(content))
+    fieldnames = reader.fieldnames
+    if not fieldnames:
+        fail("database export query did not return CSV header")
+    missing = REQUIRED_COLUMNS - set(fieldnames)
+    if missing:
+        fail("database export query missing required columns: " + ", ".join(sorted(missing)))
+    return list(reader)
 
-        env = dict(os.environ)
-        env["PGPASSWORD"] = db_password
-        return _run_command(cmd, env=env)
 
-    def _run_docker_psql():
-        if shutil.which("docker") is None:
-            raise FileNotFoundError("docker")
+def _run_direct_psql(query: str):
+    if shutil.which("psql") is None:
+        raise FileNotFoundError("psql")
 
-        docker_profile = (
-            os.environ.get("CANONICAL_DB_DOCKER_PROFILE") or "dach-data"
-        ).strip()
-        docker_service = (
-            os.environ.get("CANONICAL_DB_DOCKER_SERVICE") or "postgis"
-        ).strip()
-        db_user = (os.environ.get("CANONICAL_DB_USER") or "trainscanner").strip()
-        db_name = (os.environ.get("CANONICAL_DB_NAME") or "trainscanner").strip()
+    db_url = (os.environ.get("CANONICAL_DB_URL") or os.environ.get("DATABASE_URL") or "").strip()
+    db_host = (os.environ.get("CANONICAL_DB_HOST") or os.environ.get("PGHOST") or "localhost").strip()
+    db_port = (os.environ.get("CANONICAL_DB_PORT") or os.environ.get("PGPORT") or "5432").strip()
+    db_user = (os.environ.get("CANONICAL_DB_USER") or os.environ.get("PGUSER") or "trainscanner").strip()
+    db_name = (os.environ.get("CANONICAL_DB_NAME") or os.environ.get("PGDATABASE") or "trainscanner").strip()
+    db_password = os.environ.get("CANONICAL_DB_PASSWORD") or os.environ.get("PGPASSWORD") or "trainscanner"
 
-        up_cmd = [
-            "docker",
-            "compose",
-            "--profile",
-            docker_profile,
-            "up",
-            "-d",
-            docker_service,
-        ]
-        _run_command(up_cmd, cwd=str(ROOT_DIR))
-
+    if db_url:
+        cmd = ["psql", db_url, "-X", "-v", PSQL_ON_ERROR_STOP, "--csv", "-c", query]
+    else:
         cmd = [
-            "docker",
-            "compose",
-            "--profile",
-            docker_profile,
-            "exec",
-            "-T",
-            docker_service,
             "psql",
-            "-v",
-            PSQL_ON_ERROR_STOP,
+            "-X",
+            "-h",
+            db_host,
+            "-p",
+            db_port,
             "-U",
             db_user,
             "-d",
             db_name,
+            "-v",
+            PSQL_ON_ERROR_STOP,
             "--csv",
             "-c",
             query,
         ]
-        return _run_command(cmd, cwd=str(ROOT_DIR))
+    env = dict(os.environ)
+    env["PGPASSWORD"] = db_password
+    return _run_command(cmd, env=env)
 
+
+def _run_docker_psql(query: str):
+    if shutil.which("docker") is None:
+        raise FileNotFoundError("docker")
+
+    docker_profile = (os.environ.get("CANONICAL_DB_DOCKER_PROFILE") or "dach-data").strip()
+    docker_service = (os.environ.get("CANONICAL_DB_DOCKER_SERVICE") or "postgis").strip()
+    db_user = (os.environ.get("CANONICAL_DB_USER") or "trainscanner").strip()
+    db_name = (os.environ.get("CANONICAL_DB_NAME") or "trainscanner").strip()
+
+    up_cmd = [
+        "docker",
+        "compose",
+        "--profile",
+        docker_profile,
+        "up",
+        "-d",
+        docker_service,
+    ]
+    _run_command(up_cmd, cwd=str(ROOT_DIR))
+
+    cmd = [
+        "docker",
+        "compose",
+        "--profile",
+        docker_profile,
+        "exec",
+        "-T",
+        docker_service,
+        "psql",
+        "-v",
+        PSQL_ON_ERROR_STOP,
+        "-U",
+        db_user,
+        "-d",
+        db_name,
+        "--csv",
+        "-c",
+        query,
+    ]
+    return _run_command(cmd, cwd=str(ROOT_DIR))
+
+
+def _try_query_runner(label: str, runner):
+    try:
+        result = runner()
+        return _parse_psql_csv(result.stdout or ""), None
+    except (FileNotFoundError, subprocess.CalledProcessError) as err:
+        return None, f"{label}: {_format_error(err)}"
+
+
+def run_psql_csv(query: str):
     mode = (os.environ.get("CANONICAL_DB_MODE") or "auto").strip().lower()
     if mode not in {"auto", "direct", "docker-compose"}:
         fail("invalid CANONICAL_DB_MODE (expected auto, direct, docker-compose)")
 
     errors = []
     if mode in {"auto", "direct"}:
-        try:
-            result = _run_direct_psql()
-            content = result.stdout or ""
-            reader = csv.DictReader(io.StringIO(content))
-            fieldnames = reader.fieldnames
-            if not fieldnames:
-                fail("database export query did not return CSV header")
-            missing = REQUIRED_COLUMNS - set(fieldnames)
-            if missing:
-                fail(
-                    "database export query missing required columns: "
-                    + ", ".join(sorted(missing))
-                )
-            return list(reader)
-        except (FileNotFoundError, subprocess.CalledProcessError) as err:
-            errors.append(f"direct mode: {_format_error(err)}")
-            if mode == "direct":
-                fail("database export query failed: " + errors[-1])
+        rows, err = _try_query_runner("direct mode", lambda: _run_direct_psql(query))
+        if rows is not None:
+            return rows
+        errors.append(err)
+        if mode == "direct":
+            fail("database export query failed: " + errors[-1])
 
     if mode in {"auto", "docker-compose"}:
-        try:
-            result = _run_docker_psql()
-            content = result.stdout or ""
-            reader = csv.DictReader(io.StringIO(content))
-            fieldnames = reader.fieldnames
-            if not fieldnames:
-                fail("database export query did not return CSV header")
-            missing = REQUIRED_COLUMNS - set(fieldnames)
-            if missing:
-                fail(
-                    "database export query missing required columns: "
-                    + ", ".join(sorted(missing))
-                )
-            return list(reader)
-        except (FileNotFoundError, subprocess.CalledProcessError) as err:
-            errors.append(f"docker-compose mode: {_format_error(err)}")
-            fail("database export query failed: " + " | ".join(errors))
+        rows, err = _try_query_runner(
+            "docker-compose mode", lambda: _run_docker_psql(query)
+        )
+        if rows is not None:
+            return rows
+        errors.append(err)
+        fail("database export query failed: " + " | ".join(errors))
 
     fail("database export query failed due to unresolved mode selection")
 
@@ -579,45 +560,98 @@ def parse_explicit_tiers(raw_hint: str):
     return tiers
 
 
-def classify_stop_tiers(stop):
-    tiers = set()
+def _add_pattern_tier(text: str, patterns, tier: str, tiers: set[str]) -> None:
+    for pattern in patterns:
+        if pattern.search(text):
+            tiers.add(tier)
+            return
 
-    tiers.update(parse_explicit_tiers(stop.get("tier_hint", "")))
 
+def _add_section_type_tier(stop: dict, tiers: set[str]) -> None:
     section_type = str(stop.get("section_type") or "").strip().lower()
-    if section_type in {"subway", "tram", "bus"}:
+    if section_type in LOCAL_SECTION_TYPES:
         tiers.add("local")
-    elif section_type in {"main", "secondary"}:
+    elif section_type in REGIONAL_SECTION_TYPES:
         tiers.add("regional")
 
+
+def _add_route_type_hint_tier(stop: dict, tiers: set[str]) -> None:
     route_type_hint = stop.get("route_type_hint")
-    if route_type_hint is not None:
-        if route_type_hint in {0, 1, 3, 4, 5, 6, 7, 11, 12}:
-            tiers.add("local")
-        elif route_type_hint in {2, 100, 101, 102, 103, 106, 107}:
-            tiers.add("regional")
+    if route_type_hint in LOCAL_ROUTE_TYPE_HINTS:
+        tiers.add("local")
+    elif route_type_hint in REGIONAL_ROUTE_TYPE_HINTS:
+        tiers.add("regional")
+
+
+def classify_stop_tiers(stop):
+    tiers = set()
+    tiers.update(parse_explicit_tiers(stop.get("tier_hint", "")))
+    _add_section_type_tier(stop, tiers)
+    _add_route_type_hint_tier(stop, tiers)
 
     text = compile_classification_text(stop)
     if text:
-        for pattern in HIGH_SPEED_PATTERNS:
-            if pattern.search(text):
-                tiers.add("high-speed")
-                break
-
-        for pattern in REGIONAL_PATTERNS:
-            if pattern.search(text):
-                tiers.add("regional")
-                break
-
-        for pattern in LOCAL_PATTERNS:
-            if pattern.search(text):
-                tiers.add("local")
-                break
+        _add_pattern_tier(text, HIGH_SPEED_PATTERNS, "high-speed", tiers)
+        _add_pattern_tier(text, REGIONAL_PATTERNS, "regional", tiers)
+        _add_pattern_tier(text, LOCAL_PATTERNS, "local", tiers)
 
     if not tiers:
         tiers.add("regional")
 
     return sorted(tiers)
+
+
+def _parse_stop_row_identity(row):
+    stop_id = (row.get("stop_id") or "").strip()
+    stop_name = (row.get("stop_name") or "").strip()
+    country = (row.get("country") or "").strip()
+    if not stop_id or not stop_name or country not in VALID_COUNTRIES:
+        fail(f"invalid stop row values for stop_id='{stop_id}' country='{country}'")
+    return stop_id, stop_name, country
+
+
+def _parse_stop_coordinates(stop_id: str, lat_raw: str, lon_raw: str):
+    try:
+        lat = float(lat_raw)
+        lon = float(lon_raw)
+    except Exception:
+        return None
+
+    if abs(lat) > 90 or abs(lon) > 180:
+        fail(f"invalid coordinates for stop '{stop_id}': lat={lat_raw} lon={lon_raw}")
+    return lat, lon
+
+
+def _build_stop_record(
+    row,
+    stop_id: str,
+    stop_name: str,
+    country: str,
+    lat: float,
+    lon: float,
+):
+    stop = {
+        "stop_id": stop_id,
+        "stop_name": stop_name,
+        "country": country,
+        "stop_lat": lat,
+        "stop_lon": lon,
+        "location_type": (row.get("location_type") or "").strip(),
+        "parent_station": (row.get("parent_station") or "").strip(),
+        "is_user_facing": parse_bool(row.get("is_user_facing"), default=True),
+        "walk_links": parse_walk_links(row.get("walk_links_json") or ""),
+        "section_type": (row.get("section_type") or "").strip(),
+        "service_labels": parse_json_string_list(
+            (row.get("service_labels_json") or row.get("service_labels") or "")
+        ),
+        "provider_tags": parse_json_string_list(
+            (row.get("provider_tags_json") or row.get("provider_tags") or "")
+        ),
+        "tier_hint": (row.get("tier_hint") or "").strip(),
+        "route_type_hint": parse_route_type_hint(row.get("route_type_hint")),
+    }
+    stop["tiers"] = classify_stop_tiers(stop)
+    return stop
 
 
 def load_stops_from_rows(rows):
@@ -628,57 +662,15 @@ def load_stops_from_rows(rows):
     missing_coords = []
 
     for row in rows:
-        stop_id = (row.get("stop_id") or "").strip()
-        stop_name = (row.get("stop_name") or "").strip()
-        country = (row.get("country") or "").strip()
+        stop_id, stop_name, country = _parse_stop_row_identity(row)
         lat_raw = (row.get("stop_lat") or "").strip()
         lon_raw = (row.get("stop_lon") or "").strip()
-
-        if not stop_id or not stop_name or country not in VALID_COUNTRIES:
-            fail(f"invalid stop row values for stop_id='{stop_id}' country='{country}'")
-
-        try:
-            lat = float(lat_raw)
-            lon = float(lon_raw)
-        except Exception:
+        coords = _parse_stop_coordinates(stop_id, lat_raw, lon_raw)
+        if coords is None:
             missing_coords.append(stop_id)
             continue
-
-        if abs(lat) > 90 or abs(lon) > 180:
-            fail(
-                f"invalid coordinates for stop '{stop_id}': lat={lat_raw} lon={lon_raw}"
-            )
-
-        location_type = (row.get("location_type") or "").strip()
-        parent_station = (row.get("parent_station") or "").strip()
-        section_type = (row.get("section_type") or "").strip()
-
-        service_labels = parse_json_string_list(
-            (row.get("service_labels_json") or row.get("service_labels") or "")
-        )
-        provider_tags = parse_json_string_list(
-            (row.get("provider_tags_json") or row.get("provider_tags") or "")
-        )
-
-        stop = {
-            "stop_id": stop_id,
-            "stop_name": stop_name,
-            "country": country,
-            "stop_lat": lat,
-            "stop_lon": lon,
-            "location_type": location_type,
-            "parent_station": parent_station,
-            "is_user_facing": parse_bool(row.get("is_user_facing"), default=True),
-            "walk_links": parse_walk_links(row.get("walk_links_json") or ""),
-            "section_type": section_type,
-            "service_labels": service_labels,
-            "provider_tags": provider_tags,
-            "tier_hint": (row.get("tier_hint") or "").strip(),
-            "route_type_hint": parse_route_type_hint(row.get("route_type_hint")),
-        }
-
-        stop["tiers"] = classify_stop_tiers(stop)
-        stops.append(stop)
+        lat, lon = coords
+        stops.append(_build_stop_record(row, stop_id, stop_name, country, lat, lon))
 
     if missing_coords:
         sample = ", ".join(missing_coords[:10])
@@ -780,12 +772,95 @@ def infer_route_type(stops, tier: str) -> str:
     return "0"
 
 
+def _append_agency_row(agency_rows, country: str, agency_url: str):
+    tz_map = {"DE": "Europe/Berlin", "AT": "Europe/Vienna", "CH": "Europe/Zurich"}
+    agency_id = f"agency_{country.lower()}"
+    agency_rows.append(
+        [
+            agency_id,
+            f"Canonical {country} Transit",
+            agency_url,
+            tz_map.get(country, "Europe/Berlin"),
+            "de",
+        ]
+    )
+    return agency_id
+
+
+def _select_route_stops(stops, country: str, tier: str):
+    country_tier_rows = [
+        stop for stop in stops if stop["country"] == country and tier in stop.get("tiers", [])
+    ]
+    user_facing = sorted(
+        [stop for stop in country_tier_rows if stop["is_user_facing"]],
+        key=lambda row: row["stop_id"],
+    )
+    if len(user_facing) >= 2:
+        return user_facing
+    fallback = sorted(country_tier_rows, key=lambda row: row["stop_id"])
+    if len(fallback) >= 2:
+        return fallback
+    return []
+
+
+def _append_tier_rows(
+    profile: str,
+    country: str,
+    tier: str,
+    agency_id: str,
+    route_stops,
+    route_rows,
+    trip_rows,
+    stop_time_rows,
+    calendar_rows,
+):
+    tier_slug = tier.replace("-", "_")
+    route_id = f"route_{country.lower()}_{tier_slug}"
+    service_id = f"svc_{country.lower()}_{tier_slug}"
+    route_rows.append(
+        [
+            route_id,
+            agency_id,
+            f"{country} {TIER_SHORT[tier]}",
+            f"{country} {TIER_LABELS[tier]} Canonical Bridge",
+            infer_route_type(route_stops, tier),
+            f"tier:{tier};profile:{profile}",
+        ]
+    )
+
+    first_stop = route_stops[0]["stop_name"]
+    last_stop = route_stops[-1]["stop_name"]
+    trip_out_id = f"trip_{country.lower()}_{tier_slug}_outbound"
+    trip_in_id = f"trip_{country.lower()}_{tier_slug}_inbound"
+    trip_rows.append([route_id, service_id, trip_out_id, f"{first_stop} -> {last_stop}"])
+    trip_rows.append([route_id, service_id, trip_in_id, f"{last_stop} -> {first_stop}"])
+    calendar_rows.append(
+        [
+            service_id,
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "20240101",
+            "20351231",
+        ]
+    )
+
+    tier_slot = TIER_SEQUENCE.index(tier)
+    outbound_start = (6 + tier_slot * 2) * 3600
+    inbound_start = (18 + tier_slot * 2) * 3600
+    for idx, stop in enumerate(route_stops, start=1):
+        t = fmt_time(outbound_start + (idx - 1) * 420)
+        stop_time_rows.append([trip_out_id, t, t, stop["stop_id"], str(idx)])
+    for idx, stop in enumerate(reversed(route_stops), start=1):
+        t = fmt_time(inbound_start + (idx - 1) * 420)
+        stop_time_rows.append([trip_in_id, t, t, stop["stop_id"], str(idx)])
+
+
 def build_tables(profile: str, requested_tier: str, stops, agency_url: str):
-    tz_map = {
-        "DE": "Europe/Berlin",
-        "AT": "Europe/Vienna",
-        "CH": "Europe/Zurich",
-    }
 
     agency_rows = []
     route_rows = []
@@ -793,94 +868,26 @@ def build_tables(profile: str, requested_tier: str, stops, agency_url: str):
     stop_time_rows = []
     calendar_rows = []
 
-    agency_seen = set()
     countries = sorted({stop["country"] for stop in stops})
     tiers_to_emit = TIER_SEQUENCE if requested_tier == "all" else [requested_tier]
 
     for country in countries:
-        agency_id = f"agency_{country.lower()}"
-        if agency_id not in agency_seen:
-            agency_rows.append(
-                [
-                    agency_id,
-                    f"Canonical {country} Transit",
-                    agency_url,
-                    tz_map.get(country, "Europe/Berlin"),
-                    "de",
-                ]
-            )
-            agency_seen.add(agency_id)
-
+        agency_id = _append_agency_row(agency_rows, country, agency_url)
         for tier in tiers_to_emit:
-            country_tier_rows = [
-                stop
-                for stop in stops
-                if stop["country"] == country and tier in stop.get("tiers", [])
-            ]
-
-            route_stops = sorted(
-                [stop for stop in country_tier_rows if stop["is_user_facing"]],
-                key=lambda r: r["stop_id"],
-            )
-
-            if len(route_stops) < 2:
-                route_stops = sorted(country_tier_rows, key=lambda r: r["stop_id"])
-
+            route_stops = _select_route_stops(stops, country, tier)
             if len(route_stops) < 2:
                 continue
-
-            tier_slug = tier.replace("-", "_")
-            route_id = f"route_{country.lower()}_{tier_slug}"
-            service_id = f"svc_{country.lower()}_{tier_slug}"
-
-            route_rows.append(
-                [
-                    route_id,
-                    agency_id,
-                    f"{country} {TIER_SHORT[tier]}",
-                    f"{country} {TIER_LABELS[tier]} Canonical Bridge",
-                    infer_route_type(route_stops, tier),
-                    f"tier:{tier};profile:{profile}",
-                ]
+            _append_tier_rows(
+                profile,
+                country,
+                tier,
+                agency_id,
+                route_stops,
+                route_rows,
+                trip_rows,
+                stop_time_rows,
+                calendar_rows,
             )
-
-            first_stop = route_stops[0]["stop_name"]
-            last_stop = route_stops[-1]["stop_name"]
-            trip_out_id = f"trip_{country.lower()}_{tier_slug}_outbound"
-            trip_in_id = f"trip_{country.lower()}_{tier_slug}_inbound"
-
-            trip_rows.append(
-                [route_id, service_id, trip_out_id, f"{first_stop} -> {last_stop}"]
-            )
-            trip_rows.append(
-                [route_id, service_id, trip_in_id, f"{last_stop} -> {first_stop}"]
-            )
-
-            calendar_rows.append(
-                [
-                    service_id,
-                    "1",
-                    "1",
-                    "1",
-                    "1",
-                    "1",
-                    "1",
-                    "1",
-                    "20240101",
-                    "20351231",
-                ]
-            )
-
-            tier_slot = TIER_SEQUENCE.index(tier)
-            base_outbound = (6 + tier_slot * 2) * 3600
-            for idx, stop in enumerate(route_stops, start=1):
-                t = fmt_time(base_outbound + (idx - 1) * 420)
-                stop_time_rows.append([trip_out_id, t, t, stop["stop_id"], str(idx)])
-
-            base_inbound = (18 + tier_slot * 2) * 3600
-            for idx, stop in enumerate(reversed(route_stops), start=1):
-                t = fmt_time(base_inbound + (idx - 1) * 420)
-                stop_time_rows.append([trip_in_id, t, t, stop["stop_id"], str(idx)])
 
     stops_rows = [
         [

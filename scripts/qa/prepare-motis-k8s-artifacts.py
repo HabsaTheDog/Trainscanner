@@ -213,6 +213,37 @@ def parse_service_date(raw: str | None) -> dt.date | None:
         return None
 
 
+def _row_value(row: dict[str, str], key: str) -> str:
+    return (row.get(key) or "").strip()
+
+
+def _calendar_row_is_active(
+    row: dict[str, str],
+    date_str: str,
+    weekday_key: str,
+) -> bool:
+    start = _row_value(row, "start_date")
+    end = _row_value(row, "end_date")
+    return bool(start and end and start <= date_str <= end and _row_value(row, weekday_key) == "1")
+
+
+def _apply_calendar_exception(
+    active: set[str],
+    row: dict[str, str],
+    date_str: str,
+) -> None:
+    if _row_value(row, "date") != date_str:
+        return
+    service_id = _row_value(row, "service_id")
+    if not service_id:
+        return
+    exception_type = _row_value(row, "exception_type")
+    if exception_type == "1":
+        active.add(service_id)
+    elif exception_type == "2":
+        active.discard(service_id)
+
+
 def active_services(
     calendar_rows: list[dict[str, str]],
     calendar_dates_rows: list[dict[str, str]],
@@ -231,29 +262,13 @@ def active_services(
 
     active: set[str] = set()
     for row in calendar_rows:
-        start = (row.get("start_date") or "").strip()
-        end = (row.get("end_date") or "").strip()
-        if (
-            start
-            and end
-            and start <= date_str <= end
-            and (row.get(weekday_key) or "") == "1"
-        ):
-            service_id = (row.get("service_id") or "").strip()
+        if _calendar_row_is_active(row, date_str, weekday_key):
+            service_id = _row_value(row, "service_id")
             if service_id:
                 active.add(service_id)
 
     for row in calendar_dates_rows:
-        if (row.get("date") or "").strip() != date_str:
-            continue
-        service_id = (row.get("service_id") or "").strip()
-        if not service_id:
-            continue
-        exception_type = (row.get("exception_type") or "").strip()
-        if exception_type == "1":
-            active.add(service_id)
-        elif exception_type == "2":
-            active.discard(service_id)
+        _apply_calendar_exception(active, row, date_str)
     return active
 
 
@@ -293,6 +308,33 @@ def time_to_iso(date_str: str, hhmmss: str) -> str | None:
     return value.isoformat() + "Z"
 
 
+def _add_missing_parents(
+    keep: set[str],
+    rows_by_id: dict[str, dict[str, str]],
+) -> bool:
+    changed = False
+    for stop_id in list(keep):
+        row = rows_by_id.get(stop_id)
+        if not row:
+            continue
+        parent = normalize_stop_id(row.get("parent_station"))
+        if parent and parent not in keep:
+            keep.add(parent)
+            changed = True
+    return changed
+
+
+def _add_missing_children(keep: set[str], stops_rows: list[dict[str, str]]) -> bool:
+    changed = False
+    for row in stops_rows:
+        stop_id = normalize_stop_id(row.get("stop_id"))
+        parent = normalize_stop_id(row.get("parent_station"))
+        if parent and parent in keep and stop_id not in keep:
+            keep.add(stop_id)
+            changed = True
+    return changed
+
+
 def add_parent_and_child_stops(
     initial_ids: set[str],
     stops_rows: list[dict[str, str]],
@@ -300,104 +342,77 @@ def add_parent_and_child_stops(
     rows_by_id = index_rows(stops_rows, "stop_id")
     keep = set(initial_ids)
 
-    changed = True
-    while changed:
-        changed = False
-        snapshot = list(keep)
-        for stop_id in snapshot:
-            row = rows_by_id.get(stop_id)
-            if not row:
-                continue
-            parent = normalize_stop_id(row.get("parent_station"))
-            if parent and parent not in keep:
-                keep.add(parent)
-                changed = True
-        for row in stops_rows:
-            stop_id = normalize_stop_id(row.get("stop_id"))
-            parent = normalize_stop_id(row.get("parent_station"))
-            if parent and parent in keep and stop_id not in keep:
-                keep.add(stop_id)
-                changed = True
+    while True:
+        changed = _add_missing_parents(keep, rows_by_id)
+        changed = _add_missing_children(keep, stops_rows) or changed
+        if not changed:
+            break
     return keep
 
 
-def filter_feed_by_routes(
+def _collect_ids(rows: list[dict[str, str]], key: str) -> set[str]:
+    return {value for row in rows if (value := _row_value(row, key))}
+
+
+def _filter_rows_by_ids(
+    rows: list[dict[str, str]],
+    key: str,
+    keep_ids: set[str],
+) -> list[dict[str, str]]:
+    return [row for row in rows if _row_value(row, key) in keep_ids]
+
+
+def _filter_agency_rows(
+    agency_rows: list[dict[str, str]],
+    keep_agency_ids: set[str],
+) -> list[dict[str, str]]:
+    if not keep_agency_ids:
+        return list(agency_rows)
+    return _filter_rows_by_ids(agency_rows, "agency_id", keep_agency_ids)
+
+
+def _filter_transfer_rows(
+    transfer_rows: list[dict[str, str]],
+    keep_stop_ids: set[str],
+) -> list[dict[str, str]]:
+    return [
+        row
+        for row in transfer_rows
+        if _row_value(row, "from_stop_id") in keep_stop_ids
+        and _row_value(row, "to_stop_id") in keep_stop_ids
+    ]
+
+
+def _scope_tables_from_trips(
     tables: dict[str, list[dict[str, str]]],
-    tier: str,
-) -> dict[str, list[dict[str, str]]]:
-    routes_rows = tables[ROUTES_FILE]
-    trips_rows = tables[TRIPS_FILE]
-    stop_times_rows = tables[STOP_TIMES_FILE]
+    filtered_trips: list[dict[str, str]],
+    filtered_stop_times: list[dict[str, str]],
+) -> tuple[dict[str, list[dict[str, str]]], set[str]]:
     stops_rows = tables[STOPS_FILE]
-    calendar_rows = tables[CALENDAR_FILE]
-    calendar_dates_rows = tables[CALENDAR_DATES_FILE]
-    agency_rows = tables[AGENCY_FILE]
-    transfers_rows = tables[TRANSFERS_FILE]
+    keep_stop_ids = add_parent_and_child_stops(
+        _collect_ids(filtered_stop_times, "stop_id"),
+        stops_rows,
+    )
+    filtered_stops = _filter_rows_by_ids(stops_rows, "stop_id", keep_stop_ids)
+    filtered_routes = _filter_rows_by_ids(
+        tables[ROUTES_FILE],
+        "route_id",
+        _collect_ids(filtered_trips, "route_id"),
+    )
+    keep_service_ids = _collect_ids(filtered_trips, "service_id")
+    filtered_calendar = _filter_rows_by_ids(tables[CALENDAR_FILE], "service_id", keep_service_ids)
+    filtered_calendar_dates = _filter_rows_by_ids(
+        tables[CALENDAR_DATES_FILE],
+        "service_id",
+        keep_service_ids,
+    )
+    filtered_agency = _filter_agency_rows(
+        tables[AGENCY_FILE],
+        _collect_ids(filtered_routes, "agency_id"),
+    )
+    filtered_transfers = _filter_transfer_rows(tables[TRANSFERS_FILE], keep_stop_ids)
 
-    route_tiers = {
-        (row.get("route_id") or "").strip(): parse_route_tier(row)
-        for row in routes_rows
-    }
-    if tier == "all":
-        keep_route_ids = {rid for rid in route_tiers if rid}
-    else:
-        keep_route_ids = {
-            route_id
-            for route_id, route_tier in route_tiers.items()
-            if route_tier == tier
-        }
-    if not keep_route_ids:
-        fail(f"tier '{tier}' produced no routes")
-
-    filtered_routes = [
-        row
-        for row in routes_rows
-        if (row.get("route_id") or "").strip() in keep_route_ids
-    ]
-    filtered_trips = [
-        row
-        for row in trips_rows
-        if (row.get("route_id") or "").strip() in keep_route_ids
-    ]
-    keep_trip_ids = {(row.get("trip_id") or "").strip() for row in filtered_trips}
-    filtered_stop_times = [
-        row
-        for row in stop_times_rows
-        if (row.get("trip_id") or "").strip() in keep_trip_ids
-    ]
-    keep_stop_ids = {(row.get("stop_id") or "").strip() for row in filtered_stop_times}
-    keep_stop_ids = add_parent_and_child_stops(keep_stop_ids, stops_rows)
-    filtered_stops = [
-        row for row in stops_rows if (row.get("stop_id") or "").strip() in keep_stop_ids
-    ]
-    keep_service_ids = {(row.get("service_id") or "").strip() for row in filtered_trips}
-    filtered_calendar = [
-        row
-        for row in calendar_rows
-        if (row.get("service_id") or "").strip() in keep_service_ids
-    ]
-    filtered_calendar_dates = [
-        row
-        for row in calendar_dates_rows
-        if (row.get("service_id") or "").strip() in keep_service_ids
-    ]
-    keep_agency_ids = {(row.get("agency_id") or "").strip() for row in filtered_routes}
-    if keep_agency_ids:
-        filtered_agency = [
-            row
-            for row in agency_rows
-            if (row.get("agency_id") or "").strip() in keep_agency_ids
-        ]
-    else:
-        filtered_agency = list(agency_rows)
-    filtered_transfers = [
-        row
-        for row in transfers_rows
-        if (row.get("from_stop_id") or "").strip() in keep_stop_ids
-        and (row.get("to_stop_id") or "").strip() in keep_stop_ids
-    ]
-
-    return {
+    scoped = {
         **tables,
         ROUTES_FILE: filtered_routes,
         TRIPS_FILE: filtered_trips,
@@ -408,6 +423,87 @@ def filter_feed_by_routes(
         AGENCY_FILE: filtered_agency,
         TRANSFERS_FILE: filtered_transfers,
     }
+    return scoped, keep_stop_ids
+
+
+def filter_feed_by_routes(
+    tables: dict[str, list[dict[str, str]]],
+    tier: str,
+) -> dict[str, list[dict[str, str]]]:
+    routes_rows = tables[ROUTES_FILE]
+    trips_rows = tables[TRIPS_FILE]
+    stop_times_rows = tables[STOP_TIMES_FILE]
+    route_tiers = {
+        route_id: parse_route_tier(row)
+        for row in routes_rows
+        if (route_id := _row_value(row, "route_id"))
+    }
+    if tier == "all":
+        keep_route_ids = set(route_tiers)
+    else:
+        keep_route_ids = {
+            route_id
+            for route_id, route_tier in route_tiers.items()
+            if route_tier == tier
+        }
+    if not keep_route_ids:
+        fail(f"tier '{tier}' produced no routes")
+
+    filtered_trips = _filter_rows_by_ids(trips_rows, "route_id", keep_route_ids)
+    filtered_stop_times = _filter_rows_by_ids(
+        stop_times_rows,
+        "trip_id",
+        _collect_ids(filtered_trips, "trip_id"),
+    )
+    scoped, _ = _scope_tables_from_trips(tables, filtered_trips, filtered_stop_times)
+    return scoped
+
+
+def _collect_bbox_stop_ids(
+    stops_rows: list[dict[str, str]],
+    bbox: tuple[float, float, float, float],
+) -> set[str]:
+    in_scope: set[str] = set()
+    for row in stops_rows:
+        stop_id = normalize_stop_id(row.get("stop_id"))
+        if not stop_id:
+            continue
+        if in_bbox(parse_float(row.get("stop_lat")), parse_float(row.get("stop_lon")), bbox):
+            in_scope.add(stop_id)
+    return in_scope
+
+
+def _group_stop_times_by_trip(
+    stop_times_rows: list[dict[str, str]],
+) -> dict[str, list[dict[str, str]]]:
+    by_trip: dict[str, list[dict[str, str]]] = {}
+    for row in stop_times_rows:
+        trip_id = _row_value(row, "trip_id")
+        if trip_id:
+            by_trip.setdefault(trip_id, []).append(row)
+    for rows in by_trip.values():
+        sort_stop_times(rows)
+    return by_trip
+
+
+def _trip_ids_crossing_scoped_stops(
+    trips_rows: list[dict[str, str]],
+    stop_times_by_trip: dict[str, list[dict[str, str]]],
+    bbox_stop_ids: set[str],
+) -> set[str]:
+    keep_trip_ids: set[str] = set()
+    for trip in trips_rows:
+        trip_id = _row_value(trip, "trip_id")
+        if not trip_id:
+            continue
+        scoped_rows = [
+            row
+            for row in stop_times_by_trip.get(trip_id, [])
+            if normalize_stop_id(row.get("stop_id")) in bbox_stop_ids
+        ]
+        if len(scoped_rows) >= 2:
+            keep_trip_ids.add(trip_id)
+    return keep_trip_ids
 
 
 def micro_scope_feed(
@@ -419,108 +515,91 @@ def micro_scope_feed(
     stops_rows = tables[STOPS_FILE]
     trips_rows = tables[TRIPS_FILE]
     stop_times_rows = tables[STOP_TIMES_FILE]
-    routes_rows = tables[ROUTES_FILE]
-    calendar_rows = tables[CALENDAR_FILE]
-    calendar_dates_rows = tables[CALENDAR_DATES_FILE]
-    agency_rows = tables[AGENCY_FILE]
-    transfers_rows = tables[TRANSFERS_FILE]
 
     stop_by_id = index_rows(stops_rows, "stop_id")
-    bbox_stop_ids: set[str] = set()
-    for row in stops_rows:
-        stop_id = normalize_stop_id(row.get("stop_id"))
-        if not stop_id:
-            continue
-        lat = parse_float(row.get("stop_lat"))
-        lon = parse_float(row.get("stop_lon"))
-        if in_bbox(lat, lon, expanded):
-            bbox_stop_ids.add(stop_id)
+    bbox_stop_ids = _collect_bbox_stop_ids(stops_rows, expanded)
     if len(bbox_stop_ids) < 2:
         fail("micro scope found fewer than 2 stops in bbox/padding window")
 
-    stop_times_by_trip: dict[str, list[dict[str, str]]] = {}
-    for row in stop_times_rows:
-        trip_id = (row.get("trip_id") or "").strip()
-        if trip_id:
-            stop_times_by_trip.setdefault(trip_id, []).append(row)
-    for rows in stop_times_by_trip.values():
-        sort_stop_times(rows)
-
-    keep_trip_ids: set[str] = set()
-    for trip in trips_rows:
-        trip_id = (trip.get("trip_id") or "").strip()
-        if not trip_id:
-            continue
-        rows = stop_times_by_trip.get(trip_id, [])
-        in_scope = [
-            r for r in rows if normalize_stop_id(r.get("stop_id")) in bbox_stop_ids
-        ]
-        if len(in_scope) >= 2:
-            keep_trip_ids.add(trip_id)
+    stop_times_by_trip = _group_stop_times_by_trip(stop_times_rows)
+    keep_trip_ids = _trip_ids_crossing_scoped_stops(
+        trips_rows,
+        stop_times_by_trip,
+        bbox_stop_ids,
+    )
     if not keep_trip_ids:
         fail("micro scope found no trips crossing at least 2 scoped stops")
 
-    filtered_trips = [
-        row for row in trips_rows if (row.get("trip_id") or "").strip() in keep_trip_ids
-    ]
-    filtered_stop_times = [
-        row
-        for row in stop_times_rows
-        if (row.get("trip_id") or "").strip() in keep_trip_ids
-    ]
-    keep_stop_ids = {(row.get("stop_id") or "").strip() for row in filtered_stop_times}
-    keep_stop_ids = add_parent_and_child_stops(keep_stop_ids, stops_rows)
-    filtered_stops = [
-        row for row in stops_rows if (row.get("stop_id") or "").strip() in keep_stop_ids
-    ]
-    keep_route_ids = {(row.get("route_id") or "").strip() for row in filtered_trips}
-    filtered_routes = [
-        row
-        for row in routes_rows
-        if (row.get("route_id") or "").strip() in keep_route_ids
-    ]
-    keep_service_ids = {(row.get("service_id") or "").strip() for row in filtered_trips}
-    filtered_calendar = [
-        row
-        for row in calendar_rows
-        if (row.get("service_id") or "").strip() in keep_service_ids
-    ]
-    filtered_calendar_dates = [
-        row
-        for row in calendar_dates_rows
-        if (row.get("service_id") or "").strip() in keep_service_ids
-    ]
-    keep_agency_ids = {(row.get("agency_id") or "").strip() for row in filtered_routes}
-    if keep_agency_ids:
-        filtered_agency = [
-            row
-            for row in agency_rows
-            if (row.get("agency_id") or "").strip() in keep_agency_ids
-        ]
-    else:
-        filtered_agency = list(agency_rows)
-    filtered_transfers = [
-        row
-        for row in transfers_rows
-        if (row.get("from_stop_id") or "").strip() in keep_stop_ids
-        and (row.get("to_stop_id") or "").strip() in keep_stop_ids
-    ]
+    filtered_trips = _filter_rows_by_ids(trips_rows, "trip_id", keep_trip_ids)
+    filtered_stop_times = _filter_rows_by_ids(stop_times_rows, "trip_id", keep_trip_ids)
+    scoped, _ = _scope_tables_from_trips(tables, filtered_trips, filtered_stop_times)
 
     unresolved_bbox_stops = {sid for sid in bbox_stop_ids if sid in stop_by_id}
-    return (
-        {
-            **tables,
-            ROUTES_FILE: filtered_routes,
-            TRIPS_FILE: filtered_trips,
-            STOP_TIMES_FILE: filtered_stop_times,
-            STOPS_FILE: filtered_stops,
-            CALENDAR_FILE: filtered_calendar,
-            CALENDAR_DATES_FILE: filtered_calendar_dates,
-            AGENCY_FILE: filtered_agency,
-            TRANSFERS_FILE: filtered_transfers,
-        },
-        unresolved_bbox_stops,
-    )
+    return scoped, unresolved_bbox_stops
+
+
+def _group_active_stop_times_by_trip(
+    stop_times_rows: list[dict[str, str]],
+    service_by_trip: dict[str, str],
+    active_service_ids: set[str],
+) -> dict[str, list[dict[str, str]]]:
+    by_trip: dict[str, list[dict[str, str]]] = {}
+    for row in stop_times_rows:
+        trip_id = _row_value(row, "trip_id")
+        if not trip_id:
+            continue
+        if service_by_trip.get(trip_id, "") not in active_service_ids:
+            continue
+        by_trip.setdefault(trip_id, []).append(row)
+    for rows in by_trip.values():
+        sort_stop_times(rows)
+    return by_trip
+
+
+def _trip_query_candidate(
+    trip_id: str,
+    rows: list[dict[str, str]],
+    bbox_stop_ids: set[str],
+    target_date: str,
+    stops_by_id: dict[str, dict[str, str]],
+) -> tuple[dict[str, object], tuple[str, str, str]] | None:
+    scoped_rows = [row for row in rows if normalize_stop_id(row.get("stop_id")) in bbox_stop_ids]
+    if len(scoped_rows) < 2:
+        return None
+
+    origin_row = scoped_rows[0]
+    destination_row = scoped_rows[-1]
+    origin_stop_id = normalize_stop_id(origin_row.get("stop_id"))
+    destination_stop_id = normalize_stop_id(destination_row.get("stop_id"))
+    dep_time = (_row_value(origin_row, "departure_time") or _row_value(origin_row, "arrival_time"))
+    dt_iso = time_to_iso(target_date, dep_time)
+    if not dt_iso:
+        return None
+
+    origin_stop = stops_by_id.get(origin_stop_id, {})
+    destination_stop = stops_by_id.get(destination_stop_id, {})
+    o_lat = parse_float(origin_stop.get("stop_lat"))
+    o_lon = parse_float(origin_stop.get("stop_lon"))
+    d_lat = parse_float(destination_stop.get("stop_lat"))
+    d_lon = parse_float(destination_stop.get("stop_lon"))
+    if None in (o_lat, o_lon, d_lat, d_lon):
+        return None
+
+    if origin_stop_id and destination_stop_id:
+        origin = f"{MOTIS_DATASET_TAG}_{origin_stop_id}"
+        destination = f"{MOTIS_DATASET_TAG}_{destination_stop_id}"
+    else:
+        origin = f"{o_lat},{o_lon}"
+        destination = f"{d_lat},{d_lon}"
+
+    query = {
+        "name": f"micro-{trip_id}",
+        "required": True,
+        "origin": origin,
+        "destination": destination,
+        "datetime": dt_iso,
+    }
+    return query, (origin, destination, dt_iso)
 
 
 def build_micro_queries(
@@ -536,72 +615,36 @@ def build_micro_queries(
     target_date = choose_active_date(calendar_rows, calendar_dates_rows)
 
     service_by_trip = {
-        (row.get("trip_id") or "").strip(): (row.get("service_id") or "").strip()
+        _row_value(row, "trip_id"): _row_value(row, "service_id")
         for row in trips_rows
+        if _row_value(row, "trip_id")
     }
-    active_service_ids = active_services(
-        calendar_rows, calendar_dates_rows, target_date
-    )
+    active_service_ids = active_services(calendar_rows, calendar_dates_rows, target_date)
 
     stops_by_id = index_rows(stops_rows, "stop_id")
-    stop_times_by_trip: dict[str, list[dict[str, str]]] = {}
-    for row in stop_times_rows:
-        trip_id = (row.get("trip_id") or "").strip()
-        if not trip_id:
-            continue
-        if service_by_trip.get(trip_id, "") not in active_service_ids:
-            continue
-        stop_times_by_trip.setdefault(trip_id, []).append(row)
-    for rows in stop_times_by_trip.values():
-        sort_stop_times(rows)
+    stop_times_by_trip = _group_active_stop_times_by_trip(
+        stop_times_rows,
+        service_by_trip,
+        active_service_ids,
+    )
 
     queries: list[dict[str, object]] = []
     seen: set[tuple[str, str, str]] = set()
-    for trip_id in sorted(stop_times_by_trip.keys()):
-        rows = stop_times_by_trip[trip_id]
-        scoped_rows = [
-            r for r in rows if normalize_stop_id(r.get("stop_id")) in bbox_stop_ids
-        ]
-        if len(scoped_rows) < 2:
+    for trip_id, rows in sorted(stop_times_by_trip.items()):
+        candidate = _trip_query_candidate(
+            trip_id,
+            rows,
+            bbox_stop_ids,
+            target_date,
+            stops_by_id,
+        )
+        if not candidate:
             continue
-        origin_row = scoped_rows[0]
-        destination_row = scoped_rows[-1]
-        origin_stop_id = normalize_stop_id(origin_row.get("stop_id"))
-        destination_stop_id = normalize_stop_id(destination_row.get("stop_id"))
-        dep_time = (
-            origin_row.get("departure_time") or origin_row.get("arrival_time") or ""
-        ).strip()
-        dt_iso = time_to_iso(target_date, dep_time)
-        if not dt_iso:
-            continue
-        origin_stop = stops_by_id.get(origin_stop_id, {})
-        destination_stop = stops_by_id.get(destination_stop_id, {})
-        o_lat = parse_float(origin_stop.get("stop_lat"))
-        o_lon = parse_float(origin_stop.get("stop_lon"))
-        d_lat = parse_float(destination_stop.get("stop_lat"))
-        d_lon = parse_float(destination_stop.get("stop_lon"))
-        if None in (o_lat, o_lon, d_lat, d_lon):
-            continue
-        if origin_stop_id and destination_stop_id:
-            # Prefer stable station IDs to avoid depending on street/geocoder lookup.
-            origin = f"{MOTIS_DATASET_TAG}_{origin_stop_id}"
-            destination = f"{MOTIS_DATASET_TAG}_{destination_stop_id}"
-        else:
-            origin = f"{o_lat},{o_lon}"
-            destination = f"{d_lat},{d_lon}"
-        key = (origin, destination, dt_iso)
+        query, key = candidate
         if key in seen:
             continue
         seen.add(key)
-        queries.append(
-            {
-                "name": f"micro-{trip_id}",
-                "required": True,
-                "origin": origin,
-                "destination": destination,
-                "datetime": dt_iso,
-            }
-        )
+        queries.append(query)
         if len(queries) >= max_queries:
             break
     if not queries:

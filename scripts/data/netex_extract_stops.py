@@ -60,27 +60,36 @@ def first_descriptor_name(elem: etree._Element) -> str | None:
     return None
 
 
+def _parse_coordinate_value(raw: str | None) -> float | None:
+    text = clean_text(raw)
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _valid_coordinates(lat: float | None, lon: float | None) -> bool:
+    return lat is not None and lon is not None and -90 <= lat <= 90 and -180 <= lon <= 180
+
+
+def _coords_from_location(location: etree._Element) -> tuple[float | None, float | None]:
+    lat: float | None = None
+    lon: float | None = None
+    for child in location:
+        tag = local_name(child.tag)
+        if tag == "Latitude":
+            lat = _parse_coordinate_value(child.text)
+        elif tag == "Longitude":
+            lon = _parse_coordinate_value(child.text)
+    return lat, lon
+
+
 def first_location_coords(elem: etree._Element) -> tuple[float | None, float | None]:
     for location in elem.iterfind(".//{*}Location"):
-        lat: float | None = None
-        lon: float | None = None
-        for child in location:
-            tag = local_name(child.tag)
-            if tag == "Latitude":
-                val = clean_text(child.text)
-                if val:
-                    try:
-                        lat = float(val)
-                    except ValueError:
-                        lat = None
-            elif tag == "Longitude":
-                val = clean_text(child.text)
-                if val:
-                    try:
-                        lon = float(val)
-                    except ValueError:
-                        lon = None
-        if lat is not None and lon is not None and -90 <= lat <= 90 and -180 <= lon <= 180:
+        lat, lon = _coords_from_location(location)
+        if _valid_coordinates(lat, lon):
             return lat, lon
     return None, None
 
@@ -148,131 +157,173 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _clear_element(elem: etree._Element) -> None:
+    elem.clear()
+    while elem.getprevious() is not None:
+        del elem.getparent()[0]
+
+
+def _candidate_xml_entries(archive: zipfile.ZipFile, zip_path: Path) -> list[str]:
+    xml_entries = sorted(name for name in archive.namelist() if name.lower().endswith(".xml"))
+    if not xml_entries:
+        raise RuntimeError(f"No XML entries found in archive: {zip_path}")
+
+    preferred_entries = [
+        name
+        for name in xml_entries
+        if any(token in Path(name).name.lower() for token in ("site", "stop", "station"))
+    ]
+    entries_to_scan = preferred_entries if preferred_entries else xml_entries
+    if len(entries_to_scan) > MAX_XML_ENTRIES_TO_SCAN:
+        raise RuntimeError(
+            f"Too many XML entries to scan ({len(entries_to_scan)}). "
+            f"Limit is {MAX_XML_ENTRIES_TO_SCAN}."
+        )
+    if not preferred_entries:
+        print(
+            f"[netex-extract] WARN: No site-like XML entry name detected in {zip_path.name}; "
+            "falling back to all XML entries.",
+            file=sys.stderr,
+        )
+    return entries_to_scan
+
+
+def _pick_hard_id(public_code: str | None, private_code: str | None, kv: dict[str, str]) -> str | None:
+    hard_id = public_code or private_code
+    if hard_id:
+        return hard_id
+    for key in ("uic", "ifopt", "eva", "stopplaceref", "globalid"):
+        if key in kv:
+            return kv[key]
+    return None
+
+
+def _write_stop_row(
+    writer: csv.DictWriter,
+    args: argparse.Namespace,
+    entry: str,
+    elem: etree._Element,
+    source_stop_id: str,
+    stop_name: str,
+    lat: float | None,
+    lon: float | None,
+    public_code: str | None,
+    private_code: str | None,
+    hard_id: str | None,
+) -> None:
+    payload = {
+        "xmlEntry": entry,
+        "stopPlaceType": first_direct_child_text(elem, {"StopPlaceType"}),
+        "transportMode": first_direct_child_text(elem, {"TransportMode"}),
+    }
+    writer.writerow(
+        {
+            "import_run_id": args.import_run_id,
+            "source_id": args.source_id,
+            "country": args.country,
+            "provider_slug": args.provider_slug,
+            "snapshot_date": args.snapshot_date,
+            "manifest_sha256": args.manifest_sha256,
+            "source_stop_id": source_stop_id,
+            "source_parent_stop_id": parent_site_ref(elem) or "",
+            "stop_name": stop_name,
+            "latitude": "" if lat is None else f"{lat:.8f}",
+            "longitude": "" if lon is None else f"{lon:.8f}",
+            "grid_id": compute_grid_id(args.country, lat, lon),
+            "public_code": public_code or "",
+            "private_code": private_code or "",
+            "hard_id": hard_id or "",
+            "source_file": entry,
+            "raw_payload": json.dumps(payload, ensure_ascii=True, separators=(",", ":")),
+        }
+    )
+
+
+def _process_stop_place(
+    elem: etree._Element,
+    entry: str,
+    writer: csv.DictWriter,
+    args: argparse.Namespace,
+    seen_stop_ids: set[str],
+    summary: Summary,
+) -> None:
+    summary.stop_places_found += 1
+    source_stop_id = clean_text(elem.attrib.get("id"))
+    if not source_stop_id:
+        summary.missing_id_skipped += 1
+        return
+    if source_stop_id in seen_stop_ids:
+        summary.duplicates_skipped += 1
+        return
+
+    stop_name = first_direct_child_text(elem, {"Name"}) or first_descriptor_name(elem)
+    if not stop_name:
+        summary.missing_name_skipped += 1
+        return
+
+    lat, lon = first_location_coords(elem)
+    if lat is None or lon is None:
+        summary.without_coordinates += 1
+    else:
+        summary.with_coordinates += 1
+
+    public_code = first_direct_child_text(elem, {"PublicCode"})
+    private_code = first_direct_child_text(elem, {"PrivateCode"})
+    hard_id = _pick_hard_id(public_code, private_code, key_values(elem))
+    _write_stop_row(
+        writer,
+        args,
+        entry,
+        elem,
+        source_stop_id,
+        stop_name,
+        lat,
+        lon,
+        public_code,
+        private_code,
+        hard_id,
+    )
+    seen_stop_ids.add(source_stop_id)
+    summary.stop_places_written += 1
+
+
+def _scan_xml_entry(
+    archive: zipfile.ZipFile,
+    entry: str,
+    writer: csv.DictWriter,
+    args: argparse.Namespace,
+    seen_stop_ids: set[str],
+    summary: Summary,
+) -> None:
+    entry_info = archive.getinfo(entry)
+    if entry_info.file_size > MAX_XML_ENTRY_BYTES:
+        raise RuntimeError(f"XML entry '{entry}' exceeds safety limit ({entry_info.file_size} bytes)")
+
+    with archive.open(entry) as handle:
+        context = etree.iterparse(
+            handle,
+            events=("end",),
+            tag="{*}StopPlace",
+            recover=False,
+            huge_tree=True,
+            resolve_entities=False,
+            load_dtd=False,
+            no_network=True,
+        )
+        for _, elem in context:
+            _process_stop_place(elem, entry, writer, args, seen_stop_ids, summary)
+            _clear_element(elem)
+
+
 def extract(zip_path: Path, writer: csv.DictWriter, args: argparse.Namespace) -> Summary:
     summary = Summary()
     seen_stop_ids: set[str] = set()
 
     with zipfile.ZipFile(zip_path) as archive:
-        xml_entries = sorted(name for name in archive.namelist() if name.lower().endswith(".xml"))
-        if not xml_entries:
-            raise RuntimeError(f"No XML entries found in archive: {zip_path}")
-
-        # NeTEx stops are typically in Site/SiteFrame XMLs.
-        # Restricting to these entries avoids parsing massive timetable files.
-        preferred_entries = [
-            name
-            for name in xml_entries
-            if any(token in Path(name).name.lower() for token in ("site", "stop", "station"))
-        ]
-        entries_to_scan = preferred_entries if preferred_entries else xml_entries
-        if len(entries_to_scan) > MAX_XML_ENTRIES_TO_SCAN:
-            raise RuntimeError(
-                f"Too many XML entries to scan ({len(entries_to_scan)}). "
-                f"Limit is {MAX_XML_ENTRIES_TO_SCAN}."
-            )
-
-        if not preferred_entries:
-            print(
-                f"[netex-extract] WARN: No site-like XML entry name detected in {zip_path.name}; "
-                "falling back to all XML entries.",
-                file=sys.stderr,
-            )
-
-        for entry in entries_to_scan:
+        for entry in _candidate_xml_entries(archive, zip_path):
             summary.xml_entries_scanned += 1
             try:
-                entry_info = archive.getinfo(entry)
-                if entry_info.file_size > MAX_XML_ENTRY_BYTES:
-                    raise RuntimeError(
-                        f"XML entry '{entry}' exceeds safety limit ({entry_info.file_size} bytes)"
-                    )
-
-                with archive.open(entry) as handle:
-                    context = etree.iterparse(
-                        handle,
-                        events=("end",),
-                        tag="{*}StopPlace",
-                        recover=False,
-                        huge_tree=True,
-                        resolve_entities=False,
-                        load_dtd=False,
-                        no_network=True,
-                    )
-                    for _, elem in context:
-                        summary.stop_places_found += 1
-                        source_stop_id = clean_text(elem.attrib.get("id"))
-                        if not source_stop_id:
-                            summary.missing_id_skipped += 1
-                            elem.clear()
-                            while elem.getprevious() is not None:
-                                del elem.getparent()[0]
-                            continue
-
-                        if source_stop_id in seen_stop_ids:
-                            summary.duplicates_skipped += 1
-                            elem.clear()
-                            while elem.getprevious() is not None:
-                                del elem.getparent()[0]
-                            continue
-
-                        stop_name = first_direct_child_text(elem, {"Name"}) or first_descriptor_name(elem)
-                        if not stop_name:
-                            summary.missing_name_skipped += 1
-                            elem.clear()
-                            while elem.getprevious() is not None:
-                                del elem.getparent()[0]
-                            continue
-
-                        lat, lon = first_location_coords(elem)
-                        if lat is None or lon is None:
-                            summary.without_coordinates += 1
-                        else:
-                            summary.with_coordinates += 1
-
-                        public_code = first_direct_child_text(elem, {"PublicCode"})
-                        private_code = first_direct_child_text(elem, {"PrivateCode"})
-                        kv = key_values(elem)
-
-                        hard_id = public_code or private_code
-                        if not hard_id:
-                            for key in ("uic", "ifopt", "eva", "stopplaceref", "globalid"):
-                                if key in kv:
-                                    hard_id = kv[key]
-                                    break
-
-                        payload = {
-                            "xmlEntry": entry,
-                            "stopPlaceType": first_direct_child_text(elem, {"StopPlaceType"}),
-                            "transportMode": first_direct_child_text(elem, {"TransportMode"}),
-                        }
-
-                        writer.writerow(
-                            {
-                                "import_run_id": args.import_run_id,
-                                "source_id": args.source_id,
-                                "country": args.country,
-                                "provider_slug": args.provider_slug,
-                                "snapshot_date": args.snapshot_date,
-                                "manifest_sha256": args.manifest_sha256,
-                                "source_stop_id": source_stop_id,
-                                "source_parent_stop_id": parent_site_ref(elem) or "",
-                                "stop_name": stop_name,
-                                "latitude": "" if lat is None else f"{lat:.8f}",
-                                "longitude": "" if lon is None else f"{lon:.8f}",
-                                "grid_id": compute_grid_id(args.country, lat, lon),
-                                "public_code": public_code or "",
-                                "private_code": private_code or "",
-                                "hard_id": hard_id or "",
-                                "source_file": entry,
-                                "raw_payload": json.dumps(payload, ensure_ascii=True, separators=(",", ":")),
-                            }
-                        )
-                        seen_stop_ids.add(source_stop_id)
-                        summary.stop_places_written += 1
-
-                        elem.clear()
-                        while elem.getprevious() is not None:
-                            del elem.getparent()[0]
+                _scan_xml_entry(archive, entry, writer, args, seen_stop_ids, summary)
             except etree.XMLSyntaxError as exc:
                 raise RuntimeError(f"NeTEx XML parse error in entry '{entry}': {exc}") from exc
 

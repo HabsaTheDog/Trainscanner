@@ -23,7 +23,7 @@ DECLARE
   v_canonical regclass := to_regclass('public.canonical_stations');
   v_staging regclass := to_regclass('public.netex_stops_staging');
 BEGIN
-  IF to_regclass('public.canonical_stations_legacy') IS NULL
+  IF to_regclass('canonical_stations_legacy') IS NULL
      AND v_canonical IS NOT NULL
      AND NOT EXISTS (
        SELECT 1
@@ -82,7 +82,7 @@ CREATE INDEX IF NOT EXISTS idx_canonical_stations_geom_partitioned
 -- Copy existing rows if legacy table exists.
 DO $$
 BEGIN
-  IF to_regclass('public.canonical_stations_legacy') IS NOT NULL THEN
+  IF to_regclass('canonical_stations_legacy') IS NOT NULL THEN
     INSERT INTO canonical_stations (
       canonical_station_id,
       canonical_name,
@@ -127,13 +127,14 @@ END $$;
 DO $$
 DECLARE
   r record;
+  v_canonical_legacy regclass := to_regclass('canonical_stations_legacy');
 BEGIN
-  IF to_regclass('public.canonical_stations_legacy') IS NOT NULL THEN
+  IF v_canonical_legacy IS NOT NULL THEN
     FOR r IN
       SELECT conrelid::regclass AS table_name, conname
       FROM pg_constraint
       WHERE contype = 'f'
-        AND confrelid = 'public.canonical_stations_legacy'::regclass
+        AND confrelid = v_canonical_legacy
     LOOP
       EXECUTE format(
         'ALTER TABLE %s DROP CONSTRAINT IF EXISTS %I',
