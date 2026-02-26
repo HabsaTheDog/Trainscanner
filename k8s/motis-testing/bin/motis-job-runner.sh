@@ -10,6 +10,7 @@ SERVER_LOG="${SERVER_LOG:-/work/motis-server.log}"
 
 log() {
   printf '[motis-job-runner] %s\n' "$*"
+  return 0
 }
 
 require_file() {
@@ -19,6 +20,7 @@ require_file() {
     log "ERROR: missing ${label}: ${path}"
     exit 2
   fi
+  return 0
 }
 
 cleanup() {
@@ -26,6 +28,7 @@ cleanup() {
     kill "$MOTIS_PID" >/dev/null 2>&1 || true
     wait "$MOTIS_PID" >/dev/null 2>&1 || true
   fi
+  return 0
 }
 
 trap cleanup EXIT INT TERM

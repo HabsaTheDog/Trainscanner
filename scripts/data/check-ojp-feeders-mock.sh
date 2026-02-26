@@ -37,11 +37,12 @@ log() {
 
 fail() {
   printf '[check-ojp-mock] ERROR: %s\n' "$*" >&2
-  exit 1
+  return 1
 }
 
 require_cmd() {
-  command -v "$1" >/dev/null 2>&1 || fail "Missing required command: $1"
+  local cmd="$1"
+  command -v "$cmd" >/dev/null 2>&1 || fail "Missing required command: $cmd"
   return 0
 }
 
@@ -57,8 +58,10 @@ cleanup() {
 trap cleanup EXIT
 
 parse_args() {
+  local arg
   while [[ $# -gt 0 ]]; do
-    case "$1" in
+    arg="$1"
+    case "$arg" in
       --config)
         [[ $# -ge 2 ]] || fail "Missing value for --config"
         MOCK_CONFIG_FILE="$2"
@@ -89,7 +92,7 @@ parse_args() {
         exit 0
         ;;
       *)
-        fail "Unknown argument: $1"
+        fail "Unknown argument: $arg"
         ;;
     esac
   done

@@ -15,6 +15,7 @@ DB_PASSWORD=""
 DB_DOCKER_PROFILE=""
 DB_DOCKER_SERVICE=""
 DB_READY_TIMEOUT_SEC="${CANONICAL_DB_READY_TIMEOUT_SEC:-90}"
+DB_MODE_DOCKER_COMPOSE="docker-compose"
 
 db_log() {
   printf '[db] %s\n' "$*"
@@ -23,7 +24,7 @@ db_log() {
 
 db_fail() {
   printf '[db] ERROR: %s\n' "$*" >&2
-  exit 1
+  return 1
 }
 
 db_load_env() {
@@ -40,17 +41,19 @@ db_load_env() {
 }
 
 db_require_cmd() {
-  command -v "$1" >/dev/null 2>&1 || db_fail "Missing required command: $1"
+  local cmd="$1"
+  command -v "$cmd" >/dev/null 2>&1 || db_fail "Missing required command: $cmd"
   return 0
 }
 
 db_sql_escape() {
-  printf '%s' "$1" | sed "s/'/''/g"
+  local value="$1"
+  printf '%s' "$value" | sed "s/'/''/g"
   return 0
 }
 
 db_has_explicit_direct_target() {
-  [[ -n "${CANONICAL_DB_URL:-}" ]] \
+  if [[ -n "${CANONICAL_DB_URL:-}" ]] \
     || [[ -n "${DATABASE_URL:-}" ]] \
     || [[ -n "${CANONICAL_DB_HOST:-}" ]] \
     || [[ -n "${CANONICAL_DB_PORT:-}" ]] \
@@ -59,7 +62,10 @@ db_has_explicit_direct_target() {
     || [[ -n "${PGHOST:-}" ]] \
     || [[ -n "${PGPORT:-}" ]] \
     || [[ -n "${PGUSER:-}" ]] \
-    || [[ -n "${PGDATABASE:-}" ]]
+    || [[ -n "${PGDATABASE:-}" ]]; then
+    return 0
+  fi
+  return 1
 }
 
 db_probe_direct_connection() {
@@ -98,14 +104,14 @@ db_resolve_connection() {
           if [[ "$explicit_direct_target" == "true" ]]; then
             db_fail "Auto mode detected explicit direct DB configuration, but direct connection failed. Fix connectivity or set CANONICAL_DB_MODE=docker-compose."
           fi
-          DB_MODE_EFFECTIVE="docker-compose"
+          DB_MODE_EFFECTIVE="$DB_MODE_DOCKER_COMPOSE"
           db_log "Auto mode falling back to docker-compose database service '${DB_DOCKER_SERVICE}'"
         fi
       else
         if [[ "$explicit_direct_target" == "true" ]]; then
           db_fail "Auto mode detected explicit direct DB configuration, but psql is unavailable. Install psql or set CANONICAL_DB_MODE=docker-compose."
         fi
-        DB_MODE_EFFECTIVE="docker-compose"
+        DB_MODE_EFFECTIVE="$DB_MODE_DOCKER_COMPOSE"
         db_log "Auto mode selected docker-compose database service '${DB_DOCKER_SERVICE}' because psql is unavailable"
       fi
       ;;
@@ -113,7 +119,7 @@ db_resolve_connection() {
       DB_MODE_EFFECTIVE="direct"
       ;;
     docker-compose)
-      DB_MODE_EFFECTIVE="docker-compose"
+      DB_MODE_EFFECTIVE="$DB_MODE_DOCKER_COMPOSE"
       ;;
     *)
       db_fail "Invalid CANONICAL_DB_MODE '$requested_mode' (expected auto, direct, docker-compose)"
@@ -131,7 +137,7 @@ db_resolve_connection() {
 db_ensure_ready() {
   local started_at now elapsed
 
-  if [[ "$DB_MODE_EFFECTIVE" == "docker-compose" ]]; then
+  if [[ "$DB_MODE_EFFECTIVE" == "$DB_MODE_DOCKER_COMPOSE" ]]; then
     db_log "Ensuring docker compose service '${DB_DOCKER_SERVICE}' (profile '${DB_DOCKER_PROFILE}') is running"
     (cd "$ROOT_DIR" && docker compose --profile "$DB_DOCKER_PROFILE" up -d "$DB_DOCKER_SERVICE") >/dev/null
   fi
@@ -139,7 +145,7 @@ db_ensure_ready() {
   started_at="$(date +%s)"
   while true; do
     if db_psql -At -c 'SELECT 1' >/dev/null 2>&1; then
-      return
+      return 0
     fi
 
     now="$(date +%s)"
@@ -153,7 +159,7 @@ db_ensure_ready() {
 }
 
 db_psql() {
-  if [[ "$DB_MODE_EFFECTIVE" == "docker-compose" ]]; then
+  if [[ "$DB_MODE_EFFECTIVE" == "$DB_MODE_DOCKER_COMPOSE" ]]; then
     (cd "$ROOT_DIR" && docker compose --profile "$DB_DOCKER_PROFILE" exec -T "$DB_DOCKER_SERVICE" \
       psql -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$DB_NAME" "$@")
   else
@@ -163,6 +169,7 @@ db_psql() {
       PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 "$@"
     fi
   fi
+  return 0
 }
 
 db_copy_csv_from_file() {
@@ -171,7 +178,7 @@ db_copy_csv_from_file() {
 
   [[ -f "$csv_file" ]] || db_fail "CSV file not found: $csv_file"
 
-  if [[ "$DB_MODE_EFFECTIVE" == "docker-compose" ]]; then
+  if [[ "$DB_MODE_EFFECTIVE" == "$DB_MODE_DOCKER_COMPOSE" ]]; then
     cat "$csv_file" | (cd "$ROOT_DIR" && docker compose --profile "$DB_DOCKER_PROFILE" exec -T "$DB_DOCKER_SERVICE" \
       psql -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$DB_NAME" -c "\\copy ${copy_target} FROM STDIN WITH (FORMAT csv, HEADER true)")
   else
@@ -182,4 +189,5 @@ db_copy_csv_from_file() {
         -c "\\copy ${copy_target} FROM STDIN WITH (FORMAT csv, HEADER true)"
     fi
   fi
+  return 0
 }

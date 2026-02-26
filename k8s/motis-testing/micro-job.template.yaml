@@ -20,6 +20,7 @@ spec:
         trainscanner.test.bbox: "__BBOX__"
     spec:
       restartPolicy: Never
+      automountServiceAccountToken: false
       volumes:
         - name: scripts
           configMap:
@@ -37,8 +38,17 @@ spec:
           emptyDir: {}
       containers:
         - name: motis-runner
-          image: __MOTIS_IMAGE__
+          image: "__MOTIS_IMAGE_REPO__:__MOTIS_IMAGE_TAG__"
           imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "2Gi"
+              ephemeral-storage: "2Gi"
+            limits:
+              cpu: "2"
+              memory: "6Gi"
+              ephemeral-storage: "8Gi"
           command: ["/bin/sh", "/scripts/motis-job-runner.sh"]
           env:
             - name: WORK_DIR
@@ -66,8 +76,17 @@ spec:
             - name: shared
               mountPath: /work
         - name: tester
-          image: __TESTER_IMAGE__
+          image: "__TESTER_IMAGE_REPO__:__TESTER_IMAGE_TAG__"
           imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+              ephemeral-storage: "512Mi"
+            limits:
+              cpu: "500m"
+              memory: "1Gi"
+              ephemeral-storage: "2Gi"
           command: ["python3", "/scripts/test-motis-routes.py"]
           env:
             - name: MOTIS_TEST_MODE

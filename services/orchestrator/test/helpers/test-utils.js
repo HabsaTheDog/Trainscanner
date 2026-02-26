@@ -53,12 +53,11 @@ async function stopHttpServer(server) {
 }
 
 function startNodeProcess(scriptPath, options = {}) {
+  const envOverrides =
+    options.env && typeof options.env === "object" ? options.env : null;
   const child = spawn(process.execPath, [scriptPath], {
     cwd: options.cwd,
-    env: {
-      ...process.env,
-      ...(options.env || {}),
-    },
+    env: envOverrides ? { ...process.env, ...envOverrides } : process.env,
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -91,7 +90,7 @@ function startNodeProcess(scriptPath, options = {}) {
 async function httpJson(url, options = {}) {
   const response = await fetch(url, options);
   const text = await response.text();
-  let body = {};
+  let body = null;
   if (text) {
     try {
       body = JSON.parse(text);
@@ -147,7 +146,7 @@ with zipfile.ZipFile(r'''${zipPath}''', 'w') as zf:
   for name in ['agency.txt','stops.txt','routes.txt','trips.txt','stop_times.txt','calendar.txt']:
     rows = files[name]
     out = io.StringIO()
-    writer = csv.writer(out, lineterminator='\\n')
+    writer = csv.writer(out, lineterminator='\\\\n')
     writer.writerows(rows)
     zf.writestr(name, out.getvalue())
 `;

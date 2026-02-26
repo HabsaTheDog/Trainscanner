@@ -35,7 +35,7 @@ log() {
 
 fail() {
   printf '[ingest-netex] ERROR: %s\n' "$*" >&2
-  exit 1
+  return 1
 }
 
 cleanup() {
@@ -55,13 +55,16 @@ is_iso_date() {
 }
 
 slugify() {
-  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/_/g; s/^_+//; s/_+$//'
+  local value="$1"
+  printf '%s' "$value" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/_/g; s/^_+//; s/_+$//'
   return 0
 }
 
 parse_args() {
+  local arg
   while [[ $# -gt 0 ]]; do
-    case "$1" in
+    arg="$1"
+    case "$arg" in
       --country)
         [[ $# -ge 2 ]] || fail "Missing value for --country"
         COUNTRY_FILTER="$2"
@@ -82,7 +85,7 @@ parse_args() {
         exit 0
         ;;
       *)
-        fail "Unknown argument: $1"
+        fail "Unknown argument: $arg"
         ;;
     esac
   done

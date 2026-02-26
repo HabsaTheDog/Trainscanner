@@ -44,23 +44,23 @@ test("MetricsCollector aggregates counters, gauges, and histograms", () => {
 
   assert.match(
     output,
-    /orchestrator_http_requests_total\{method="GET",path="\/health"\} 3/,
+    /orchestrator_http_requests_total[{]method="GET",path="[/]health"[}] 3/,
   );
   assert.match(output, /orchestrator_station_cache_entries 7/);
   assert.match(
     output,
-    /orchestrator_http_request_duration_ms_count\{path="\/health"\} 2/,
+    /orchestrator_http_request_duration_ms_count[{]path="[/]health"[}] 2/,
   );
   assert.match(
     output,
-    /orchestrator_http_request_duration_ms_sum\{path="\/health"\} 35/,
+    /orchestrator_http_request_duration_ms_sum[{]path="[/]health"[}] 35/,
   );
   assert.match(
     output,
-    /orchestrator_http_request_duration_ms_min\{path="\/health"\} 10/,
+    /orchestrator_http_request_duration_ms_min[{]path="[/]health"[}] 10/,
   );
   assert.match(
     output,
-    /orchestrator_http_request_duration_ms_max\{path="\/health"\} 25/,
+    /orchestrator_http_request_duration_ms_max[{]path="[/]health"[}] 25/,
   );
 });

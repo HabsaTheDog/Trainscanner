@@ -123,7 +123,7 @@ function resolveDefaultProfile(rootDir) {
   throw new Error("No profiles configured");
 }
 
-(async () => {
+async function run() {
   const args = parseArgs(process.argv.slice(2));
   const rootDir = path.resolve(args.root);
 
@@ -141,7 +141,15 @@ function resolveDefaultProfile(rootDir) {
   }
 
   throw new Error(`Unknown command '${args.command}'`);
-})().catch((err) => {
-  process.stderr.write(`[profile-runtime] ERROR: ${err.message}\n`);
-  process.exit(1);
-});
+}
+
+async function main() {
+  try {
+    await run();
+  } catch (err) {
+    process.stderr.write(`[profile-runtime] ERROR: ${err.message}\n`);
+    process.exit(1);
+  }
+}
+
+void main();

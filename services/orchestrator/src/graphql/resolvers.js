@@ -42,7 +42,7 @@ async function requestAiScoreBridge(clusterId, candidates) {
     if (!response.ok) {
       console.error("AI Service Error:", await response.text());
       return {
-        confidence_score: 0.0,
+        confidence_score: 0,
         suggested_action: "error",
         reasoning: "AI Service unreachable",
       };
@@ -52,7 +52,7 @@ async function requestAiScoreBridge(clusterId, candidates) {
   } catch (e) {
     console.error("AI Bridge Exception:", e);
     return {
-      confidence_score: 0.0,
+      confidence_score: 0,
       suggested_action: "error",
       reasoning: e.message,
     };

@@ -159,61 +159,63 @@ function deepEqual(a, b) {
 }
 
 async function run() {
-  const args = parseArgs(process.argv.slice(2));
-  const routeCases = await loadRouteCaseFile(path.resolve(args.casesFile));
+  try {
+    const args = parseArgs(process.argv.slice(2));
+    const routeCases = await loadRouteCaseFile(path.resolve(args.casesFile));
 
-  const caseResults = [];
-  for (const caseDef of routeCases.cases) {
-    const { baselinePath, baseline } = await readBaselineForCase(
-      caseDef,
-      path.resolve(args.baselinesDir),
+    const caseResults = [];
+    for (const caseDef of routeCases.cases) {
+      const { baselinePath, baseline } = await readBaselineForCase(
+        caseDef,
+        path.resolve(args.baselinesDir),
+      );
+      const execution = await runCase(args.apiUrl, caseDef);
+      const match = deepEqual(execution.response, baseline.expected);
+
+      caseResults.push({
+        caseId: caseDef.id,
+        label: caseDef.label || "",
+        baselinePath,
+        expected: baseline.expected,
+        actual: execution.response,
+        pass: match,
+      });
+    }
+
+    const failed = caseResults.filter((entry) => !entry.pass);
+    const report = {
+      generatedAt: new Date().toISOString(),
+      apiUrl: args.apiUrl,
+      casesFile: path.resolve(args.casesFile),
+      baselinesDir: path.resolve(args.baselinesDir),
+      summary: {
+        total: caseResults.length,
+        passed: caseResults.length - failed.length,
+        failed: failed.length,
+      },
+      cases: caseResults,
+    };
+
+    const reportFile = `route-regression-${new Date().toISOString().replaceAll(/[:.]/g, "-")}.json`;
+    const reportPath = await writeQaReport(args.reportDir, reportFile, report);
+
+    process.stdout.write(`[route-regression] report=${reportPath}\n`);
+    process.stdout.write(
+      `[route-regression] total=${report.summary.total} passed=${report.summary.passed} failed=${report.summary.failed}\n`,
     );
-    const execution = await runCase(args.apiUrl, caseDef);
-    const match = deepEqual(execution.response, baseline.expected);
 
-    caseResults.push({
-      caseId: caseDef.id,
-      label: caseDef.label || "",
-      baselinePath,
-      expected: baseline.expected,
-      actual: execution.response,
-      pass: match,
-    });
-  }
-
-  const failed = caseResults.filter((entry) => !entry.pass);
-  const report = {
-    generatedAt: new Date().toISOString(),
-    apiUrl: args.apiUrl,
-    casesFile: path.resolve(args.casesFile),
-    baselinesDir: path.resolve(args.baselinesDir),
-    summary: {
-      total: caseResults.length,
-      passed: caseResults.length - failed.length,
-      failed: failed.length,
-    },
-    cases: caseResults,
-  };
-
-  const reportFile = `route-regression-${new Date().toISOString().replaceAll(/[:.]/g, "-")}.json`;
-  const reportPath = await writeQaReport(args.reportDir, reportFile, report);
-
-  process.stdout.write(`[route-regression] report=${reportPath}\n`);
-  process.stdout.write(
-    `[route-regression] total=${report.summary.total} passed=${report.summary.passed} failed=${report.summary.failed}\n`,
-  );
-
-  if (failed.length > 0) {
-    for (const fail of failed) {
-      process.stdout.write(`[route-regression] FAIL ${fail.caseId}\n`);
+    if (failed.length > 0) {
+      for (const fail of failed) {
+        process.stdout.write(`[route-regression] FAIL ${fail.caseId}\n`);
+      }
+      if (args.failOnDiff) {
+        process.exit(1);
+      }
     }
-    if (args.failOnDiff) {
-      process.exit(1);
-    }
+  } catch (err) {
+    process.stderr.write(`[route-regression] ERROR: ${err.message}\n`);
+    process.exit(1);
   }
 }
 
-run().catch((err) => {
-  process.stderr.write(`[route-regression] ERROR: ${err.message}\n`);
-  process.exit(1);
-});
+void run();

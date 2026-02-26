@@ -26,9 +26,14 @@ async function getSystemState(key, fallback = null) {
       return row.value;
     }
     return fallback;
-  } catch (_err) {
+  } catch (err) {
     // If table doesn't exist yet or connection fails, return fallback.
     // This makes it graceful.
+    if (process.env.NODE_ENV !== "test") {
+      console.warn(
+        `[system-state] Falling back for key '${key}': ${err.message}`,
+      );
+    }
     return fallback;
   }
 }

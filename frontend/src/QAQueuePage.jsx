@@ -479,7 +479,7 @@ export function QAQueuePage() {
 
   // --- bulk action state ---
   const [busyIds, setBusyIds] = useState(new Set());
-  const [banner, setBanner] = useState(null); // { type: 'ok'|'error', msg }
+  const [banner, setBanner] = useState(null);
 
   // --- bbox drawing state ---
   const [bboxDrawing, setBboxDrawing] = useState(false);
@@ -773,7 +773,10 @@ export function QAQueuePage() {
   });
 
   function thSort(col, label) {
-    const arrow = sortCol === col ? (sortAsc ? " ↑" : " ↓") : "";
+    let arrow = "";
+    if (sortCol === col) {
+      arrow = sortAsc ? " ↑" : " ↓";
+    }
     return (
       <th
         onClick={() => toggleSort(col)}
@@ -864,7 +867,7 @@ export function QAQueuePage() {
       {selected.size > 0 && (
         <div className="bulk-action-bar">
           <span>
-            {selected.size} item{selected.size !== 1 ? "s" : ""} selected
+            {selected.size} item{selected.size === 1 ? "" : "s"} selected
           </span>
           <button
             type="button"

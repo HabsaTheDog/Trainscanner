@@ -73,7 +73,7 @@ function sendText(
 
 function sendError(res, err, options = {}) {
   const includeDetails =
-    options.includeDetails !== undefined ? options.includeDetails : true;
+    options.includeDetails === undefined ? true : options.includeDetails;
   const extra =
     options.extra && typeof options.extra === "object" ? options.extra : {};
   const { statusCode, payload } = errorToPayload(err, { includeDetails });
@@ -957,8 +957,9 @@ async function ensureBootstrapFiles() {
   }
 }
 
-ensureBootstrapFiles()
-  .then(() => {
+async function startServer() {
+  try {
+    await ensureBootstrapFiles();
     server.listen(config.port, () => {
       logger.info("Orchestrator started", {
         step: "startup",
@@ -970,11 +971,13 @@ ensureBootstrapFiles()
         frontendDir: config.frontendDir,
       });
     });
-  })
-  .catch((err) => {
+  } catch (err) {
     logger.error("Failed to bootstrap orchestrator", {
       step: "startup",
       error: err.message,
     });
     process.exitCode = 1;
-  });
+  }
+}
+
+void startServer();

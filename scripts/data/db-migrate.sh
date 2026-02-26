@@ -20,12 +20,14 @@ Options:
   --quiet      Reduce log output
   -h, --help   Show this help
 USAGE
+  return 0
 }
 
 log() {
   if [[ "$QUIET" != "true" ]]; then
     printf '[db-migrate] %s\n' "$*"
   fi
+  return 0
 }
 
 while [[ $# -gt 0 ]]; do

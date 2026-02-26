@@ -1450,14 +1450,15 @@ async function run() {
 }
 
 if (require.main === module) {
-  (async () => {
+  const main = async () => {
     try {
       await run();
     } catch (err) {
       printCliError("seed-base-spatial", err, "Seed base spatial data failed");
       process.exit(1);
     }
-  })();
+  };
+  void main();
 }
 
 module.exports = {

@@ -16,6 +16,10 @@ JOB_NAME=""
 NODE_PATH_MAP=""
 MOTIS_IMAGE="${MOTIS_IMAGE:-ghcr.io/motis-project/motis:latest}"
 TESTER_IMAGE="${TESTER_IMAGE:-python:3.11-slim}"
+MOTIS_IMAGE_REPO=""
+MOTIS_IMAGE_TAG=""
+TESTER_IMAGE_REPO=""
+TESTER_IMAGE_TAG=""
 TIMEOUT_SEC="1200"
 HEALTH_TIMEOUT_SEC="240"
 KEEP_RESOURCES="false"
@@ -53,7 +57,7 @@ USAGE
 
 fail() {
   printf '[run-motis-k8s-test] ERROR: %s\n' "$*" >&2
-  exit 1
+  return 1
 }
 
 log() {
@@ -78,6 +82,26 @@ to_node_path() {
     return 0
   fi
   fail "path '$local_path' is outside mapped prefix '$MAP_LOCAL_PREFIX' for --node-path-map"
+}
+
+split_image_ref() {
+  local image_ref="$1"
+  local image_role="$2"
+  local tail_part repo_part tag_part
+
+  tail_part="${image_ref##*/}"
+  if [[ "$tail_part" != *:* ]]; then
+    fail "${image_role} image must include an explicit tag (got '${image_ref}')"
+  fi
+
+  repo_part="${image_ref%:*}"
+  tag_part="${image_ref##*:}"
+  if [[ -z "$repo_part" || -z "$tag_part" ]]; then
+    fail "${image_role} image is invalid (got '${image_ref}')"
+  fi
+
+  printf '%s|%s\n' "$repo_part" "$tag_part"
+  return 0
 }
 
 # shellcheck disable=SC2329 # invoked via trap on EXIT
@@ -265,6 +289,8 @@ GTFS_FILE_NAME="$(basename "$PREPARED_GTFS")"
 QUERY_FILE_NAME="$(basename "$QUERIES_JSON")"
 OSM_FILE_NAME="$(basename "$OSM_ABS")"
 ACTIVE_DEADLINE_SECONDS="$((TIMEOUT_SEC + 120))"
+IFS='|' read -r MOTIS_IMAGE_REPO MOTIS_IMAGE_TAG <<<"$(split_image_ref "$MOTIS_IMAGE" "MOTIS")"
+IFS='|' read -r TESTER_IMAGE_REPO TESTER_IMAGE_TAG <<<"$(split_image_ref "$TESTER_IMAGE" "tester")"
 
 log "Ensuring namespace '$NAMESPACE' exists..."
 kubectl get namespace "$NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$NAMESPACE" >/dev/null
@@ -297,8 +323,10 @@ replace_token "OSM_HOST_DIR" "$OSM_HOST_DIR_NODE"
 replace_token "GTFS_FILE_NAME" "$GTFS_FILE_NAME"
 replace_token "QUERY_FILE_NAME" "$QUERY_FILE_NAME"
 replace_token "OSM_FILE_NAME" "$OSM_FILE_NAME"
-replace_token "MOTIS_IMAGE" "$MOTIS_IMAGE"
-replace_token "TESTER_IMAGE" "$TESTER_IMAGE"
+replace_token "MOTIS_IMAGE_REPO" "$MOTIS_IMAGE_REPO"
+replace_token "MOTIS_IMAGE_TAG" "$MOTIS_IMAGE_TAG"
+replace_token "TESTER_IMAGE_REPO" "$TESTER_IMAGE_REPO"
+replace_token "TESTER_IMAGE_TAG" "$TESTER_IMAGE_TAG"
 replace_token "TEST_TIMEOUT_SEC" "$TIMEOUT_SEC"
 replace_token "HEALTH_TIMEOUT_SEC" "$HEALTH_TIMEOUT_SEC"
 replace_token "ACTIVE_DEADLINE_SECONDS" "$ACTIVE_DEADLINE_SECONDS"

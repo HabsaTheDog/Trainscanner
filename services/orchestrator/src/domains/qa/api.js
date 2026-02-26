@@ -610,7 +610,7 @@ function deriveServiceContextFromRawRows(rows) {
 
     const directionText = directionKeys
       .map((key) => toCleanString(payload[key]).toLowerCase())
-      .find((value) => Boolean(value));
+      .find(Boolean);
     if (directionText) {
       const label = toCleanString(
         payload.headsign ||

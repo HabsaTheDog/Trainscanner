@@ -34,6 +34,13 @@ function normalizeRow(row) {
     return null;
   }
 
+  let fileSizeBytes = null;
+  if (Number.isFinite(row.file_size_bytes)) {
+    fileSizeBytes = row.file_size_bytes;
+  } else if (Number.isFinite(row.fileSizeBytes)) {
+    fileSizeBytes = row.fileSizeBytes;
+  }
+
   const out = {
     sourceId: row.source_id || row.sourceid || row.sourceId,
     country: row.country,
@@ -51,11 +58,7 @@ function normalizeRow(row) {
       row.resolvedDownloadUrl ||
       null,
     fileName: row.file_name || row.filename || row.fileName,
-    fileSizeBytes: Number.isFinite(row.file_size_bytes)
-      ? row.file_size_bytes
-      : Number.isFinite(row.fileSizeBytes)
-        ? row.fileSizeBytes
-        : null,
+    fileSizeBytes,
     retrievalTimestamp:
       row.retrieval_timestamp ||
       row.retrievaltimestamp ||

@@ -20,15 +20,17 @@ Options:
   --min-canonical N    Minimum canonical rows expected (default: 1)
   -h, --help           Show this help
 USAGE
+  return 0
 }
 
 fail() {
   printf '[check-canonical] ERROR: %s\n' "$*" >&2
-  exit 1
+  return 1
 }
 
 log() {
   printf '[check-canonical] %s\n' "$*"
+  return 0
 }
 
 while [[ $# -gt 0 ]]; do

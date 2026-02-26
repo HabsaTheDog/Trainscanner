@@ -368,68 +368,70 @@ function formatArgs(args = []) {
 }
 
 async function run() {
-  const options = parseArgs(process.argv.slice(2));
-  if (options.help) {
-    printUsage();
-    return;
-  }
+  try {
+    const options = parseArgs(process.argv.slice(2));
+    if (options.help) {
+      printUsage();
+      return;
+    }
 
-  const selectedSteps = filterSelectedSteps(options);
-  const stepDefs = toStepDefinitions(options);
-  const runIdBase = String(options.runId || "").trim() || crypto.randomUUID();
+    const selectedSteps = filterSelectedSteps(options);
+    const stepDefs = toStepDefinitions(options);
+    const runIdBase = String(options.runId || "").trim() || crypto.randomUUID();
 
-  process.stdout.write(`[refresh-station-review] runId=${runIdBase}\n`);
-  process.stdout.write(
-    `[refresh-station-review] scope country=${options.country || "ALL"} as-of=${options.asOf || "latest"} source-id=${options.sourceId || "ALL"}\n`,
-  );
-  process.stdout.write(
-    `[refresh-station-review] selected steps: ${selectedSteps.join(" -> ")}\n`,
-  );
+    process.stdout.write(`[refresh-station-review] runId=${runIdBase}\n`);
+    process.stdout.write(
+      `[refresh-station-review] scope country=${options.country || "ALL"} as-of=${options.asOf || "latest"} source-id=${options.sourceId || "ALL"}\n`,
+    );
+    process.stdout.write(
+      `[refresh-station-review] selected steps: ${selectedSteps.join(" -> ")}\n`,
+    );
 
-  if (options.dryRun) {
-    for (const stepId of selectedSteps) {
+    if (options.dryRun) {
+      for (const stepId of selectedSteps) {
+        const def = stepDefs[stepId];
+        process.stdout.write(
+          `[refresh-station-review] dry-run ${stepId}: ${def.label} ${formatArgs(def.args)}\n`,
+        );
+      }
+      return;
+    }
+
+    const startedAt = Date.now();
+    for (let index = 0; index < selectedSteps.length; index += 1) {
+      const stepId = selectedSteps[index];
       const def = stepDefs[stepId];
+      const stepRunId = `${runIdBase}-${stepId.replaceAll(/[^a-z0-9]+/gi, "-")}`;
+      const stepStartedAt = Date.now();
+
       process.stdout.write(
-        `[refresh-station-review] dry-run ${stepId}: ${def.label} ${formatArgs(def.args)}\n`,
+        `[refresh-station-review] (${index + 1}/${selectedSteps.length}) ${stepId}: ${def.label} ${formatArgs(def.args)}\n`,
+      );
+
+      await def.run({
+        rootDir: options.rootDir,
+        runId: stepRunId,
+        args: def.args,
+      });
+
+      const elapsedMs = Date.now() - stepStartedAt;
+      process.stdout.write(
+        `[refresh-station-review] completed ${stepId} in ${(elapsedMs / 1000).toFixed(1)}s\n`,
       );
     }
-    return;
-  }
 
-  const startedAt = Date.now();
-  for (let index = 0; index < selectedSteps.length; index += 1) {
-    const stepId = selectedSteps[index];
-    const def = stepDefs[stepId];
-    const stepRunId = `${runIdBase}-${stepId.replaceAll(/[^a-z0-9]+/gi, "-")}`;
-    const stepStartedAt = Date.now();
-
+    const totalMs = Date.now() - startedAt;
     process.stdout.write(
-      `[refresh-station-review] (${index + 1}/${selectedSteps.length}) ${stepId}: ${def.label} ${formatArgs(def.args)}\n`,
+      `[refresh-station-review] done in ${(totalMs / 1000).toFixed(1)}s\n`,
     );
-
-    await def.run({
-      rootDir: options.rootDir,
-      runId: stepRunId,
-      args: def.args,
-    });
-
-    const elapsedMs = Date.now() - stepStartedAt;
-    process.stdout.write(
-      `[refresh-station-review] completed ${stepId} in ${(elapsedMs / 1000).toFixed(1)}s\n`,
+  } catch (err) {
+    printCliError(
+      "refresh-station-review",
+      err,
+      "Station review refresh pipeline failed",
     );
+    process.exit(1);
   }
-
-  const totalMs = Date.now() - startedAt;
-  process.stdout.write(
-    `[refresh-station-review] done in ${(totalMs / 1000).toFixed(1)}s\n`,
-  );
 }
 
-run().catch((err) => {
-  printCliError(
-    "refresh-station-review",
-    err,
-    "Station review refresh pipeline failed",
-  );
-  process.exit(1);
-});
+void run();

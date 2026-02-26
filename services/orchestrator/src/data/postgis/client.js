@@ -67,7 +67,7 @@ function resolveConnectionConfig(options = {}) {
 }
 
 function escapeRegex(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
 }
 
 function toSqlLiteral(value) {
@@ -87,17 +87,17 @@ function toSqlLiteral(value) {
     return value ? "TRUE" : "FALSE";
   }
   if (value instanceof Date) {
-    return `'${value.toISOString().replace(/'/g, "''")}'`;
+    return `'${value.toISOString().replaceAll("'", "''")}'`;
   }
   if (typeof value === "object") {
-    return `'${JSON.stringify(value).replace(/'/g, "''")}'`;
+    return `'${JSON.stringify(value).replaceAll("'", "''")}'`;
   }
-  return `'${String(value).replace(/'/g, "''")}'`;
+  return `'${String(value).replaceAll("'", "''")}'`;
 }
 
 function interpolateSqlLiterals(sql, params = {}) {
   let query = String(sql || "");
-  const entries = Object.entries(params || {});
+  const entries = Object.entries(params);
   entries.sort((a, b) => b[0].length - a[0].length);
 
   for (const [key, value] of entries) {
@@ -107,7 +107,7 @@ function interpolateSqlLiterals(sql, params = {}) {
     }
   }
 
-  const unresolved = query.match(/:'[A-Za-z_][A-Za-z0-9_]*'/g);
+  const unresolved = query.match(/:'[A-Za-z_]\w*'/g);
   if (unresolved && unresolved.length > 0) {
     throw new AppError({
       code: "INVALID_REQUEST",
@@ -123,7 +123,7 @@ function scriptResultToStdout(result) {
     ? [...result]
         .reverse()
         .find((item) => Array.isArray(item?.rows) && item.rows.length > 0) ||
-      result[result.length - 1]
+      result.at(-1)
     : result;
 
   if (
@@ -156,7 +156,7 @@ function interpolateSqlParams(sql, params = {}) {
   const values = [];
   let paramIndex = 1;
 
-  const entries = Object.entries(params || {});
+  const entries = Object.entries(params);
 
   // Sort entries by length descending to prevent partial matches (e.g. replacing :id inside :idx)
   entries.sort((a, b) => b[0].length - a[0].length);
@@ -170,7 +170,7 @@ function interpolateSqlParams(sql, params = {}) {
     }
   }
 
-  const unresolved = query.match(/:'[A-Za-z_][A-Za-z0-9_]*'/g);
+  const unresolved = query.match(/:'[A-Za-z_]\w*'/g);
   if (unresolved && unresolved.length > 0) {
     throw new AppError({
       code: "INVALID_REQUEST",
@@ -179,6 +179,11 @@ function interpolateSqlParams(sql, params = {}) {
   }
 
   return { query, values };
+}
+
+async function resolveMode() {
+  // Legacy support: mode is always resolved to 'direct' now that we use pg.Pool
+  return "direct";
 }
 
 function createPostgisClient(options = {}) {
@@ -191,7 +196,7 @@ function createPostgisClient(options = {}) {
       }
     : {
         host: config.host,
-        port: parseInt(config.port, 10),
+        port: Number.parseInt(config.port, 10),
         user: config.user,
         database: config.database,
         password: config.password,
@@ -204,13 +209,9 @@ function createPostgisClient(options = {}) {
     console.error("Unexpected error on idle database client", err);
   });
 
-  async function resolveMode() {
-    // Legacy support: mode is always resolved to 'direct' now that we use pg.Pool
-    return "direct";
-  }
-
   async function ensureReady() {
     const started = Date.now();
+    let lastError = null;
 
     while (Date.now() - started < config.readyTimeoutSec * 1000) {
       try {
@@ -218,7 +219,8 @@ function createPostgisClient(options = {}) {
         await client.query("SELECT 1;");
         client.release();
         return;
-      } catch (_err) {
+      } catch (err) {
+        lastError = err;
         await new Promise((resolve) => setTimeout(resolve, 2000));
       }
     }
@@ -226,6 +228,7 @@ function createPostgisClient(options = {}) {
     throw new AppError({
       code: "INTERNAL_ERROR",
       message: `Database did not become ready within ${config.readyTimeoutSec}s`,
+      cause: lastError || undefined,
     });
   }
 
@@ -324,7 +327,6 @@ function createPostgisClient(options = {}) {
         await client.query("BEGIN");
 
         const statements = [];
-        const _statementIdx = 0;
 
         const tx = {
           add(sql, localParams = {}) {
@@ -336,8 +338,8 @@ function createPostgisClient(options = {}) {
 
         for (const stmt of statements) {
           const mergedParams = {
-            ...(params || {}),
-            ...(stmt.localParams || {}),
+            ...params,
+            ...stmt.localParams,
           };
           const { query, values } = interpolateSqlParams(
             stmt.sql,

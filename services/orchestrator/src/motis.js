@@ -21,7 +21,7 @@ function uniqueList(values) {
 
 function parseStationInput(value) {
   const input = String(value || "").trim();
-  const bracketMatch = input.match(/\[(.+?)\]\s*$/);
+  const bracketMatch = /\[(.+?)\]\s*$/.exec(input);
   if (bracketMatch) {
     return bracketMatch[1].trim();
   }
@@ -31,7 +31,7 @@ function parseStationInput(value) {
 function stationCandidates(value) {
   const input = String(value || "").trim();
   const out = [];
-  const bracketMatch = input.match(/^(.*?)\s*\[(.+?)\]\s*$/);
+  const bracketMatch = /^(.*?)\s*\[(.+?)\]\s*$/.exec(input);
   if (bracketMatch) {
     const name = bracketMatch[1].trim();
     const id = bracketMatch[2].trim();
@@ -68,15 +68,18 @@ function isEndpointNotFound(response) {
 async function requestJson(url, options = {}, timeoutMs = 10000) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  const headers = options.headers
+    ? {
+        "content-type": "application/json",
+        ...options.headers,
+      }
+    : { "content-type": "application/json" };
 
   try {
     const response = await fetch(url, {
       ...options,
       signal: ctrl.signal,
-      headers: {
-        "content-type": "application/json",
-        ...(options.headers || {}),
-      },
+      headers,
     });
 
     const text = await response.text();
@@ -179,7 +182,7 @@ function parseDockerApiVersion(raw) {
   if (typeof raw !== "string") {
     return null;
   }
-  const m = raw.match(/^(\d+)\.(\d+)$/);
+  const m = /^(\d+)\.(\d+)$/.exec(raw);
   if (!m) {
     return null;
   }

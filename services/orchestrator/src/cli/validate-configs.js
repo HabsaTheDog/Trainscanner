@@ -62,46 +62,48 @@ async function validateEntry(name, filePath, validator) {
 }
 
 async function run() {
-  const args = parseArgs(process.argv.slice(2));
-  const root = path.resolve(args.root);
-  const configDir = path.join(root, "config");
+  try {
+    const args = parseArgs(process.argv.slice(2));
+    const root = path.resolve(args.root);
+    const configDir = path.join(root, "config");
 
-  const tasks = [
-    {
-      name: "profiles",
-      filePath: path.join(configDir, "gtfs-profiles.json"),
-      validator: validateGtfsProfilesConfig,
-    },
-    {
-      name: "dach",
-      filePath: path.join(configDir, "dach-data-sources.json"),
-      validator: validateSourceDiscoveryConfig,
-    },
-    {
-      name: "ojp",
-      filePath: path.join(configDir, "ojp-endpoints.json"),
-      validator: validateOjpEndpointsConfig,
-    },
-    {
-      name: "ojp-mock",
-      filePath: path.join(configDir, "ojp-endpoints.mock.json"),
-      validator: validateOjpEndpointsConfig,
-    },
-  ];
+    const tasks = [
+      {
+        name: "profiles",
+        filePath: path.join(configDir, "gtfs-profiles.json"),
+        validator: validateGtfsProfilesConfig,
+      },
+      {
+        name: "dach",
+        filePath: path.join(configDir, "dach-data-sources.json"),
+        validator: validateSourceDiscoveryConfig,
+      },
+      {
+        name: "ojp",
+        filePath: path.join(configDir, "ojp-endpoints.json"),
+        validator: validateOjpEndpointsConfig,
+      },
+      {
+        name: "ojp-mock",
+        filePath: path.join(configDir, "ojp-endpoints.mock.json"),
+        validator: validateOjpEndpointsConfig,
+      },
+    ];
 
-  const selected = args.only
-    ? tasks.filter((task) => task.name === args.only)
-    : tasks;
-  if (selected.length === 0) {
-    throw new Error(`Unknown --only target '${args.only}'`);
-  }
+    const selected = args.only
+      ? tasks.filter((task) => task.name === args.only)
+      : tasks;
+    if (selected.length === 0) {
+      throw new Error(`Unknown --only target '${args.only}'`);
+    }
 
-  for (const task of selected) {
-    await validateEntry(task.name, task.filePath, task.validator);
+    for (const task of selected) {
+      await validateEntry(task.name, task.filePath, task.validator);
+    }
+  } catch (err) {
+    process.stderr.write(`[validate-configs] ERROR: ${err.message}\n`);
+    process.exit(1);
   }
 }
 
-run().catch((err) => {
-  process.stderr.write(`[validate-configs] ERROR: ${err.message}\n`);
-  process.exit(1);
-});
+void run();

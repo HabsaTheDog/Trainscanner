@@ -18,15 +18,17 @@ Options:
   --country DE|AT|CH   Restrict report to one country
   -h, --help           Show this help
 USAGE
+  return 0
 }
 
 fail() {
   printf '[report-canonical] ERROR: %s\n' "$*" >&2
-  exit 1
+  return 1
 }
 
 log() {
   printf '[report-canonical] %s\n' "$*"
+  return 0
 }
 
 while [[ $# -gt 0 ]]; do

@@ -108,16 +108,18 @@ fail() {
     "$FETCH_PROGRESS_TOTAL_BYTES" \
     "$*" || true
   printf '[fetch-dach] ERROR: %s\n' "$*" >&2
-  exit 1
+  return 1
 }
 
 require_cmd() {
-  command -v "$1" >/dev/null 2>&1 || fail "Missing required command: $1"
+  local cmd="$1"
+  command -v "$cmd" >/dev/null 2>&1 || fail "Missing required command: $cmd"
   return 0
 }
 
 slugify() {
-  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/_/g; s/^_+//; s/_+$//'
+  local value="$1"
+  printf '%s' "$value" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/_/g; s/^_+//; s/_+$//'
   return 0
 }
 
@@ -129,8 +131,10 @@ is_iso_date() {
 }
 
 parse_args() {
+  local arg
   while [[ $# -gt 0 ]]; do
-    case "$1" in
+    arg="$1"
+    case "$arg" in
       --as-of)
         [[ $# -ge 2 ]] || fail "Missing value for --as-of"
         AS_OF="$2"
@@ -151,7 +155,7 @@ parse_args() {
         exit 0
         ;;
       *)
-        fail "Unknown option: $1"
+        fail "Unknown option: $arg"
         ;;
     esac
   done
@@ -229,7 +233,7 @@ build_auth_args() {
           local session_cookie_file
           session_cookie_file="$(delfi_login_cookie_file "$source_id" "$login_url" "$username" "$password" "$auth_check_url")"
           AUTH_ARGS+=(--cookie "$session_cookie_file")
-          return
+          return 0
         fi
         fail "Missing auth for '$source_id': set cookie/header ($cookie_var, $cookie_file_var, $header_var) or login credentials ($user_var, $pass_var)"
       fi
@@ -501,6 +505,7 @@ resolve_download_url() {
       fail "Unknown downloadMethod '$method' for source '$source_id'"
       ;;
   esac
+  return 0
 }
 
 check_format_match() {
@@ -523,10 +528,10 @@ check_format_match() {
         && printf '%s\n' "$file_name" | grep -Eiq '^[0-9]{8}_fahrplaene_gesamtdeutschland\.zip$'; then
         return 0
       fi
-      if command -v unzip >/dev/null 2>&1 && printf '%s\n' "$file_name" | grep -Eiq '\.zip$'; then
-        if unzip -l "$file_path" 2>/dev/null | grep -Eiq 'netex|netx|\.xml'; then
-          return 0
-        fi
+      if command -v unzip >/dev/null 2>&1 \
+        && printf '%s\n' "$file_name" | grep -Eiq '\.zip$' \
+        && unzip -l "$file_path" 2>/dev/null | grep -Eiq 'netex|netx|\.xml'; then
+        return 0
       fi
       return 1
       ;;
@@ -534,10 +539,10 @@ check_format_match() {
       if printf '%s\n' "$file_name" | grep -Eiq 'gtfs|google_transit'; then
         return 0
       fi
-      if command -v unzip >/dev/null 2>&1 && printf '%s\n' "$file_name" | grep -Eiq '\.zip$'; then
-        if unzip -l "$file_path" 2>/dev/null | grep -Eq '(agency|stops|routes|trips|stop_times)\.txt'; then
-          return 0
-        fi
+      if command -v unzip >/dev/null 2>&1 \
+        && printf '%s\n' "$file_name" | grep -Eiq '\.zip$' \
+        && unzip -l "$file_path" 2>/dev/null | grep -Eq '(agency|stops|routes|trips|stop_times)\.txt'; then
+        return 0
       fi
       return 1
       ;;

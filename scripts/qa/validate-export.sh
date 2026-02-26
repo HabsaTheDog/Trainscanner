@@ -29,7 +29,7 @@ log() {
 
 fail() {
   printf '[validate-export] ERROR: %s\n' "$*" >&2
-  exit 1
+  return 1
 }
 
 while [[ $# -gt 0 ]]; do

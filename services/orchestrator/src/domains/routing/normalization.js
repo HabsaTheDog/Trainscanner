@@ -57,7 +57,7 @@ function parseCoordinateToken(value) {
     return null;
   }
 
-  const match = input.match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
+  const match = /^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/.exec(input);
   if (!match) {
     return null;
   }
@@ -72,7 +72,7 @@ function parseCoordinateToken(value) {
 
 function parseBracketId(value) {
   const input = String(value || "").trim();
-  const match = input.match(/\[(.+?)\]\s*$/);
+  const match = /\[(.+?)\]\s*$/.exec(input);
   if (!match) {
     return null;
   }

@@ -40,10 +40,15 @@ async function run() {
 }
 
 if (require.main === module) {
-  run().catch((err) => {
-    console.error("Temporal worker failed:", err);
-    process.exit(1);
-  });
+  const main = async () => {
+    try {
+      await run();
+    } catch (err) {
+      console.error("Temporal worker failed:", err);
+      process.exit(1);
+    }
+  };
+  void main();
 }
 
 module.exports = { run };

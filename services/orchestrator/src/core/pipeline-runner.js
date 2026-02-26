@@ -15,7 +15,7 @@ function toSafeArgs(args) {
   if (!Array.isArray(args)) {
     return [];
   }
-  return args.map((arg) => String(arg));
+  return args.map(String);
 }
 
 function createPipelineLogger(
@@ -35,7 +35,7 @@ function createPipelineLogger(
 function buildIdempotencyKey(service, args = []) {
   const payload = JSON.stringify({
     service: String(service || ""),
-    args: Array.isArray(args) ? args.map((arg) => String(arg)) : [],
+    args: Array.isArray(args) ? args.map(String) : [],
   });
   return crypto.createHash("sha256").update(payload).digest("hex");
 }

@@ -141,6 +141,36 @@ function updateBounds(bounds, lon, lat) {
   bounds.count += 1;
 }
 
+function legLineCoordinates(leg) {
+  if (leg?.legGeometry?.points) {
+    try {
+      const precision = Number(leg.legGeometry.precision);
+      const decoded = decodePolyline(leg.legGeometry.points, precision);
+      if (decoded.length >= 2) {
+        return decoded;
+      }
+    } catch {
+      // fallback below
+    }
+  }
+
+  if (
+    leg?.from &&
+    leg.to &&
+    Number.isFinite(leg.from.lat) &&
+    Number.isFinite(leg.from.lon) &&
+    Number.isFinite(leg.to.lat) &&
+    Number.isFinite(leg.to.lon)
+  ) {
+    return [
+      [leg.from.lon, leg.from.lat],
+      [leg.to.lon, leg.to.lat],
+    ];
+  }
+
+  return [];
+}
+
 function getFormFieldString(formData, key) {
   const value = formData.get(key);
   return typeof value === "string" ? value : "";
@@ -465,36 +495,6 @@ export function initHomeApp() {
     if (source) {
       source.setData(pendingRouteGeoJson);
     }
-  }
-
-  function legLineCoordinates(leg) {
-    if (leg?.legGeometry?.points) {
-      try {
-        const precision = Number(leg.legGeometry.precision);
-        const decoded = decodePolyline(leg.legGeometry.points, precision);
-        if (decoded.length >= 2) {
-          return decoded;
-        }
-      } catch {
-        // fallback below
-      }
-    }
-
-    if (
-      leg?.from &&
-      leg.to &&
-      Number.isFinite(leg.from.lat) &&
-      Number.isFinite(leg.from.lon) &&
-      Number.isFinite(leg.to.lat) &&
-      Number.isFinite(leg.to.lon)
-    ) {
-      return [
-        [leg.from.lon, leg.from.lat],
-        [leg.to.lon, leg.to.lat],
-      ];
-    }
-
-    return [];
   }
 
   function drawRouteMap(payload) {

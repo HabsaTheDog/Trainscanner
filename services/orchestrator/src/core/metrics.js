@@ -1,7 +1,7 @@
 function escapeLabelValue(value) {
   return String(value)
-    .replaceAll("\\", "\\\\")
-    .replaceAll("\n", "\\n")
+    .replaceAll(/\\/g, "\\\\")
+    .replaceAll(/\n/g, "\\n")
     .replaceAll('"', '\\"');
 }
 
@@ -73,14 +73,21 @@ class MetricsCollector {
     }
 
     for (const item of this.histograms.values()) {
-      lines.push(`${item.name}_count${labelsText(item.labels)} ${item.count}`);
-      lines.push(`${item.name}_sum${labelsText(item.labels)} ${item.sum}`);
+      const histogramLines = [
+        `${item.name}_count${labelsText(item.labels)} ${item.count}`,
+        `${item.name}_sum${labelsText(item.labels)} ${item.sum}`,
+      ];
       if (Number.isFinite(item.min)) {
-        lines.push(`${item.name}_min${labelsText(item.labels)} ${item.min}`);
+        histogramLines.push(
+          `${item.name}_min${labelsText(item.labels)} ${item.min}`,
+        );
       }
       if (Number.isFinite(item.max)) {
-        lines.push(`${item.name}_max${labelsText(item.labels)} ${item.max}`);
+        histogramLines.push(
+          `${item.name}_max${labelsText(item.labels)} ${item.max}`,
+        );
       }
+      lines.push(...histogramLines);
     }
 
     return lines.join("\n") + (lines.length > 0 ? "\n" : "");

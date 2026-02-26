@@ -12,6 +12,7 @@ CURRENT_STEP=""
 CURRENT_CMD=""
 PIPELINE_STARTED_AT="$(date +%s)"
 REFRESH_ARGS=()
+STEP_DB_MIGRATE="db-migrate"
 
 timestamp_utc() {
   date -u +"%Y-%m-%dT%H:%M:%SZ"
@@ -25,7 +26,7 @@ log() {
 
 fail() {
   log "ERROR: $*"
-  exit 1
+  return 1
 }
 
 usage() {
@@ -102,7 +103,7 @@ on_error() {
     log "Failed command: ${CURRENT_CMD}"
   fi
 
-  if [[ "$CURRENT_STEP" == "db-migrate" ]]; then
+  if [[ "$CURRENT_STEP" == "$STEP_DB_MIGRATE" ]]; then
     log "Hint: verify PostGIS is reachable and CANONICAL_DB_* env values are correct."
   fi
 
@@ -186,8 +187,8 @@ log "Refresh args: ${REFRESH_ARGS[*]}"
 
 if [[ "$DRY_RUN" == "true" ]]; then
   if [[ "$SKIP_MIGRATE" == "false" ]]; then
-    record_step "db-migrate" "skipped" "0"
-    log "DRY-RUN step=db-migrate command=${ROOT_DIR}/scripts/data/db-migrate.sh"
+    record_step "$STEP_DB_MIGRATE" "skipped" "0"
+    log "DRY-RUN step=${STEP_DB_MIGRATE} command=${ROOT_DIR}/scripts/data/db-migrate.sh"
   fi
   run_step "refresh-station-review" "${ROOT_DIR}/scripts/data/refresh-station-review.sh" "${REFRESH_ARGS[@]}"
   print_summary
@@ -195,10 +196,10 @@ if [[ "$DRY_RUN" == "true" ]]; then
 fi
 
 if [[ "$SKIP_MIGRATE" == "false" ]]; then
-  run_step "db-migrate" "${ROOT_DIR}/scripts/data/db-migrate.sh"
+  run_step "$STEP_DB_MIGRATE" "${ROOT_DIR}/scripts/data/db-migrate.sh"
 else
-  record_step "db-migrate" "skipped" "0"
-  log "SKIP step=db-migrate (--skip-migrate)"
+  record_step "$STEP_DB_MIGRATE" "skipped" "0"
+  log "SKIP step=${STEP_DB_MIGRATE} (--skip-migrate)"
 fi
 
 run_step "refresh-station-review" "${ROOT_DIR}/scripts/data/refresh-station-review.sh" "${REFRESH_ARGS[@]}"

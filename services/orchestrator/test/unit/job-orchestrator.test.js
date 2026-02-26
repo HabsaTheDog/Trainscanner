@@ -8,27 +8,27 @@ const {
 } = require("../../src/core/job-orchestrator");
 const { AppError } = require("../../src/core/errors");
 
+function cloneJob(job) {
+  return job ? structuredClone(job) : null;
+}
+
 function createInMemoryJobsRepo() {
   const byId = new Map();
   const byKey = new Map();
 
-  function clone(job) {
-    return job ? JSON.parse(JSON.stringify(job)) : null;
-  }
-
   function save(job) {
-    byId.set(job.jobId, clone(job));
+    byId.set(job.jobId, cloneJob(job));
     byKey.set(`${job.jobType}|${job.idempotencyKey}`, job.jobId);
-    return clone(job);
+    return cloneJob(job);
   }
 
   return {
     async getById(jobId) {
-      return clone(byId.get(jobId));
+      return cloneJob(byId.get(jobId));
     },
     async getByIdempotency(jobType, idempotencyKey) {
       const id = byKey.get(`${jobType}|${idempotencyKey}`);
-      return id ? clone(byId.get(id)) : null;
+      return id ? cloneJob(byId.get(id)) : null;
     },
     async createQueuedJob(input) {
       return save({
@@ -87,9 +87,10 @@ function createInMemoryJobsRepo() {
       if (!current) {
         return;
       }
+      const patchData = patch && typeof patch === "object" ? patch : null;
       save({
         ...current,
-        ...(patch || {}),
+        ...(patchData || undefined),
       });
     },
     _seed(job) {

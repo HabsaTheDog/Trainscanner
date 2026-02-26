@@ -74,25 +74,31 @@ function parseArgs(argv = []) {
 }
 
 async function run() {
-  const args = parseArgs(process.argv.slice(2));
-  const client = createPostgisClient({ rootDir: args.rootDir });
-  await client.ensureReady();
+  try {
+    const args = parseArgs(process.argv.slice(2));
+    const client = createPostgisClient({ rootDir: args.rootDir });
+    await client.ensureReady();
 
-  const jobsRepo = createPipelineJobsRepo(client);
-  const jobs = await jobsRepo.listRecentByType(args.jobType || "", 1000);
-  const payload = buildKpiPayload(jobs, {
-    windowHours: args.windowHours,
-  });
+    const jobsRepo = createPipelineJobsRepo(client);
+    const jobs = await jobsRepo.listRecentByType(args.jobType || "", 1000);
+    const payload = buildKpiPayload(jobs, {
+      windowHours: args.windowHours,
+    });
 
-  const reportPath = await writeKpiReport(args.reportDir, {
-    ...payload,
-    jobType: args.jobType || null,
-  });
+    const reportPath = await writeKpiReport(args.reportDir, {
+      ...payload,
+      jobType: args.jobType || null,
+    });
 
-  process.stdout.write(`${reportPath}\n`);
+    process.stdout.write(`${reportPath}\n`);
+  } catch (err) {
+    printCliError(
+      "pipeline-kpis",
+      err,
+      "Pipeline KPI report generation failed",
+    );
+    process.exit(1);
+  }
 }
 
-run().catch((err) => {
-  printCliError("pipeline-kpis", err, "Pipeline KPI report generation failed");
-  process.exit(1);
-});
+void run();

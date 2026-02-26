@@ -7,6 +7,13 @@
 
 const LOW_CONFIDENCE_THRESHOLD = 0.9;
 
+function toNumberOrNull(value) {
+  if (value == null) {
+    return null;
+  }
+  return Number(value);
+}
+
 /**
  * Fetch evidence rows where ai_confidence < 0.90.
  *
@@ -77,14 +84,13 @@ async function getLowConfidenceQueue(client, { limit = 50, offset = 0 } = {}) {
       source_canonical_station_id: row.source_canonical_station_id,
       target_canonical_station_id: row.target_canonical_station_id,
       evidence_type: row.evidence_type,
-      ai_confidence:
-        row.ai_confidence != null ? Number(row.ai_confidence) : null,
+      ai_confidence: toNumberOrNull(row.ai_confidence),
       ai_suggested_action: row.ai_suggested_action || null,
       cluster_display_name: row.cluster_display_name || null,
-      source_lat: row.source_lat != null ? Number(row.source_lat) : null,
-      source_lon: row.source_lon != null ? Number(row.source_lon) : null,
-      target_lat: row.target_lat != null ? Number(row.target_lat) : null,
-      target_lon: row.target_lon != null ? Number(row.target_lon) : null,
+      source_lat: toNumberOrNull(row.source_lat),
+      source_lon: toNumberOrNull(row.source_lon),
+      target_lat: toNumberOrNull(row.target_lat),
+      target_lon: toNumberOrNull(row.target_lon),
     })),
   };
 }
@@ -154,12 +160,10 @@ async function recordAiMatchDecision(
   }
 
   // Map operator action to the canonical decision operation set
-  const dbOperation =
-    operation === "approve"
-      ? "keep_separate"
-      : operation === "reject"
-        ? "keep_separate"
-        : "merge"; // override → merge into targetCluster
+  let dbOperation = "merge";
+  if (operation === "approve" || operation === "reject") {
+    dbOperation = "keep_separate";
+  }
 
   const decisionPayload = {
     ai_queue_action: operation,

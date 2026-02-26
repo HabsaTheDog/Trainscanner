@@ -54,8 +54,9 @@ warn() {
 }
 
 require_cmd() {
-  command -v "$1" >/dev/null 2>&1 || {
-    printf '[verify-dach] ERROR: Missing required command: %s\n' "$1" >&2
+  local cmd="$1"
+  command -v "$cmd" >/dev/null 2>&1 || {
+    printf '[verify-dach] ERROR: Missing required command: %s\n' "$cmd" >&2
     exit 1
   }
   return 0
@@ -76,20 +77,22 @@ is_iso_ts() {
 }
 
 parse_args() {
+  local arg
   while [[ $# -gt 0 ]]; do
-    case "$1" in
+    arg="$1"
+    case "$arg" in
       --country)
-        [[ $# -ge 2 ]] || { echo "Missing value for --country" >&2; exit 1; }
+        [[ $# -ge 2 ]] || { err "Missing value for --country"; exit 1; }
         COUNTRY_FILTER="$2"
         shift 2
         ;;
       --source-id)
-        [[ $# -ge 2 ]] || { echo "Missing value for --source-id" >&2; exit 1; }
+        [[ $# -ge 2 ]] || { err "Missing value for --source-id"; exit 1; }
         SOURCE_ID_FILTER="$2"
         shift 2
         ;;
       --as-of)
-        [[ $# -ge 2 ]] || { echo "Missing value for --as-of" >&2; exit 1; }
+        [[ $# -ge 2 ]] || { err "Missing value for --as-of"; exit 1; }
         AS_OF="$2"
         shift 2
         ;;
@@ -98,19 +101,19 @@ parse_args() {
         exit 0
         ;;
       *)
-        echo "Unknown option: $1" >&2
+        err "Unknown option: $arg"
         exit 1
         ;;
     esac
   done
 
   if [[ -n "$COUNTRY_FILTER" && "$COUNTRY_FILTER" != "DE" && "$COUNTRY_FILTER" != "AT" && "$COUNTRY_FILTER" != "CH" ]]; then
-    echo "Invalid --country '$COUNTRY_FILTER'" >&2
+    err "Invalid --country '$COUNTRY_FILTER'"
     exit 1
   fi
 
   if [[ -n "$AS_OF" ]] && ! is_iso_date "$AS_OF"; then
-    echo "Invalid --as-of '$AS_OF' (expected YYYY-MM-DD)" >&2
+    err "Invalid --as-of '$AS_OF' (expected YYYY-MM-DD)"
     exit 1
   fi
   return 0
@@ -249,7 +252,6 @@ extract_attr() {
 }
 
 delfi_login_cookie_file() {
-  local source_id="$1"
   local login_url="$2"
   local username="$3"
   local password="$4"
