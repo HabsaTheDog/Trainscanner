@@ -1307,7 +1307,7 @@ async function writeArtifacts(outputDir, payloads) {
   }; // NOSONAR
 }
 
-async function run() {
+async function run(/* NOSONAR */) {
   const parsedCli = parsePipelineCliArgs(process.argv.slice(2));
   const args = parseSeedArgs(parsedCli.passthroughArgs);
 

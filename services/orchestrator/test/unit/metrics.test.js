@@ -7,7 +7,7 @@ test("labelsText escapes Prometheus label values", () => {
   const rendered = labelsText({
     path: '/api/"routes"',
     note: "line1\nline2",
-    slash: "a\\b",
+    slash: String.raw`a\b`,
   });
 
   assert.equal(
