@@ -212,7 +212,7 @@ def load_rows_from_csv(path: str):
         return list(reader)
 
 
-def run_psql_csv(query: str): # NOSONAR
+def run_psql_csv(query: str):
     def _run_command(cmd, *, env=None, cwd=None):
         return subprocess.run(
             cmd,
@@ -262,7 +262,7 @@ def run_psql_csv(query: str): # NOSONAR
         )
 
         if db_url:
-            cmd = ["psql", db_url, "-X", "-v", "ON_ERROR_STOP=1", "--csv", "-c", query] # NOSONAR
+            cmd = ["psql", db_url, "-X", "-v", "ON_ERROR_STOP=1", "--csv", "-c", query]
         else:
             cmd = [
                 "psql",
@@ -577,7 +577,7 @@ def parse_explicit_tiers(raw_hint: str):
     return tiers
 
 
-def classify_stop_tiers(stop): # NOSONAR
+def classify_stop_tiers(stop):
     tiers = set()
 
     tiers.update(parse_explicit_tiers(stop.get("tier_hint", "")))
@@ -618,7 +618,7 @@ def classify_stop_tiers(stop): # NOSONAR
     return sorted(tiers)
 
 
-def load_stops_from_rows(rows): # NOSONAR
+def load_stops_from_rows(rows):
     if not rows:
         fail("no stop rows found for export scope")
 
@@ -778,7 +778,7 @@ def infer_route_type(stops, tier: str) -> str:
     return "0"
 
 
-def build_tables(profile: str, requested_tier: str, stops, agency_url: str): # NOSONAR
+def build_tables(profile: str, requested_tier: str, stops, agency_url: str):
     tz_map = {
         "DE": "Europe/Berlin",
         "AT": "Europe/Vienna",
@@ -958,7 +958,7 @@ def build_tables(profile: str, requested_tier: str, stops, agency_url: str): # N
     }
 
     if transfer_rows:
-        files["transfers.txt"] = csv_text( # NOSONAR
+        files["transfers.txt"] = csv_text(
             ["from_stop_id", "to_stop_id", "transfer_type", "min_transfer_time"],
             transfer_rows,
         )

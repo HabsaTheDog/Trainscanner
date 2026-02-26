@@ -109,7 +109,7 @@ function createJobOrchestrator(options = {}) {
         ],
   );
 
-  async function runJob(input = {}) { // NOSONAR
+  async function runJob(input = {}) {
     const jobType = String(input.jobType || "").trim();
     const idempotencyKey = String(input.idempotencyKey || "").trim();
     const runContext =

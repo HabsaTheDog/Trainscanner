@@ -300,7 +300,7 @@ async function updateRefreshCheckpoint(updateCheckpoint, state, patch) {
   return next;
 }
 
-async function runRefreshPipelineSteps(input /* NOSONAR */) {
+async function runRefreshPipelineSteps(input) {
   const rootDir = input.rootDir || process.cwd();
   const runId = String(input.runId || "").trim() || crypto.randomUUID();
   const scope = normalizeRefreshScope(input.scope || {});
@@ -514,7 +514,7 @@ function addArrayValues(targetSet, value) {
   }
 }
 
-function deriveServiceContextFromRawRows(rows /* NOSONAR */) {
+function deriveServiceContextFromRawRows(rows) {
   const lineKeys = [
     "line",
     "route",
@@ -527,7 +527,7 @@ function deriveServiceContextFromRawRows(rows /* NOSONAR */) {
   const lineArrayKeys = [
     "lines",
     "routes",
-    "services", // NOSONAR
+    "services",
     "trips",
     "line_codes",
     "route_ids",
@@ -901,14 +901,14 @@ function inferSectionTypeFromLabel(label) {
   return "other";
 }
 
-function buildGroupModelFromDecision( /* NOSONAR */
+function buildGroupModelFromDecision(
   clusterId,
   country,
   decision,
   stationToSegment = new Map(),
 ) {
   if (
-    !decision?.operation || // NOSONAR
+    !decision?.operation ||
     decision.operation !== "split" ||
     !Array.isArray(decision.groups) ||
     decision.groups.length < 2
@@ -1820,8 +1820,8 @@ function persistGroupModel(tx, groupModel) {
   }
 }
 
-function buildDecisionMembersPayload(decision /* NOSONAR */) {
-  const rows = []; // NOSONAR
+function buildDecisionMembersPayload(decision) {
+  const rows = [];
   const seen = new Set();
 
   function pushRow(canonicalStationId, groupLabel, action, metadata = {}) {
@@ -1906,8 +1906,8 @@ function buildRenameTargets(decision) {
   return targets;
 }
 
-function buildSegmentWalkLinks(decision /* NOSONAR */) {
-  const links = []; // NOSONAR
+function buildSegmentWalkLinks(decision) {
+  const links = [];
   const seen = new Set();
 
   for (const group of decision.groups) {

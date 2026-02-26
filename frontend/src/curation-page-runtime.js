@@ -35,7 +35,7 @@ export function initCurationApp() {
     value: "",
   };
 
-  const createEmptyDraftState = () => { // NOSONAR
+  const createEmptyDraftState = () => {
     return {
       mergeItems: [],
       groups: [],
@@ -46,11 +46,11 @@ export function initCurationApp() {
   };
   draftState = createEmptyDraftState();
 
-  const createDraftId = (prefix) => { // NOSONAR
+  const createDraftId = (prefix) => {
     return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
   };
 
-  const escapeHtml = (value) => { // NOSONAR
+  const escapeHtml = (value) => {
     return String(value || "")
       .replaceAll("&", "&amp;")
       .replaceAll("<", "&lt;")
@@ -59,7 +59,7 @@ export function initCurationApp() {
       .replaceAll("'", "&#39;");
   };
 
-  const showNotice = (message, tone = "info", sticky = false) => { // NOSONAR
+  const showNotice = (message, tone = "info", sticky = false) => {
     const box = document.getElementById("uiNotice");
     if (!box) {
       return;
@@ -77,25 +77,25 @@ export function initCurationApp() {
     }
   };
 
-  const normalizeText = (value) => { // NOSONAR
+  const normalizeText = (value) => {
     return String(value || "")
       .trim()
       .toLowerCase();
   };
 
-  const toCandidateRef = (stationId) => { // NOSONAR
+  const toCandidateRef = (stationId) => {
     return `candidate:${String(stationId || "").trim()}`;
   };
 
-  const toMergeRef = (mergeId) => { // NOSONAR
+  const toMergeRef = (mergeId) => {
     return `merge:${String(mergeId || "").trim()}`;
   };
 
-  const toGroupRef = (groupId) => { // NOSONAR
+  const toGroupRef = (groupId) => {
     return `group:${String(groupId || "").trim()}`;
   };
 
-  const parseRef = (refKey) => { // NOSONAR
+  const parseRef = (refKey) => {
     const raw = String(refKey || "").trim();
     const index = raw.indexOf(":");
     if (index <= 0) {
@@ -185,7 +185,7 @@ export function initCurationApp() {
     );
   }
 
-  const compareCandidateRank = (a, b) => { // NOSONAR
+  const compareCandidateRank = (a, b) => {
     const rankA = Number.parseInt(String(a?.candidate_rank ?? ""), 10);
     const rankB = Number.parseInt(String(b?.candidate_rank ?? ""), 10);
     const safeRankA =
@@ -313,7 +313,7 @@ export function initCurationApp() {
     return refs;
   }
 
-  function getMergeDerivedMemberStationIds() { // NOSONAR
+  function getMergeDerivedMemberStationIds() {
     const stationIds = new Set();
 
     if (Array.isArray(activeCuratedProjectionItems)) {
@@ -408,7 +408,7 @@ export function initCurationApp() {
     );
   }
 
-  const resolveDefaultMapStyle = () => { // NOSONAR
+  const resolveDefaultMapStyle = () => {
     if (globalThis.MAP_STYLE_URL) {
       return globalThis.MAP_STYLE_URL;
     }
@@ -418,7 +418,7 @@ export function initCurationApp() {
     return "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
   };
 
-  const resolveSatelliteMapStyle = () => { // NOSONAR
+  const resolveSatelliteMapStyle = () => {
     if (globalThis.SATELLITE_MAP_STYLE_URL) {
       return globalThis.SATELLITE_MAP_STYLE_URL;
     }
@@ -524,7 +524,7 @@ export function initCurationApp() {
     currentMarkers = [];
   }
 
-  const getCandidateStationId = (candidate) => { // NOSONAR
+  const getCandidateStationId = (candidate) => {
     return String(candidate?.canonical_station_id || "").trim();
   };
 
@@ -545,7 +545,7 @@ export function initCurationApp() {
     });
   }
 
-  const getGroupedCandidatesByLocation = (candidates) => { // NOSONAR
+  const getGroupedCandidatesByLocation = (candidates) => {
     const groups = new Map();
 
     for (const candidate of candidates || []) {
@@ -1256,7 +1256,7 @@ export function initCurationApp() {
     renderClusterDetail();
   }
 
-  const pairKey = (a, b) => { // NOSONAR
+  const pairKey = (a, b) => {
     const values = [String(a || "").trim(), String(b || "").trim()].sort(
       (x, y) => x.localeCompare(y),
     );
@@ -1918,7 +1918,7 @@ export function initCurationApp() {
     }
   }
 
-  const fetchCuratedProjection = async (clusterId) => { // NOSONAR
+  const fetchCuratedProjection = async (clusterId) => {
     const cleanClusterId = String(clusterId || "").trim();
     if (!cleanClusterId) {
       return [];
@@ -2078,7 +2078,7 @@ export function initCurationApp() {
     }
   }
 
-  function renderClusterDetail() { // NOSONAR
+  function renderClusterDetail() {
     const headerEl = document.getElementById("clusterHeader");
     const metaEl = document.getElementById("clusterMeta");
     const candidatesEl = document.getElementById("candidateList");

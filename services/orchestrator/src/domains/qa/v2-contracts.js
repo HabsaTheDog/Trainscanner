@@ -195,7 +195,7 @@ function normalizeRenameTarget(raw, index) {
   };
 }
 
-function normalizeClusterDecision(body) { // NOSONAR
+function normalizeClusterDecision(body) {
   const payload = body && typeof body === "object" ? body : {};
   const operation = String(payload.operation || "").trim();
 

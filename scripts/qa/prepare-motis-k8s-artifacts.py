@@ -18,14 +18,14 @@ from typing import NoReturn
 
 TIER_CHOICES = ("all", "high-speed", "regional", "local")
 GTFS_TABLES = (
-    "agency.txt", # NOSONAR
-    "stops.txt", # NOSONAR
-    "routes.txt", # NOSONAR
-    "trips.txt", # NOSONAR
-    "stop_times.txt", # NOSONAR
-    "calendar.txt", # NOSONAR
-    "calendar_dates.txt", # NOSONAR
-    "transfers.txt", # NOSONAR
+    "agency.txt",
+    "stops.txt",
+    "routes.txt",
+    "trips.txt",
+    "stop_times.txt",
+    "calendar.txt",
+    "calendar_dates.txt",
+    "transfers.txt",
     "feed_info.txt",
 )
 LOCAL_ROUTE_TYPES = {
@@ -204,7 +204,7 @@ def parse_service_date(raw: str | None) -> dt.date | None:
         return None
 
 
-def active_services( # NOSONAR
+def active_services(
     calendar_rows: list[dict[str, str]],
     calendar_dates_rows: list[dict[str, str]],
     date_str: str,
@@ -284,7 +284,7 @@ def time_to_iso(date_str: str, hhmmss: str) -> str | None:
     return value.isoformat() + "Z"
 
 
-def add_parent_and_child_stops( # NOSONAR
+def add_parent_and_child_stops(
     initial_ids: set[str],
     stops_rows: list[dict[str, str]],
 ) -> set[str]:
@@ -312,7 +312,7 @@ def add_parent_and_child_stops( # NOSONAR
     return keep
 
 
-def filter_feed_by_routes( # NOSONAR
+def filter_feed_by_routes(
     tables: dict[str, list[dict[str, str]]],
     tier: str,
 ) -> dict[str, list[dict[str, str]]]:
@@ -401,7 +401,7 @@ def filter_feed_by_routes( # NOSONAR
     }
 
 
-def micro_scope_feed( # NOSONAR
+def micro_scope_feed(
     tables: dict[str, list[dict[str, str]]],
     bbox: tuple[float, float, float, float],
     padding_km: float,
@@ -514,7 +514,7 @@ def micro_scope_feed( # NOSONAR
     )
 
 
-def build_micro_queries( # NOSONAR
+def build_micro_queries(
     tables: dict[str, list[dict[str, str]]],
     bbox_stop_ids: set[str],
     max_queries: int,

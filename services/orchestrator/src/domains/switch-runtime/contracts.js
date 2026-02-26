@@ -66,7 +66,7 @@ function validateRuntimeDescriptor(runtime, contextPath) {
   }
 }
 
-function validateGtfsProfilesConfig(raw) { // NOSONAR
+function validateGtfsProfilesConfig(raw) {
   const source = raw && typeof raw === "object" ? raw.profiles || raw : null;
   if (!source || typeof source !== "object" || Array.isArray(source)) {
     throw new AppError({

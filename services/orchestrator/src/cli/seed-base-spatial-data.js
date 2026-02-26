@@ -209,7 +209,7 @@ function isStrictIsoDate(value) {
   return date.toISOString().slice(0, 10) === value;
 }
 
-function parseCsv(text) { // NOSONAR
+function parseCsv(text) {
   const rows = [];
   let currentRow = [];
   let currentField = "";
@@ -709,7 +709,7 @@ function printHelp() {
   process.stdout.write("  -h, --help               Show this help\n");
 }
 
-function parseSeedArgs(args = []) { // NOSONAR
+function parseSeedArgs(args = []) {
   const parsed = {
     helpRequested: false,
     countries: [],
@@ -1304,10 +1304,10 @@ async function writeArtifacts(outputDir, payloads) {
     summaryPath,
     manifestPath,
     rowsPath,
-  }; // NOSONAR
+  };
 }
 
-async function run(/* NOSONAR */) {
+async function run() {
   const parsedCli = parsePipelineCliArgs(process.argv.slice(2));
   const args = parseSeedArgs(parsedCli.passthroughArgs);
 

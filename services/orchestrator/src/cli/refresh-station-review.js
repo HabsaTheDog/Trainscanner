@@ -91,7 +91,7 @@ function assertStepId(stepId, flagName) {
   });
 }
 
-function parseArgs(argv = []) { // NOSONAR
+function parseArgs(argv = []) {
   const parsed = parsePipelineCliArgs(argv);
   const passthrough = Array.isArray(parsed.passthroughArgs)
     ? parsed.passthroughArgs
@@ -434,4 +434,4 @@ async function run() {
   }
 }
 
-void run(); // NOSONAR - CommonJS entrypoint cannot use top-level await.
+void run();

@@ -101,4 +101,4 @@ async function run() {
   }
 }
 
-void run(); // NOSONAR - CommonJS entrypoint cannot use top-level await.
+void run();

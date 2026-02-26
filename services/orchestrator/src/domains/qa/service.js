@@ -38,7 +38,7 @@ function printReportReviewQueueUsage() {
   process.stdout.write("  -h, --help           Show this help\n");
 }
 
-function parseReportReviewQueueArgs(args = []) { // NOSONAR
+function parseReportReviewQueueArgs(args = []) {
   const parsed = {
     helpRequested: false,
     country: "",

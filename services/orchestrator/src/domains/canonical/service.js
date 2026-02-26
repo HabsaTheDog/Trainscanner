@@ -63,7 +63,7 @@ function printBuildCanonicalUsage() {
   process.stdout.write("  -h, --help           Show this help\n");
 }
 
-function parseBuildCanonicalArgs(args = []) { // NOSONAR
+function parseBuildCanonicalArgs(args = []) {
   const parsed = {
     helpRequested: false,
     scope: {
@@ -144,7 +144,7 @@ function parseBuildCanonicalArgs(args = []) { // NOSONAR
   return parsed;
 }
 
-function parseBuildReviewQueueArgs(args = []) { // NOSONAR
+function parseBuildReviewQueueArgs(args = []) {
   const parsed = {
     helpRequested: false,
     scope: {

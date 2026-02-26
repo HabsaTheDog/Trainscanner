@@ -12,13 +12,13 @@ VALUES
   (
     'default',
     jsonb_build_object(
-      'name_similarity_weight', 0.35, -- NOSONAR
-      'distance_weight', 0.25, -- NOSONAR
-      'hard_id_weight', 0.20, -- NOSONAR
-      'provider_overlap_weight', 0.10, -- NOSONAR
-      'service_overlap_weight', 0.10, -- NOSONAR
-      'distance_threshold_meters', 1500, -- NOSONAR
-      'max_cluster_candidates', 40 -- NOSONAR
+      'name_similarity_weight', 0.35,
+      'distance_weight', 0.25,
+      'hard_id_weight', 0.20,
+      'provider_overlap_weight', 0.10,
+      'service_overlap_weight', 0.10,
+      'distance_threshold_meters', 1500,
+      'max_cluster_candidates', 40
     )
   ),
   (
@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS qa_station_naming_overrides_v2 (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CHECK (display_name <> ''),
-  CHECK (jsonb_typeof(aliases) = 'array') -- NOSONAR
+  CHECK (jsonb_typeof(aliases) = 'array')
 );
 
 CREATE INDEX IF NOT EXISTS idx_qa_station_naming_overrides_v2_station
@@ -100,7 +100,7 @@ CREATE INDEX IF NOT EXISTS idx_qa_station_display_names_v2_lookup
 
 CREATE TABLE IF NOT EXISTS qa_station_complexes_v2 (
   complex_id text PRIMARY KEY,
-  country char(2) NOT NULL CHECK (country ~ '^[A-Z]{2}$'), -- NOSONAR
+  country char(2) NOT NULL CHECK (country ~ '^[A-Z]{2}$'),
   complex_name text NOT NULL,
   display_name text,
   metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -187,7 +187,7 @@ CREATE TABLE IF NOT EXISTS qa_station_clusters_v2 (
   country char(2) NOT NULL CHECK (country ~ '^[A-Z]{2}$'),
   scope_tag text NOT NULL,
   scope_as_of date,
-  severity text NOT NULL CHECK (severity IN ('low', 'medium', 'high')), -- NOSONAR
+  severity text NOT NULL CHECK (severity IN ('low', 'medium', 'high')),
   status text NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'in_review', 'resolved', 'dismissed')),
   candidate_count integer NOT NULL DEFAULT 0 CHECK (candidate_count >= 0),
   issue_count integer NOT NULL DEFAULT 0 CHECK (issue_count >= 0),
@@ -322,12 +322,12 @@ BEGIN
     COALESCE(NULLIF(ov.locale, ''), 'und') AS locale,
     CASE
       WHEN ov.naming_override_id IS NOT NULL THEN 'manual_override'
-      ELSE 'canonical_name' -- NOSONAR
+      ELSE 'canonical_name'
     END AS naming_strategy,
     COALESCE(NULLIF(ov.reason, ''), 'Derived from canonical station aggregate') AS naming_reason,
     jsonb_build_object(
       'canonical_name', cs.canonical_name,
-      'country', cs.country, -- NOSONAR
+      'country', cs.country,
       'override_id', ov.naming_override_id
     ) AS source_refs,
     COALESCE(
@@ -799,7 +799,7 @@ BEGIN
           UNION ALL
           SELECT raw_payload ->> 'trip' AS value FROM src
           UNION ALL
-          SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof(raw_payload -> 'lines') = 'array' THEN raw_payload -> 'lines' ELSE '[]'::jsonb END) FROM src -- NOSONAR
+          SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof(raw_payload -> 'lines') = 'array' THEN raw_payload -> 'lines' ELSE '[]'::jsonb END) FROM src
           UNION ALL
           SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof(raw_payload -> 'routes') = 'array' THEN raw_payload -> 'routes' ELSE '[]'::jsonb END) FROM src
           UNION ALL

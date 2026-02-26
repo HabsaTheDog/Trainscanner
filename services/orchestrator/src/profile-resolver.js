@@ -6,7 +6,7 @@ const {
   validateGtfsProfilesConfig,
 } = require("./domains/switch-runtime/contracts");
 
-function normalizeProfiles(raw) { // NOSONAR
+function normalizeProfiles(raw) {
   const source = validateGtfsProfilesConfig(raw);
   const normalized = {};
 
@@ -129,7 +129,7 @@ async function pickLatestRuntimeDate(runtimeRootAbs) {
   return null;
 }
 
-async function resolveProfileArtifact(profileName, profile, options = {}) { // NOSONAR
+async function resolveProfileArtifact(profileName, profile, options = {}) {
   const allowMissing = Boolean(options.allowMissing);
   const dataDir = options.dataDir;
 

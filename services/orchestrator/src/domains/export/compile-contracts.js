@@ -28,7 +28,7 @@ function isIsoDate(value) {
   );
 }
 
-function validateCompileGtfsRequest(body) { // NOSONAR
+function validateCompileGtfsRequest(body) {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     throw new AppError({
       code: "INVALID_REQUEST",
