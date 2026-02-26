@@ -95,6 +95,14 @@ CREATE INDEX IF NOT EXISTS idx_canonical_station_overrides_target
   ON canonical_station_overrides (target_canonical_station_id)
   WHERE target_canonical_station_id IS NOT NULL;
 
+CREATE OR REPLACE FUNCTION station_rule_scope_country_default()
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+AS $$
+  SELECT 'country_default';
+$$;
+
 CREATE TABLE IF NOT EXISTS station_transfer_rules (
   rule_id bigserial PRIMARY KEY,
   rule_scope text NOT NULL CHECK (rule_scope ~ '^(country_default|hub|station)$'),
@@ -115,7 +123,7 @@ CREATE TABLE IF NOT EXISTS station_transfer_rules (
   updated_at timestamptz NOT NULL DEFAULT now(),
   CHECK (effective_to IS NULL OR effective_from IS NULL OR effective_to >= effective_from),
   CHECK (
-    (rule_scope = 'country_default' AND canonical_station_id IS NULL AND hub_name IS NULL)
+    (rule_scope = station_rule_scope_country_default() AND canonical_station_id IS NULL AND hub_name IS NULL)
     OR (rule_scope = 'hub' AND canonical_station_id IS NULL AND NULLIF(hub_name, '') IS NOT NULL)
     OR (rule_scope = 'station' AND canonical_station_id IS NOT NULL AND hub_name IS NULL)
   )
@@ -134,7 +142,7 @@ CREATE INDEX IF NOT EXISTS idx_station_transfer_rules_hub
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_station_transfer_rules_country_default_active
   ON station_transfer_rules (country, rule_scope)
-  WHERE rule_scope = 'country_default' AND is_active = true AND effective_to IS NULL;
+  WHERE rule_scope = station_rule_scope_country_default() AND is_active = true AND effective_to IS NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_station_transfer_rules_hub_active
   ON station_transfer_rules (country, hub_name)
@@ -154,7 +162,7 @@ INSERT INTO station_transfer_rules (
   notes
 )
 SELECT
-  'country_default',
+  station_rule_scope_country_default(),
   v.country,
   8,
   45,
@@ -165,7 +173,7 @@ FROM (VALUES ('DE'::char(2)), ('AT'::char(2)), ('CH'::char(2))) AS v(country)
   WHERE NOT EXISTS (
     SELECT 1
     FROM station_transfer_rules r
-    WHERE r.rule_scope = 'country_default'
+    WHERE r.rule_scope = station_rule_scope_country_default()
       AND r.country = v.country
       AND r.is_active
       AND r.effective_to IS NULL

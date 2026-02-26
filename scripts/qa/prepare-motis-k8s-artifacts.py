@@ -313,7 +313,7 @@ def _add_missing_parents(
     rows_by_id: dict[str, dict[str, str]],
 ) -> bool:
     changed = False
-    for stop_id in list(keep):
+    for stop_id in keep.copy():
         row = rows_by_id.get(stop_id)
         if not row:
             continue
