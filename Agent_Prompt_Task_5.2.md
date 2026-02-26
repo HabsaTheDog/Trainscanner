@@ -5,8 +5,9 @@ You are an AI agent tasked with executing Phase 5, Task 5.2 of the Trainscanner 
 Your goal is to build the QA Operator Interface frontend — allowing operators to review, visually inspect, and bulk-approve or reject AI station matches from a MapLibre map.
 
 **Current State Reference:**
+
 - **Backend is ready.** The GraphQL API is fully wired in `orchestrator/src/graphql/schema.js` and `resolvers.js`. The relevant queries/mutations to use are:
-  -  `lowConfidenceQueue(limit, offset)` — fetches pending matches
+  - `lowConfidenceQueue(limit, offset)` — fetches pending matches
   - `approveAiMatch(clusterId, evidenceId)` — approves a match
   - `rejectAiMatch(clusterId, evidenceId)` — rejects a match
   - `overrideAiMatch(clusterId, evidenceId, targetClusterId)` — overrides with a manual target
@@ -29,10 +30,11 @@ Your goal is to build the QA Operator Interface frontend — allowing operators 
    - Implement a "Select Region" tool on the map (e.g., a bbox draw or polygon selection) that allows operators to select all visible low-confidence items at once and batch-approve or batch-reject them via the GraphQL mutations.
 
 4. **Transfer Matrix Override (Top 100 Mega-Hubs):**
-   - Add a separate "Manual Walk-Time Override" section for the top 100 EU mega-hubs (e.g., Paris CDG, Frankfurt, Amsterdam Centraal). 
+   - Add a separate "Manual Walk-Time Override" section for the top 100 EU mega-hubs (e.g., Paris CDG, Frankfurt, Amsterdam Centraal).
    - This can be a simple, separate table that allows operators to directly enter or edit walking times (in minutes) between platforms for the hub, storing overrides in the database.
 
 **Deliverables:**
+
 - Updated or new React component(s) in `frontend/src/`.
 - Any associated state management, GraphQL query helpers, and CSS updates in `frontend/src/styles.css`.
 - Instructions on how to run the frontend locally (`npm run dev`).

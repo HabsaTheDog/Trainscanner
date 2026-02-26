@@ -36,6 +36,7 @@ python main.py
 
 To spin up a local Llama-3 (or similar) model, you can either run Ollama locally or mount a `vllm` docker image.
 For example:
+
 ```bash
 docker run --gpus all -v ~/.cache/huggingface:/root/.cache/huggingface --env "HUGGING_FACE_HUB_TOKEN=<secret>" -p 8000:8000 ipcrm/vllm:latest --model meta-llama/Meta-Llama-3-8B-Instruct
 ```

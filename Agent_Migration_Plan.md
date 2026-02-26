@@ -3,6 +3,7 @@
 This document breaks down the "Project Scope" into sequential, isolated tasks. You can assign these tasks to AI agents one by one. Each phase builds upon the previous one to safely migrate the database and architecture to a scalable, Europe-wide solution.
 
 ## Phase 1: Storage Foundation & Spatial Seeding
+
 **Goal:** Establish a robust, scalable spatial database before ingesting heavy data.
 
 - [ ] **Task 1.1: PostGIS & Geographic Partitioning Setup**
@@ -13,6 +14,7 @@ This document breaks down the "Project Scope" into sequential, isolated tasks. Y
   - **Agent Prompt:** "Create a script to pre-seed the PostGIS database with known, stable datasets (UIC codes, OpenRailwayMap stations). Ensure strict legal isolation from proprietary schedule DBs to avoid ODbL license virality."
 
 ## Phase 2: Ingestion & Normalization Engine
+
 **Goal:** Handle massive, malformed XML datasets without crashing.
 
 - [ ] **Task 2.1: Rust SAX Stream Workers**
@@ -21,6 +23,7 @@ This document breaks down the "Project Scope" into sequential, isolated tasks. Y
   - **Agent Prompt:** "Introduce an abstract 'Data Normalization Schema' step post-parsing. It must strictly map all times to Vienna (CET/CEST), flag anomalies, and handle the 'Provider Weighting' hierarchy to auto-trust local infrastructure owners for cross-border data conflicts."
 
 ## Phase 3: Control Plane & Orchestration
+
 **Goal:** Replace the fragile Node.js orchestrator with a robust distributed system.
 
 - [ ] **Task 3.1: Temporal.io Setup**
@@ -29,6 +32,7 @@ This document breaks down the "Project Scope" into sequential, isolated tasks. Y
   - **Agent Prompt:** "Refactor the ingestion trigger to heavily batch entity updates before passing them to Temporal. Implement an 'October slow burn' logic to stretch compute load, preventing workflow bloat in the orchestration DB."
 
 ## Phase 4: Local AI & Spatial Inference
+
 **Goal:** Process novel stations efficiently using local context, avoiding live API latency.
 
 - [ ] **Task 4.1: Local vLLM Worker Setup**
@@ -37,6 +41,7 @@ This document breaks down the "Project Scope" into sequential, isolated tasks. Y
   - **Agent Prompt:** "Implement the AI logic to compute 'Merge Confidence Scores' for novel stations. The AI must explicitly query the local OSM database for multi-language tags (`name:en`, `name:fr`) to prevent duplication in border regions."
 
 ## Phase 5: QA & Operator Resolutions
+
 **Goal:** Enable humans to efficiently verify the AI's low-confidence matches.
 
 - [ ] **Task 5.1: Vector Tile Map & GraphQL Backend**
@@ -45,6 +50,7 @@ This document breaks down the "Project Scope" into sequential, isolated tasks. Y
   - **Agent Prompt:** "Build the QA frontend in React/MapLibre. Implement pattern-based, region-wide bulk approvals. Add a 'Transfer Matrix' override system prioritizing manual walk-time curation for the top 100 EU mega-hubs."
 
 ## Phase 6: Testing Grid & Artifact Compilation
+
 **Goal:** Validate the final GTFS feeds dynamically without cost-prohibitive compute spikes.
 
 - [ ] **Task 6.1: Hierarchical Artifact Compilation**
@@ -53,6 +59,7 @@ This document breaks down the "Project Scope" into sequential, isolated tasks. Y
   - **Agent Prompt:** "Implement a Kubernetes orchestration script to dynamically spin up ephemeral MOTIS testing pods. Create two test modes: dynamic micro-graphs (affected bbox + padding) for local updates, and isolated sparse macro-graphs for high-speed networks."
 
 ## Suggested Agent Workflow:
+
 1. Provide the agent with the `Project Scope.md` file for context context.
 2. Copy/Paste the specific **Agent Prompt** from the checklist above.
 3. Once the agent completes a task, review the code, run standard tests, and merge before assigning the next task on the list.
