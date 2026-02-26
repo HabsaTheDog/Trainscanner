@@ -1931,6 +1931,27 @@ function buildRenameTargets(decision) {
   return targets;
 }
 
+function pushSegmentWalkLink(
+  links,
+  seen,
+  fromSegmentId,
+  toSegmentId,
+  minWalkMinutes,
+  metadata,
+) {
+  const key = `${fromSegmentId}|${toSegmentId}`;
+  if (seen.has(key)) {
+    return;
+  }
+  seen.add(key);
+  links.push({
+    fromSegmentId,
+    toSegmentId,
+    minWalkMinutes,
+    metadata,
+  });
+}
+
 function buildSegmentWalkLinks(decision) {
   const links = [];
   const seen = new Set();
@@ -1948,34 +1969,30 @@ function buildSegmentWalkLinks(decision) {
         operation: decision.operation,
       };
 
-      const forwardKey = `${parsed.fromSegmentId}|${parsed.toSegmentId}`;
-      if (!seen.has(forwardKey)) {
-        seen.add(forwardKey);
-        links.push({
-          fromSegmentId: parsed.fromSegmentId,
-          toSegmentId: parsed.toSegmentId,
-          minWalkMinutes: parsed.minWalkMinutes,
-          metadata: {
-            ...baseMetadata,
-            bidirectional: parsed.bidirectional,
-          },
-        });
-      }
+      pushSegmentWalkLink(
+        links,
+        seen,
+        parsed.fromSegmentId,
+        parsed.toSegmentId,
+        parsed.minWalkMinutes,
+        {
+          ...baseMetadata,
+          bidirectional: parsed.bidirectional,
+        },
+      );
 
       if (parsed.bidirectional) {
-        const reverseKey = `${parsed.toSegmentId}|${parsed.fromSegmentId}`;
-        if (!seen.has(reverseKey)) {
-          seen.add(reverseKey);
-          links.push({
-            fromSegmentId: parsed.toSegmentId,
-            toSegmentId: parsed.fromSegmentId,
-            minWalkMinutes: parsed.minWalkMinutes,
-            metadata: {
-              ...baseMetadata,
-              bidirectional: true,
-            },
-          });
-        }
+        pushSegmentWalkLink(
+          links,
+          seen,
+          parsed.toSegmentId,
+          parsed.fromSegmentId,
+          parsed.minWalkMinutes,
+          {
+            ...baseMetadata,
+            bidirectional: true,
+          },
+        );
       }
     }
   }

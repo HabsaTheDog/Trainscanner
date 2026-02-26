@@ -419,6 +419,22 @@ function classifyFallbackRouteResponse(response, planPath) {
   };
 }
 
+function buildRouteRequestParamCandidates(
+  originCandidates,
+  destinationCandidates,
+  datetime,
+) {
+  const candidates = [];
+  for (const origin of originCandidates) {
+    for (const destination of destinationCandidates) {
+      for (const buildParams of QUERY_VARIANTS) {
+        candidates.push(buildParams(origin, destination, datetime));
+      }
+    }
+  }
+  return candidates;
+}
+
 async function probePlanPath(config, planPath, attempts) {
   const probeUrl = new URL(joinUrl(config.motisBaseUrl, planPath));
   const probe = await requestJson(
@@ -446,38 +462,32 @@ async function tryRouteRequestsForPath({
   let firstNonNotFound = null;
   let firstRouteNotFound = null;
 
-  for (const origin of originCandidates) {
-    for (const destination of destinationCandidates) {
-      for (const buildParams of QUERY_VARIANTS) {
-        const params = buildParams(origin, destination, datetime);
-        const response = await requestRouteVariant(
-          config,
-          planPath,
-          params,
-          attempts,
-        );
+  for (const params of buildRouteRequestParamCandidates(
+    originCandidates,
+    destinationCandidates,
+    datetime,
+  )) {
+    const response = await requestRouteVariant(config, planPath, params, attempts);
 
-        if (response.ok) {
-          return {
-            success: {
-              ...response,
-              routePath: planPath,
-              routeMethod: "GET",
-              routeAttempts: attempts,
-            },
-            firstRouteNotFound,
-            firstNonNotFound,
-          };
-        }
+    if (response.ok) {
+      return {
+        success: {
+          ...response,
+          routePath: planPath,
+          routeMethod: "GET",
+          routeAttempts: attempts,
+        },
+        firstRouteNotFound,
+        firstNonNotFound,
+      };
+    }
 
-        const fallback = classifyFallbackRouteResponse(response, planPath);
-        if (!firstRouteNotFound && fallback.routeNotFound) {
-          firstRouteNotFound = fallback.routeNotFound;
-        }
-        if (!firstNonNotFound && fallback.nonNotFound) {
-          firstNonNotFound = fallback.nonNotFound;
-        }
-      }
+    const fallback = classifyFallbackRouteResponse(response, planPath);
+    if (!firstRouteNotFound && fallback.routeNotFound) {
+      firstRouteNotFound = fallback.routeNotFound;
+    }
+    if (!firstNonNotFound && fallback.nonNotFound) {
+      firstNonNotFound = fallback.nonNotFound;
     }
   }
 
