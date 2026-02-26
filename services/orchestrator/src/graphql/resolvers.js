@@ -80,7 +80,7 @@ const rootValue = {
   requestAiScore: async ({ clusterId }) => {
     // 1. Fetch cluster details to get candidates
     const detail = await getReviewClusterDetailV2(clusterId);
-    if (!detail || !detail.candidates) {
+    if (!detail?.candidates) {
       throw new Error("Cluster not found to score");
     }
 

@@ -15,11 +15,13 @@ Usage: scripts/qa/seed-export-fixture.sh [--as-of YYYY-MM-DD]
 
 Seed minimal canonical fixture data used by CI export checks.
 USAGE
+  return 0
 }
 
 fail() {
   printf '[seed-export-fixture] ERROR: %s\n' "$*" >&2
   exit 1
+  return 1
 }
 
 while [[ $# -gt 0 ]]; do

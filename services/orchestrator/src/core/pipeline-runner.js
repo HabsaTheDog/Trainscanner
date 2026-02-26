@@ -66,7 +66,7 @@ async function runLegacyDataScript(options = {}) {
   const args = toSafeArgs(options.args);
   const runId =
     String(options.runId || "").trim() ||
-    generateId(service.replace(/[^A-Za-z0-9]+/g, "-"));
+    generateId(service.replaceAll(/[^A-Za-z0-9]+/g, "-"));
   const runCommand = options.runCommand || spawnInherit;
 
   if (!scriptFile) {

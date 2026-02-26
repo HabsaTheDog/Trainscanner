@@ -21,6 +21,7 @@ cleanup_temp_files() {
   for f in "${TEMP_FILES[@]}"; do
     [[ -n "$f" ]] && rm -f "$f" 2>/dev/null || true
   done
+  return 0
 }
 trap cleanup_temp_files EXIT
 
@@ -74,6 +75,7 @@ write_fetch_progress() {
   mv "$tmp_progress_file" "$FETCH_PROGRESS_FILE" 2>/dev/null || {
     rm -f "$tmp_progress_file" 2>/dev/null || true
   }
+  return 0
 }
 
 usage() {
@@ -88,10 +90,12 @@ Options:
   --source-id ID       Only fetch one source id
   -h, --help           Show this help
 USAGE
+  return 0
 }
 
 log() {
   printf '[fetch-dach] %s\n' "$*"
+  return 0
 }
 
 fail() {
@@ -109,16 +113,19 @@ fail() {
 
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || fail "Missing required command: $1"
+  return 0
 }
 
 slugify() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/_/g; s/^_+//; s/_+$//'
+  return 0
 }
 
 is_iso_date() {
   local d="$1"
   [[ "$d" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || return 1
   date -u -d "$d" +%F >/dev/null 2>&1
+  return 0
 }
 
 parse_args() {
@@ -159,12 +166,16 @@ parse_args() {
 }
 
 load_env() {
-  if [[ -f .env ]]; then
-    set -a
-    # shellcheck disable=SC1091
-    source .env
-    set +a
-  fi
+  local env_file
+  for env_file in .env .env.local; do
+    if [[ -f "$env_file" ]]; then
+      set -a
+      # shellcheck disable=SC1090,SC1091
+      source "$env_file"
+      set +a
+    fi
+  done
+  return 0
 }
 
 build_auth_args() {
@@ -244,6 +255,7 @@ extract_attr() {
   local input="$1"
   local attr="$2"
   printf '%s\n' "$input" | sed -nE "s/.*${attr}=\"([^\"]*)\".*/\\1/p" | head -1
+  return 0
 }
 
 delfi_login_cookie_file() {
@@ -298,6 +310,7 @@ delfi_login_cookie_file() {
   fi
 
   printf '%s\n' "$cookie_file"
+  return 0
 }
 
 normalize_url() {
@@ -319,6 +332,7 @@ normalize_url() {
   else
     printf '%s/%s\n' "${base_url%/}" "$maybe_relative"
   fi
+  return 0
 }
 
 resolve_de_delfi_netex() {
@@ -373,6 +387,7 @@ resolve_de_delfi_netex() {
 
   [[ -n "$fallback_url" ]] || fail "No DE DELFI download URL could be resolved"
   printf '%s\n' "$fallback_url"
+  return 0
 }
 
 resolve_at_netex() {
@@ -405,6 +420,7 @@ resolve_at_netex() {
 
   [[ -n "$best_url" ]] || fail "No AT NetEx URL matched as-of date '$as_of'"
   printf '%s\n' "$best_url"
+  return 0
 }
 
 resolve_ch_netex() {
@@ -447,6 +463,7 @@ resolve_ch_netex() {
 
   [[ -n "$best_url" ]] || fail "No CH NetEx URL matched as-of date '$as_of'"
   printf '%s\n' "$best_url"
+  return 0
 }
 
 resolve_download_url() {
@@ -547,6 +564,7 @@ detect_version_hint() {
   fi
 
   printf '%s\n' "$hint"
+  return 0
 }
 
 probe_http_code() {
@@ -558,6 +576,7 @@ probe_http_code() {
     code="$(curl -sS -o /dev/null -w '%{http_code}' -L -r 0-0 "$@" "$url" || true)"
   fi
   printf '%s\n' "$code"
+  return 0
 }
 
 main() {
@@ -764,6 +783,7 @@ main() {
   write_fetch_progress "completed" "" "$FETCH_PROGRESS_TOTAL_SOURCES" "$FETCH_PROGRESS_TOTAL_SOURCES" "" 0 0 \
     "All selected sources fetched successfully."
   log "All selected sources fetched successfully."
+  return 0
 }
 
 main "$@"

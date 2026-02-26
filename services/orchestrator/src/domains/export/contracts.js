@@ -44,7 +44,7 @@ function sortObject(value) {
   }
   if (value && typeof value === "object") {
     const out = {};
-    for (const key of Object.keys(value).sort()) {
+    for (const key of Object.keys(value).sort((a, b) => a.localeCompare(b))) {
       out[key] = sortObject(value[key]);
     }
     return out;

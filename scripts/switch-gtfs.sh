@@ -25,6 +25,7 @@ Examples:
   scripts/switch-gtfs.sh --profile sample_dach --api-url http://localhost:3000
   scripts/switch-gtfs.sh --profile sample_de --smoke-gate --smoke-max-attempts 180
 USAGE
+  return 0
 }
 
 json_field() {
@@ -33,8 +34,10 @@ json_field() {
 
   if command -v jq >/dev/null 2>&1; then
     printf '%s' "$json" | jq -r ".${key} // empty"
+    return 0
   else
     printf '%s' "$json" | sed -n "s/.*\"${key}\":\"\([^\"]*\)\".*/\1/p"
+    return 0
   fi
 }
 

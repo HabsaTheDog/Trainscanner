@@ -25,10 +25,12 @@ Options:
   --as-of YYYY-MM-DD   Pick latest snapshot <= date
   -h, --help           Show this help
 USAGE
+  return 0
 }
 
 log() {
   printf '[ingest-netex] %s\n' "$*"
+  return 0
 }
 
 fail() {
@@ -41,6 +43,7 @@ cleanup() {
   for file in "${TMP_FILES[@]}"; do
     [[ -n "$file" ]] && rm -f "$file" 2>/dev/null || true
   done
+  return 0
 }
 trap cleanup EXIT
 
@@ -48,10 +51,12 @@ is_iso_date() {
   local d="$1"
   [[ "$d" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || return 1
   date -u -d "$d" +%F >/dev/null 2>&1
+  return 0
 }
 
 slugify() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/_/g; s/^_+//; s/_+$//'
+  return 0
 }
 
 parse_args() {
@@ -104,6 +109,7 @@ mark_run_failed() {
     SET status = 'failed', ended_at = now(), error_message = '${message_esc}'
     WHERE run_id = '${run_id_esc}'::uuid;
   " >/dev/null || true
+  return 0
 }
 
 resolve_snapshot_date() {
@@ -129,6 +135,7 @@ resolve_snapshot_date() {
 
   [[ -n "$selected" ]] || return 1
   printf '%s\n' "$selected"
+  return 0
 }
 
 create_run() {
@@ -155,6 +162,7 @@ PY
   " >/dev/null
 
   printf '%s\n' "$run_id"
+  return 0
 }
 
 ingest_source() {
@@ -342,6 +350,7 @@ ingest_source() {
   " >/dev/null
 
   log "Completed '$source_id' (${snapshot_date}): loaded ${loaded_rows} staging rows"
+  return 0
 }
 
 main() {
@@ -381,6 +390,7 @@ main() {
   done
 
   log "All selected NeTEx sources ingested successfully"
+  return 0
 }
 
 main "$@"

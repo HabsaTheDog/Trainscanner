@@ -51,11 +51,11 @@ export function initCurationApp() {
 
   function escapeHtml(value) {
     return String(value || "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#39;");
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#39;");
   }
 
   function showNotice(message, tone = "info", sticky = false) {
@@ -199,12 +199,6 @@ export function initCurationApp() {
     );
   }
 
-  function _sortCandidatesByRank(candidates) {
-    return (Array.isArray(candidates) ? candidates.slice() : []).sort(
-      compareCandidateRank,
-    );
-  }
-
   function sortStationIdsByCandidateRank(stationIds) {
     const input = Array.isArray(stationIds) ? stationIds : [];
     const lookup = new Map(
@@ -318,14 +312,6 @@ export function initCurationApp() {
     return refs;
   }
 
-  function _getSelectedMemberStationIds() {
-    const stationIds = [];
-    for (const refKey of getSelectedRefKeys()) {
-      stationIds.push(...getRefMemberStationIds(refKey));
-    }
-    return uniqueStrings(sortStationIdsByCandidateRank(stationIds));
-  }
-
   function getMergeDerivedMemberStationIds() {
     const stationIds = new Set();
 
@@ -422,18 +408,18 @@ export function initCurationApp() {
   }
 
   function resolveDefaultMapStyle() {
-    if (window.MAP_STYLE_URL) {
-      return window.MAP_STYLE_URL;
+    if (globalThis.MAP_STYLE_URL) {
+      return globalThis.MAP_STYLE_URL;
     }
-    if (window.PROTOMAPS_API_KEY) {
-      return `https://api.protomaps.com/styles/v2/light.json?key=${window.PROTOMAPS_API_KEY}`;
+    if (globalThis.PROTOMAPS_API_KEY) {
+      return `https://api.protomaps.com/styles/v2/light.json?key=${globalThis.PROTOMAPS_API_KEY}`;
     }
     return "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
   }
 
   function resolveSatelliteMapStyle() {
-    if (window.SATELLITE_MAP_STYLE_URL) {
-      return window.SATELLITE_MAP_STYLE_URL;
+    if (globalThis.SATELLITE_MAP_STYLE_URL) {
+      return globalThis.SATELLITE_MAP_STYLE_URL;
     }
 
     return {
@@ -490,7 +476,7 @@ export function initCurationApp() {
       return;
     }
 
-    if (typeof maplibregl === "undefined" || !maplibregl.Map) {
+    if (!maplibregl?.Map) {
       throw new Error(
         "MapLibre did not load in the browser (check network/cache and reload).",
       );
@@ -800,26 +786,6 @@ export function initCurationApp() {
       map.fitBounds(bounds, { padding: 50, maxZoom: 15 });
     }
     lastFocusFingerprint = focusFingerprint;
-  }
-
-  function _buildClusterListUrl() {
-    const country = document.getElementById("countryFilter").value;
-    const status = document.getElementById("statusFilter").value;
-    const scopeTag = document.getElementById("scopeTagFilter").value;
-
-    const params = new URLSearchParams();
-    if (country) {
-      params.set("country", country);
-    }
-    if (status) {
-      params.set("status", status);
-    }
-    if (scopeTag && scopeTag !== "all") {
-      params.set("scope_tag", scopeTag);
-    }
-    params.set("limit", "100");
-
-    return `/api/qa/v2/clusters?${params.toString()}`;
   }
 
   function renderClusterListMeta() {
@@ -1339,92 +1305,6 @@ export function initCurationApp() {
     renderClusterDetail();
   }
 
-  function _stageMergeFromSelection() {
-    const selected = sortStationIdsByCandidateRank(
-      Array.from(selectedStationIds.values()),
-    );
-    if (selected.length < 2) {
-      showNotice("Merge needs at least two selected candidates.", "error");
-      return;
-    }
-
-    const mergeId = createDraftId("merge");
-    const inputName = String(
-      document.getElementById("editMergeRenameInput").value || "",
-    ).trim();
-    const assumedName = inputName || resolveMergeNameAssumption(selected);
-
-    draftState.mergeItems.push({
-      merge_id: mergeId,
-      member_station_ids: selected,
-      display_name: assumedName,
-    });
-    draftState.renameByRef[toMergeRef(mergeId)] = assumedName;
-
-    clearSelection();
-    selectedDraftMergeIds.add(mergeId);
-    document.getElementById("editMergeRenameInput").value = "";
-    showNotice("Merge staged locally. No data persisted yet.", "success");
-    renderClusterDetail();
-  }
-
-  function _stageSplitFromSelection() {
-    const selected = sortStationIdsByCandidateRank(
-      Array.from(selectedStationIds.values()),
-    );
-    if (selected.length < 2) {
-      showNotice("Split needs at least two selected candidates.", "error");
-      return;
-    }
-
-    const midpoint = Math.ceil(selected.length / 2);
-    const first = selected.slice(0, midpoint);
-    const second = selected.slice(midpoint);
-
-    if (first.length === 0 || second.length === 0) {
-      showNotice("Split staging needs two non-empty groups.", "error");
-      return;
-    }
-
-    draftState.groups = [
-      {
-        group_id: createDraftId("grp"),
-        section_type: inferCandidateCategory(getCandidateByStationId(first[0])),
-        section_name: "Split A",
-        member_refs: first.map((stationId) => toCandidateRef(stationId)),
-      },
-      {
-        group_id: createDraftId("grp"),
-        section_type: inferCandidateCategory(
-          getCandidateByStationId(second[0]),
-        ),
-        section_name: "Split B",
-        member_refs: second.map((stationId) => toCandidateRef(stationId)),
-      },
-    ];
-
-    for (const group of draftState.groups) {
-      draftState.renameByRef[toGroupRef(group.group_id)] = group.section_name;
-    }
-
-    clearSelection();
-    ensurePairWalkDefaults();
-    setActiveTool("group");
-    showNotice(
-      "Split groups staged locally. You can refine them in Group mode.",
-      "success",
-    );
-    renderClusterDetail();
-  }
-
-  function _clearDraftEdits() {
-    draftState = createEmptyDraftState();
-    renameEditorState = { refKey: "", value: "" };
-    clearSelection();
-    showNotice("Draft cleared. Nothing has been persisted.", "info");
-    renderClusterDetail();
-  }
-
   function buildRenameTargetsPayload() {
     const targets = [];
     for (const [refKey, renameTo] of Object.entries(
@@ -1725,14 +1605,11 @@ export function initCurationApp() {
     activeTool = tool;
 
     document.querySelectorAll(".tool-btn").forEach((button) => {
-      button.classList.toggle(
-        "active",
-        button.getAttribute("data-tool") === tool,
-      );
+      button.classList.toggle("active", button.dataset.tool === tool);
     });
 
     document.querySelectorAll("[data-tool-panel]").forEach((panel) => {
-      panel.hidden = panel.getAttribute("data-tool-panel") !== tool;
+      panel.hidden = panel.dataset.toolPanel !== tool;
     });
 
     if (tool === "merge") {
@@ -1763,7 +1640,7 @@ export function initCurationApp() {
 
     rootEl.querySelectorAll("[data-rename-ref]").forEach((button) => {
       button.addEventListener("click", () => {
-        beginInlineRename(button.getAttribute("data-rename-ref"));
+        beginInlineRename(button.dataset.renameRef);
       });
     });
 
@@ -1939,15 +1816,13 @@ export function initCurationApp() {
 
       card.querySelectorAll("[data-remove-group]").forEach((button) => {
         button.addEventListener("click", () =>
-          removeGroup(button.getAttribute("data-remove-group")),
+          removeGroup(button.dataset.removeGroup),
         );
       });
 
       card.querySelectorAll("[data-remove-group-member]").forEach((button) => {
         button.addEventListener("click", () => {
-          const value = String(
-            button.getAttribute("data-remove-group-member") || "",
-          ).trim();
+          const value = String(button.dataset.removeGroupMember || "").trim();
           const delimiter = value.indexOf("|");
           if (delimiter <= 0) {
             return;
@@ -1960,19 +1835,13 @@ export function initCurationApp() {
 
       card.querySelectorAll("[data-group-name]").forEach((input) => {
         input.addEventListener("change", (event) => {
-          updateGroupName(
-            input.getAttribute("data-group-name"),
-            event.target.value,
-          );
+          updateGroupName(input.dataset.groupName, event.target.value);
         });
       });
 
       card.querySelectorAll("[data-group-type]").forEach((select) => {
         select.addEventListener("change", (event) => {
-          updateGroupType(
-            select.getAttribute("data-group-type"),
-            event.target.value,
-          );
+          updateGroupType(select.dataset.groupType, event.target.value);
         });
       });
 
@@ -2344,7 +2213,7 @@ export function initCurationApp() {
         '<p class="muted">No applied edits recorded for this cluster.</p>';
     } else {
       historyRows
-        .sort((a, b) =>
+        .toSorted((a, b) =>
           String(b.created_at || "").localeCompare(String(a.created_at || "")),
         )
         .slice(0, 15)
@@ -2467,7 +2336,7 @@ export function initCurationApp() {
 
     document.querySelectorAll(".tool-btn").forEach((button) => {
       button.addEventListener("click", () => {
-        const tool = String(button.getAttribute("data-tool") || "").trim();
+        const tool = String(button.dataset.tool || "").trim();
         if (tool) {
           setActiveTool(tool);
         }

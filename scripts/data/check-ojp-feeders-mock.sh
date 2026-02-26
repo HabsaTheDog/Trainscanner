@@ -27,10 +27,12 @@ Options:
   --wait-sec N        Max seconds to wait for mock health (default: 10)
   -h, --help          Show this help
 USAGE
+  return 0
 }
 
 log() {
   printf '[check-ojp-mock] %s\n' "$*"
+  return 0
 }
 
 fail() {
@@ -40,6 +42,7 @@ fail() {
 
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || fail "Missing required command: $1"
+  return 0
 }
 
 cleanup() {
@@ -49,6 +52,7 @@ cleanup() {
   fi
   [[ -n "$TMP_REPORT" ]] && rm -f "$TMP_REPORT" >/dev/null 2>&1 || true
   [[ -n "$TMP_SERVER_LOG" ]] && rm -f "$TMP_SERVER_LOG" >/dev/null 2>&1 || true
+  return 0
 }
 trap cleanup EXIT
 
@@ -111,6 +115,7 @@ wait_for_health() {
     fi
     sleep 1
   done
+  return 0
 }
 
 main() {
@@ -148,6 +153,7 @@ main() {
 
   log "Mock feeder check passed"
   jq '{providerId, country, response}' "$TMP_REPORT"
+  return 0
 }
 
 main "$@"

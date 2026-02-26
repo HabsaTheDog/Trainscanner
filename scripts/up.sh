@@ -18,6 +18,7 @@ Behavior:
   - If checks fail and --profile is set, runs scripts/setup.sh --profile <name> --no-start automatically.
   - Starts docker compose stack.
 USAGE
+  return 0
 }
 
 while [[ $# -gt 0 ]]; do

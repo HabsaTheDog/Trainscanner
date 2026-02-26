@@ -15,10 +15,12 @@ REFRESH_ARGS=()
 
 timestamp_utc() {
   date -u +"%Y-%m-%dT%H:%M:%SZ"
+  return 0
 }
 
 log() {
   printf '[station-review-pipeline] %s %s\n' "$(timestamp_utc)" "$*"
+  return 0
 }
 
 fail() {
@@ -59,6 +61,7 @@ Examples:
   scripts/data/run-station-review-pipeline.sh --country DE --as-of 2026-02-20
   scripts/data/run-station-review-pipeline.sh --skip-migrate --from-step canonical
 USAGE
+  return 0
 }
 
 record_step() {
@@ -66,6 +69,7 @@ record_step() {
   local status="$2"
   local elapsed_sec="$3"
   STEP_SUMMARY+=("${name}|${status}|${elapsed_sec}")
+  return 0
 }
 
 print_summary() {
@@ -79,6 +83,7 @@ print_summary() {
     printf '  - %-20s status=%-8s elapsed=%ss\n' "$name" "$status" "$elapsed"
   done
   log "Total elapsed: ${total_elapsed}s"
+  return 0
 }
 
 on_error() {
@@ -102,7 +107,7 @@ on_error() {
   fi
 
   if [[ "$CURRENT_STEP" == "refresh-station-review" ]]; then
-    log "Hint: fetch failures on DE usually mean missing DELFI auth env vars in .env."
+    log "Hint: fetch failures on DE usually mean missing DELFI auth env vars in .env.local (or .env)."
     log "Hint: set DE_DELFI_SOLLFAHRPLANDATEN_NETEX_USERNAME and ..._PASSWORD (or cookie/header alternatives)."
   fi
 
@@ -130,6 +135,7 @@ run_step() {
   log "DONE  step=${step_name} elapsed=${step_elapsed}s"
   CURRENT_STEP=""
   CURRENT_CMD=""
+  return 0
 }
 
 while [[ $# -gt 0 ]]; do

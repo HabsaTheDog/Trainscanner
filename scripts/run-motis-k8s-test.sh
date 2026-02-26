@@ -48,6 +48,7 @@ Options:
   --keep-resources               Keep job/configmap after execution
   --help                         Show this help
 USAGE
+  return 0
 }
 
 fail() {
@@ -57,10 +58,13 @@ fail() {
 
 log() {
   printf '[run-motis-k8s-test] %s\n' "$*"
+  return 0
 }
 
 escape_sed_replacement() {
-  printf '%s' "$1" | sed -e 's/[&|]/\\&/g'
+  local value="$1"
+  printf '%s' "$value" | sed -e 's/[&|]/\\&/g'
+  return 0
 }
 
 to_node_path() {
@@ -87,6 +91,7 @@ cleanup() {
   if [[ -n "$JOB_NAME" ]]; then
     kubectl -n "$NAMESPACE" delete job "$JOB_NAME" --ignore-not-found --wait=false >/dev/null 2>&1 || true
   fi
+  return 0
 }
 
 trap 'cleanup' EXIT
@@ -281,6 +286,7 @@ replace_token() {
   local escaped
   escaped="$(escape_sed_replacement "$value")"
   rendered="$(printf '%s' "$rendered" | sed "s|__${key}__|${escaped}|g")"
+  return 0
 }
 
 replace_token "JOB_NAME" "$JOB_NAME"

@@ -18,6 +18,7 @@ DB_READY_TIMEOUT_SEC="${CANONICAL_DB_READY_TIMEOUT_SEC:-90}"
 
 db_log() {
   printf '[db] %s\n' "$*"
+  return 0
 }
 
 db_fail() {
@@ -26,20 +27,26 @@ db_fail() {
 }
 
 db_load_env() {
-  if [[ -f "${ROOT_DIR}/.env" ]]; then
-    set -a
-    # shellcheck disable=SC1091
-    source "${ROOT_DIR}/.env"
-    set +a
-  fi
+  local env_file
+  for env_file in "${ROOT_DIR}/.env" "${ROOT_DIR}/.env.local"; do
+    if [[ -f "$env_file" ]]; then
+      set -a
+      # shellcheck disable=SC1090,SC1091
+      source "$env_file"
+      set +a
+    fi
+  done
+  return 0
 }
 
 db_require_cmd() {
   command -v "$1" >/dev/null 2>&1 || db_fail "Missing required command: $1"
+  return 0
 }
 
 db_sql_escape() {
   printf '%s' "$1" | sed "s/'/''/g"
+  return 0
 }
 
 db_has_explicit_direct_target() {
@@ -118,6 +125,7 @@ db_resolve_connection() {
   else
     db_require_cmd docker
   fi
+  return 0
 }
 
 db_ensure_ready() {
@@ -141,6 +149,7 @@ db_ensure_ready() {
     fi
     sleep 2
   done
+  return 0
 }
 
 db_psql() {

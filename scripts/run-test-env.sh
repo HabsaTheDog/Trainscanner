@@ -29,15 +29,18 @@ Options:
   --wait-sec <n>           Seconds to wait for orchestrator health (default: 60)
   --help                   Show this help
 USAGE
+  return 0
 }
 
 fail() {
   printf '[run-test-env] ERROR: %s\n' "$*" >&2
   exit 1
+  return 1
 }
 
 log() {
   printf '[run-test-env] %s\n' "$*"
+  return 0
 }
 
 while [[ $# -gt 0 ]]; do

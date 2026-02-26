@@ -17,6 +17,7 @@ cleanup_temp_files() {
   for f in "${TEMP_FILES[@]}"; do
     [[ -n "$f" ]] && rm -f "$f" 2>/dev/null || true
   done
+  return 0
 }
 trap cleanup_temp_files EXIT
 
@@ -32,20 +33,24 @@ Options:
   --as-of YYYY-MM-DD   Resolve manual sources against this deterministic date
   -h, --help           Show this help
 USAGE
+  return 0
 }
 
 log() {
   printf '[verify-dach] %s\n' "$*"
+  return 0
 }
 
 err() {
   printf '[verify-dach] ERROR: %s\n' "$*" >&2
   ERRORS=$((ERRORS + 1))
+  return 0
 }
 
 warn() {
   printf '[verify-dach] WARN: %s\n' "$*" >&2
   WARNINGS=$((WARNINGS + 1))
+  return 0
 }
 
 require_cmd() {
@@ -53,18 +58,21 @@ require_cmd() {
     printf '[verify-dach] ERROR: Missing required command: %s\n' "$1" >&2
     exit 1
   }
+  return 0
 }
 
 is_iso_date() {
   local d="$1"
   [[ "$d" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || return 1
   date -u -d "$d" +%F >/dev/null 2>&1
+  return 0
 }
 
 is_iso_ts() {
   local ts="$1"
   [[ "$ts" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || return 1
   date -u -d "$ts" +"%Y-%m-%dT%H:%M:%SZ" >/dev/null 2>&1
+  return 0
 }
 
 parse_args() {
@@ -105,15 +113,20 @@ parse_args() {
     echo "Invalid --as-of '$AS_OF' (expected YYYY-MM-DD)" >&2
     exit 1
   fi
+  return 0
 }
 
 load_env() {
-  if [[ -f .env ]]; then
-    set -a
-    # shellcheck disable=SC1091
-    source .env
-    set +a
-  fi
+  local env_file
+  for env_file in .env .env.local; do
+    if [[ -f "$env_file" ]]; then
+      set -a
+      # shellcheck disable=SC1090,SC1091
+      source "$env_file"
+      set +a
+    fi
+  done
+  return 0
 }
 
 build_auth_args() {
@@ -225,12 +238,14 @@ normalize_url() {
   else
     printf '%s/%s\n' "${base_url%/}" "$maybe_relative"
   fi
+  return 0
 }
 
 extract_attr() {
   local input="$1"
   local attr="$2"
   printf '%s\n' "$input" | sed -nE "s/.*${attr}=\"([^\"]*)\".*/\\1/p" | head -1
+  return 0
 }
 
 delfi_login_cookie_file() {
@@ -283,6 +298,7 @@ delfi_login_cookie_file() {
   fi
 
   printf '%s\n' "$cookie_file"
+  return 0
 }
 
 resolve_de_delfi_netex() {
@@ -328,6 +344,7 @@ resolve_de_delfi_netex() {
   fi
   [[ -n "$fallback_url" ]] || return 1
   printf '%s\n' "$fallback_url"
+  return 0
 }
 
 resolve_at_netex() {
@@ -358,6 +375,7 @@ resolve_at_netex() {
 
   [[ -n "$best_url" ]] || return 1
   printf '%s\n' "$best_url"
+  return 0
 }
 
 resolve_ch_netex() {
@@ -397,6 +415,7 @@ resolve_ch_netex() {
 
   [[ -n "$best_url" ]] || return 1
   printf '%s\n' "$best_url"
+  return 0
 }
 
 resolve_url() {
@@ -431,6 +450,7 @@ resolve_url() {
       return 1
       ;;
   esac
+  return 0
 }
 
 check_reachable() {
@@ -589,6 +609,7 @@ main() {
   fi
 
   log "Verification passed with $WARNINGS warning(s)."
+  return 0
 }
 
 main "$@"

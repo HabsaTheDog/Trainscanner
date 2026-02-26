@@ -36,15 +36,18 @@ Examples:
   scripts/setup.sh --profile sample_de --osm-url https://download.geofabrik.de/europe/dach-latest.osm.pbf
   scripts/setup.sh --profile sample_de --osm-file /tmp/my.osm.pbf
 USAGE
+  return 0
 }
 
 log() {
   printf '[setup] %s\n' "$*"
+  return 0
 }
 
 fail() {
   printf '[setup] ERROR: %s\n' "$*" >&2
   exit 1
+  return 1
 }
 
 while [[ $# -gt 0 ]]; do

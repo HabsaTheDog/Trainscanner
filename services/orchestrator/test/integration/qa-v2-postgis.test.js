@@ -17,8 +17,9 @@ const hasDocker =
   spawnSync("bash", ["-lc", "command -v docker >/dev/null 2>&1"]).status === 0;
 const shouldRun = hasDocker && process.env.ENABLE_POSTGIS_TESTS === "1";
 
-(shouldRun ? test : test.skip)(
+test(
   "qa v2 cluster generation is deterministic and decisions are atomic",
+  { skip: !shouldRun },
   async () => {
     const repoRoot = path.resolve(__dirname, "../../..");
 

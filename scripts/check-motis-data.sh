@@ -14,6 +14,7 @@ check_file() {
     echo "          $hint" >&2
     MISSING=1
   fi
+  return 0
 }
 
 check_file "$ROOT_DIR/data/motis/osm.pbf" "Place an OSM extract there before startup."

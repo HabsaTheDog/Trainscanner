@@ -1,6 +1,6 @@
 /**
  * Reusable GraphQL query/mutation helper.
- * Reads the endpoint from window.__CONFIG__.GRAPHQL_URL, falling back to localhost.
+ * Reads the endpoint from globalThis.window.__CONFIG__.GRAPHQL_URL, falling back to localhost.
  *
  * @param {string} query  - GraphQL query or mutation string
  * @param {object} variables - Variables object
@@ -8,7 +8,7 @@
  */
 export async function graphqlQuery(query, variables = {}) {
   const url =
-    (typeof window !== "undefined" && window.__CONFIG__?.GRAPHQL_URL) ||
+    globalThis.window?.__CONFIG__?.GRAPHQL_URL ||
     "http://localhost:4000/graphql";
 
   const res = await fetch(url, {

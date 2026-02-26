@@ -1,4 +1,5 @@
 import maplibregl from "maplibre-gl";
+import PropTypes from "prop-types";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { graphqlQuery } from "./graphql";
 
@@ -212,8 +213,9 @@ function itemCoords(stationId, lat, lon) {
   if (lat != null && lon != null) return [lon, lat];
   // Deterministic fallback (safe until all stations have coords)
   let h = 0;
-  for (let i = 0; i < stationId.length; i++)
-    h = (h * 31 + stationId.charCodeAt(i)) >>> 0;
+  for (let i = 0; i < stationId.length; i += 1) {
+    h = (h * 31 + (stationId.codePointAt(i) ?? 0)) >>> 0;
+  }
   const fbLat = 48 + ((h % 1000) / 1000) * 12;
   const fbLon = 2 + (((h >> 8) % 1000) / 1000) * 28;
   return [fbLon, fbLat];
@@ -272,7 +274,7 @@ function QueueRow({
               fontWeight: 600,
             }}
           >
-            {score != null ? `${Math.round(score * 100)}%` : "—"}
+            {score == null ? "—" : `${Math.round(score * 100)}%`}
           </span>
         </div>
       </td>
@@ -308,6 +310,24 @@ function QueueRow({
     </tr>
   );
 }
+
+QueueRow.propTypes = {
+  item: PropTypes.shape({
+    ai_confidence: PropTypes.number,
+    ai_suggested_action: PropTypes.string,
+    cluster_display_name: PropTypes.string,
+    cluster_id: PropTypes.string,
+    evidence_id: PropTypes.string.isRequired,
+    evidence_type: PropTypes.string,
+  }).isRequired,
+  selected: PropTypes.bool.isRequired,
+  active: PropTypes.bool.isRequired,
+  onSelect: PropTypes.func.isRequired,
+  onActivate: PropTypes.func.isRequired,
+  onApprove: PropTypes.func.isRequired,
+  onReject: PropTypes.func.isRequired,
+  busy: PropTypes.bool.isRequired,
+};
 
 // ---------------------------------------------------------------------------
 // Sub-component: Transfer Matrix Override
@@ -360,6 +380,35 @@ function TransferMatrix() {
   }
 
   const currentVal = (hubId) => dirty[hubId] ?? overrides[hubId] ?? "";
+  function renderSavedState(hubId) {
+    const state = saved[hubId];
+    if (state === "ok") {
+      return <span className="qa-saved-badge">Saved ✓</span>;
+    }
+    if (state === "saving") {
+      return (
+        <span className="qa-saved-badge" style={{ color: "var(--muted)" }}>
+          Saving…
+        </span>
+      );
+    }
+    if (state === "error") {
+      return (
+        <span className="qa-saved-badge" style={{ color: "var(--danger)" }}>
+          ⚠ Error
+        </span>
+      );
+    }
+    return (
+      <button
+        type="button"
+        className="qa-btn qa-btn-save"
+        onClick={() => handleSave(hubId)}
+      >
+        Save
+      </button>
+    );
+  }
 
   return (
     <section className="qa-matrix-section">
@@ -368,7 +417,6 @@ function TransferMatrix() {
         <span className="muted" style={{ fontSize: "0.85rem" }}>
           Top 100 EU Mega-Hubs — enter walking time (minutes) between platforms.
           Overrides are saved locally.
-          {/* TODO: wire up a DB mutation when the schema supports it */}
         </span>
       </div>
       <div className="qa-matrix-scroll">
@@ -397,33 +445,7 @@ function TransferMatrix() {
                     id={`walk-${hub.id}`}
                   />
                 </td>
-                <td>
-                  {saved[hub.id] === "ok" ? (
-                    <span className="qa-saved-badge">Saved ✓</span>
-                  ) : saved[hub.id] === "saving" ? (
-                    <span
-                      className="qa-saved-badge"
-                      style={{ color: "var(--muted)" }}
-                    >
-                      Saving…
-                    </span>
-                  ) : saved[hub.id] === "error" ? (
-                    <span
-                      className="qa-saved-badge"
-                      style={{ color: "var(--danger)" }}
-                    >
-                      ⚠ Error
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      className="qa-btn qa-btn-save"
-                      onClick={() => handleSave(hub.id)}
-                    >
-                      Save
-                    </button>
-                  )}
-                </td>
+                <td>{renderSavedState(hub.id)}</td>
               </tr>
             ))}
           </tbody>
@@ -783,6 +805,12 @@ export function QAQueuePage() {
   }
 
   const allChecked = items.length > 0 && selected.size === items.length;
+  let bannerTone = "info";
+  if (banner?.type === "ok") {
+    bannerTone = "success";
+  } else if (banner?.type === "error") {
+    bannerTone = "error";
+  }
 
   // -------------------------------------------------------------------------
   // Render
@@ -817,7 +845,7 @@ export function QAQueuePage() {
       {/* ── Banner ── */}
       {banner && (
         <div
-          className={`ui-notice ui-notice-${banner.type === "ok" ? "success" : banner.type === "error" ? "error" : "info"}`}
+          className={`ui-notice ui-notice-${bannerTone}`}
           style={{ margin: "0 16px" }}
         >
           {banner.msg}
@@ -1032,8 +1060,11 @@ export function QAQueuePage() {
             role="application"
             aria-label="Station evidence map"
             style={{ cursor: bboxDrawing ? "crosshair" : "grab" }}
-            onMouseDown={startBbox}
-            onMouseUp={endBbox}
+            onPointerDown={startBbox}
+            onPointerUp={endBbox}
+            onPointerCancel={() => {
+              bboxStart.current = null;
+            }}
           />
 
           {activeItem && (
@@ -1065,9 +1096,9 @@ export function QAQueuePage() {
                     fontWeight: 600,
                   }}
                 >
-                  {activeItem.ai_confidence != null
-                    ? `${Math.round(activeItem.ai_confidence * 100)}%`
-                    : "—"}
+                  {activeItem.ai_confidence == null
+                    ? "—"
+                    : `${Math.round(activeItem.ai_confidence * 100)}%`}
                 </span>
               </div>
               <div className="qa-detail-actions">

@@ -167,7 +167,7 @@ async function getStationIndexForProfile(profileName) {
   const resolved = await resolveProfileZipForQuery(profileName);
   const zipPath = resolved.absolutePath;
   const stat = await fs.stat(zipPath).catch(() => null);
-  if (!stat || !stat.isFile()) {
+  if (!stat?.isFile()) {
     throw new AppError({
       code: "PROFILE_ARTIFACT_MISSING",
       statusCode: 404,
@@ -178,8 +178,7 @@ async function getStationIndexForProfile(profileName) {
   const signature = `${zipPath}:${stat.size}:${stat.mtimeMs}`;
   const cached = stationIndexCache.get(profileName);
   if (
-    cached &&
-    cached.signature === signature &&
+    cached?.signature === signature &&
     Date.now() - (cached.cachedAt || 0) <= config.stationIndexCacheTtlMs
   ) {
     touchStationCache(profileName, cached);
@@ -649,7 +648,7 @@ async function handleApi(req, res, url, requestLogger) {
     const qFold = foldText(query);
     const bucketKey = qFold.length >= 3 ? qFold.slice(0, 3) : "";
     const bucketRows =
-      bucketKey && index.searchBuckets && index.searchBuckets.has(bucketKey)
+      bucketKey && index.searchBuckets?.has(bucketKey)
         ? index.searchBuckets.get(bucketKey).map((idx) => index.stations[idx])
         : index.stations;
 

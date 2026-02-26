@@ -46,10 +46,12 @@ Examples (for envPrefix OJP_DE_PRIMARY):
   OJP_DE_PRIMARY_API_KEY=... (optional OJP_DE_PRIMARY_API_KEY_HEADER)
   OJP_DE_PRIMARY_USERNAME=... and OJP_DE_PRIMARY_PASSWORD=...
 USAGE
+  return 0
 }
 
 log() {
   printf '[test-ojp-feeders] %s\n' "$*"
+  return 0
 }
 
 fail() {
@@ -62,26 +64,33 @@ cleanup() {
   for f in "${TMP_FILES[@]}"; do
     [[ -n "$f" ]] && rm -f "$f" 2>/dev/null || true
   done
+  return 0
 }
 trap cleanup EXIT
 
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || fail "Missing required command: $1"
+  return 0
 }
 
 is_iso_date_time() {
   local ts="$1"
   [[ "$ts" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || return 1
   date -u -d "$ts" +"%Y-%m-%dT%H:%M:%SZ" >/dev/null 2>&1
+  return 0
 }
 
 load_env() {
-  if [[ -f "${ROOT_DIR}/.env" ]]; then
-    set -a
-    # shellcheck disable=SC1091
-    source "${ROOT_DIR}/.env"
-    set +a
-  fi
+  local env_file
+  for env_file in "${ROOT_DIR}/.env" "${ROOT_DIR}/.env.local"; do
+    if [[ -f "$env_file" ]]; then
+      set -a
+      # shellcheck disable=SC1090,SC1091
+      source "$env_file"
+      set +a
+    fi
+  done
+  return 0
 }
 
 parse_args() {
@@ -186,6 +195,7 @@ resolve_provider_json() {
   fi
 
   printf '%s\n' "$provider_json"
+  return 0
 }
 
 resolve_ojp_ref_from_db() {
@@ -209,6 +219,7 @@ LIMIT 1;
 ")"
 
   printf '%s\n' "$ref"
+  return 0
 }
 
 build_auth_args() {
@@ -225,7 +236,7 @@ build_auth_args() {
       token_var1="${env_prefix}_BEARER_TOKEN"
       token_var2="${env_prefix}_TOKEN"
       token="${!token_var1:-${!token_var2:-}}"
-      [[ -n "$token" ]] || fail "Missing auth token. Set ${token_var1} (or ${token_var2}) in .env"
+      [[ -n "$token" ]] || fail "Missing auth token. Set ${token_var1} (or ${token_var2}) in .env.local (or .env)"
       AUTH_ARGS=(-H "Authorization: Bearer $token")
       ;;
     api_key)
@@ -234,7 +245,7 @@ build_auth_args() {
       header_var="${env_prefix}_API_KEY_HEADER"
       api_key="${!key_var:-}"
       api_key_header="${!header_var:-X-API-Key}"
-      [[ -n "$api_key" ]] || fail "Missing API key. Set ${key_var} in .env"
+      [[ -n "$api_key" ]] || fail "Missing API key. Set ${key_var} in .env.local (or .env)"
       AUTH_ARGS=(-H "${api_key_header}: ${api_key}")
       ;;
     basic)
@@ -243,20 +254,21 @@ build_auth_args() {
       pass_var="${env_prefix}_PASSWORD"
       username="${!user_var:-}"
       password="${!pass_var:-}"
-      [[ -n "$username" && -n "$password" ]] || fail "Missing basic auth credentials. Set ${user_var} and ${pass_var} in .env"
+      [[ -n "$username" && -n "$password" ]] || fail "Missing basic auth credentials. Set ${user_var} and ${pass_var} in .env.local (or .env)"
       AUTH_ARGS=(-u "${username}:${password}")
       ;;
     header)
       local header_var header_value
       header_var="${env_prefix}_HEADER"
       header_value="${!header_var:-}"
-      [[ -n "$header_value" ]] || fail "Missing header auth. Set ${header_var} in .env"
+      [[ -n "$header_value" ]] || fail "Missing header auth. Set ${header_var} in .env.local (or .env)"
       AUTH_ARGS=(-H "$header_value")
       ;;
     *)
       fail "Unsupported authMode '${auth_mode}' for provider '${PROVIDER_ID}'"
       ;;
   esac
+  return 0
 }
 
 xml_escape() {
@@ -267,6 +279,7 @@ xml_escape() {
   value="${value//\"/&quot;}"
   value="${value//\'/&apos;}"
   printf '%s' "$value"
+  return 0
 }
 
 main() {
@@ -410,7 +423,7 @@ XML
   fi
 
   if [[ "$http_status" == "401" || "$http_status" == "403" ]]; then
-    fail "Auth failed for provider '$PROVIDER_ID' (HTTP ${http_status}). Check ${env_prefix} auth vars in .env"
+    fail "Auth failed for provider '$PROVIDER_ID' (HTTP ${http_status}). Check ${env_prefix} auth vars in .env.local (or .env)"
   fi
 
   if (( http_status >= 400 )); then
@@ -473,6 +486,7 @@ XML
   fi
 
   printf '%s\n' "$report_json" | jq .
+  return 0
 }
 
 main "$@"

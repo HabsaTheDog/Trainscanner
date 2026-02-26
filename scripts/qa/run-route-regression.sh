@@ -24,6 +24,7 @@ Options:
   --no-fail-on-diff       Exit 0 even when mismatches are found
   -h, --help              Show this help
 USAGE
+  return 0
 }
 
 while [[ $# -gt 0 ]]; do

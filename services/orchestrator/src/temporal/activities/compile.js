@@ -57,9 +57,9 @@ function toAbsolutePath(rootDir, value) {
 function slugifyProfile(profile) {
   return String(profile || "canonical_runtime")
     .trim()
-    .replace(/[^A-Za-z0-9._-]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
+    .replaceAll(/[^A-Za-z0-9._-]+/g, "-")
+    .replaceAll(/-+/g, "-")
+    .replaceAll(/^-|-$/g, "");
 }
 
 function createCompileActivities(_dbClient, config) {

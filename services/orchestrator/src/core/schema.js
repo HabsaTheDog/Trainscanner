@@ -110,7 +110,7 @@ function validateSchema(value, schema, path = "$") {
       }
     }
 
-    if (schema && schema.additionalProperties === false) {
+    if (schema?.additionalProperties === false) {
       const allowed = new Set(Object.keys(properties));
       for (const key of Object.keys(value)) {
         if (!allowed.has(key)) {

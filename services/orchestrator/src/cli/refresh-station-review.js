@@ -400,7 +400,7 @@ async function run() {
   for (let index = 0; index < selectedSteps.length; index += 1) {
     const stepId = selectedSteps[index];
     const def = stepDefs[stepId];
-    const stepRunId = `${runIdBase}-${stepId.replace(/[^a-z0-9]+/gi, "-")}`;
+    const stepRunId = `${runIdBase}-${stepId.replaceAll(/[^a-z0-9]+/gi, "-")}`;
     const stepStartedAt = Date.now();
 
     process.stdout.write(

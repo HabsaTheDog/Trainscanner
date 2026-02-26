@@ -8,7 +8,7 @@ function isProcessAlive(pid) {
     process.kill(pid, 0);
     return true;
   } catch (err) {
-    if (err && err.code === "EPERM") {
+    if (err?.code === "EPERM") {
       return true;
     }
     return false;

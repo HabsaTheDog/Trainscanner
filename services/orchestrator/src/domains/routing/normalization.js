@@ -1,7 +1,7 @@
 function foldText(value) {
   return String(value || "")
     .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
+    .replaceAll(/\p{Diacritic}/gu, "")
     .toLowerCase()
     .trim();
 }

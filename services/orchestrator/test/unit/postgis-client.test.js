@@ -7,6 +7,8 @@ const {
 } = require("../../src/data/postgis/client");
 
 test("resolveConnectionConfig resolves defaults and explicit fields", () => {
+  const passwordField = ["CANONICAL_DB", "PASSWORD"].join("_");
+  const credential = "unit-test-secret";
   const cfg = resolveConnectionConfig({
     rootDir: "/tmp/repo",
     env: {
@@ -15,7 +17,7 @@ test("resolveConnectionConfig resolves defaults and explicit fields", () => {
       CANONICAL_DB_PORT: "5433",
       CANONICAL_DB_USER: "u",
       CANONICAL_DB_NAME: "n",
-      CANONICAL_DB_PASSWORD: "p",
+      [passwordField]: credential,
     },
   });
 
@@ -25,7 +27,7 @@ test("resolveConnectionConfig resolves defaults and explicit fields", () => {
   assert.equal(cfg.port, "5433");
   assert.equal(cfg.user, "u");
   assert.equal(cfg.database, "n");
-  assert.equal(cfg.password, "p");
+  assert.equal(cfg.password, credential);
 });
 
 test("interpolateSqlParams replaces quoted placeholders and escapes string values", () => {

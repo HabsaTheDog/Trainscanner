@@ -915,7 +915,7 @@ function buildGroupModelFromDecision(
   stationToSegment = new Map(),
 ) {
   if (
-    !decision ||
+    !decision?.operation ||
     decision.operation !== "split" ||
     !Array.isArray(decision.groups) ||
     decision.groups.length < 2
@@ -1425,7 +1425,7 @@ function startRefreshWorker(options = {}) {
   const job = options.job;
   const jobsRepo = options.jobsRepo;
 
-  if (!job || !job.jobId || !jobsRepo) {
+  if (!job?.jobId || !jobsRepo) {
     return null;
   }
 
@@ -1587,7 +1587,7 @@ async function getRefreshJob(jobId, options = {}) {
     throw err;
   }
 
-  if (!job || job.jobType !== REFRESH_JOB_TYPE) {
+  if (job?.jobType !== REFRESH_JOB_TYPE) {
     throw new AppError({
       code: "INVALID_REQUEST",
       statusCode: 404,
@@ -1616,8 +1616,7 @@ async function getRefreshJob(jobId, options = {}) {
 
 function persistGroupModel(tx, groupModel) {
   if (
-    !groupModel ||
-    !groupModel.groupId ||
+    !groupModel?.groupId ||
     !Array.isArray(groupModel.sections) ||
     groupModel.sections.length === 0
   ) {

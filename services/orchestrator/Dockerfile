@@ -27,5 +27,8 @@ COPY services/orchestrator ./services/orchestrator
 COPY scripts ./scripts
 COPY db ./db
 
+RUN chown -R node:node /app
+USER node
+
 EXPOSE 3000
 CMD ["node", "services/orchestrator/src/server.js"]

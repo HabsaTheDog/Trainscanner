@@ -1,5 +1,151 @@
 import maplibregl from "maplibre-gl";
 
+const BRACKET_ID_PATTERN = /\[(.+?)\]\s*$/;
+
+function pretty(payload) {
+  return JSON.stringify(payload, null, 2);
+}
+
+function clearElement(node) {
+  while (node.firstChild) {
+    node.firstChild.remove();
+  }
+}
+
+function formatTime(value) {
+  if (!value) {
+    return "--:--";
+  }
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) {
+    return String(value);
+  }
+  return dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatDateTime(value) {
+  if (!value) {
+    return "-";
+  }
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) {
+    return String(value);
+  }
+  return dt.toLocaleString();
+}
+
+function durationToText(seconds) {
+  const total = Number(seconds || 0);
+  if (!Number.isFinite(total) || total <= 0) {
+    return "0m";
+  }
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.round((total % 3600) / 60);
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+  return `${minutes}m`;
+}
+
+function parseBracketId(value) {
+  const input = String(value || "").trim();
+  const match = BRACKET_ID_PATTERN.exec(input);
+  return match ? match[1].trim() : "";
+}
+
+async function fetchJson(url, options) {
+  const response = await fetch(url, options);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const err = new Error(data.error || `Request failed (${response.status})`);
+    err.payload = data;
+    err.status = response.status;
+    throw err;
+  }
+  return data;
+}
+
+function protomapsStyleUrl() {
+  const key = String(globalThis.PROTOMAPS_API_KEY || "").trim();
+  if (!key) {
+    return null;
+  }
+  return `https://api.protomaps.com/styles/v4/light/en.json?key=${encodeURIComponent(key)}`;
+}
+
+function mapStyleUrl() {
+  const explicit = String(globalThis.MAP_STYLE_URL || "").trim();
+  if (explicit) {
+    return explicit;
+  }
+
+  const proto = protomapsStyleUrl();
+  if (proto) {
+    return proto;
+  }
+
+  // Fallback when no Protomaps key is configured.
+  return "https://tiles.openfreemap.org/styles/liberty";
+}
+
+function decodePolyline(encoded, precision) {
+  const coords = [];
+  if (!encoded || typeof encoded !== "string") {
+    return coords;
+  }
+
+  const factor = 10 ** (Number.isFinite(precision) ? precision : 5);
+  let index = 0;
+  let lat = 0;
+  let lon = 0;
+
+  while (index < encoded.length) {
+    let result = 0;
+    let shift = 0;
+    let byte = 0;
+
+    do {
+      byte = (encoded.codePointAt(index) ?? 63) - 63;
+      index += 1;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20 && index < encoded.length + 1);
+
+    lat += result & 1 ? ~(result >> 1) : result >> 1;
+
+    result = 0;
+    shift = 0;
+    do {
+      byte = (encoded.codePointAt(index) ?? 63) - 63;
+      index += 1;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20 && index < encoded.length + 1);
+
+    lon += result & 1 ? ~(result >> 1) : result >> 1;
+
+    coords.push([lon / factor, lat / factor]);
+  }
+
+  return coords;
+}
+
+function updateBounds(bounds, lon, lat) {
+  if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
+    return;
+  }
+  bounds.minLat = Math.min(bounds.minLat, lat);
+  bounds.maxLat = Math.max(bounds.maxLat, lat);
+  bounds.minLon = Math.min(bounds.minLon, lon);
+  bounds.maxLon = Math.max(bounds.maxLon, lon);
+  bounds.count += 1;
+}
+
+function getFormFieldString(formData, key) {
+  const value = formData.get(key);
+  return typeof value === "string" ? value : "";
+}
+
 export function initHomeApp() {
   const profileSelect = document.getElementById("profileSelect");
   const activateBtn = document.getElementById("activateBtn");
@@ -46,51 +192,6 @@ export function initHomeApp() {
     LONG_DISTANCE_HIGH_SPEED_RAIL: "#1d4ed8",
   };
 
-  function pretty(payload) {
-    return JSON.stringify(payload, null, 2);
-  }
-
-  function clearElement(node) {
-    while (node.firstChild) {
-      node.removeChild(node.firstChild);
-    }
-  }
-
-  function formatTime(value) {
-    if (!value) {
-      return "--:--";
-    }
-    const dt = new Date(value);
-    if (Number.isNaN(dt.getTime())) {
-      return String(value);
-    }
-    return dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  }
-
-  function formatDateTime(value) {
-    if (!value) {
-      return "-";
-    }
-    const dt = new Date(value);
-    if (Number.isNaN(dt.getTime())) {
-      return String(value);
-    }
-    return dt.toLocaleString();
-  }
-
-  function durationToText(seconds) {
-    const total = Number(seconds || 0);
-    if (!Number.isFinite(total) || total <= 0) {
-      return "0m";
-    }
-    const hours = Math.floor(total / 3600);
-    const minutes = Math.round((total % 3600) / 60);
-    if (hours > 0) {
-      return `${hours}h ${minutes}m`;
-    }
-    return `${minutes}m`;
-  }
-
   function setStatus(status) {
     const state = status.state || "idle";
     statusBadge.textContent = state;
@@ -113,12 +214,6 @@ export function initHomeApp() {
     });
   }
 
-  function parseBracketId(value) {
-    const input = String(value || "").trim();
-    const match = input.match(/\[(.+?)\]\s*$/);
-    return match ? match[1].trim() : "";
-  }
-
   function resolveStationToken(rawValue) {
     const input = String(rawValue || "").trim();
     if (!input) {
@@ -126,7 +221,7 @@ export function initHomeApp() {
     }
 
     if (/^-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?$/.test(input)) {
-      return input.replace(/\s+/g, "");
+      return input.replaceAll(/\s+/g, "");
     }
 
     const direct = stationTokenByValue.get(input);
@@ -172,10 +267,11 @@ export function initHomeApp() {
         return;
       }
       renderStationSuggestions(payload.stations || []);
-    } catch (_err) {
+    } catch (err) {
       if (requestId !== stationFetchCounter) {
         return;
       }
+      console.debug("Failed to load station suggestions", err);
       renderStationSuggestions([]);
     }
   }
@@ -187,20 +283,6 @@ export function initHomeApp() {
     stationSuggestionTimer = setTimeout(() => {
       loadStationSuggestions(query);
     }, 120);
-  }
-
-  async function fetchJson(url, options) {
-    const response = await fetch(url, options);
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      const err = new Error(
-        data.error || `Request failed (${response.status})`,
-      );
-      err.payload = data;
-      err.status = response.status;
-      throw err;
-    }
-    return data;
   }
 
   async function loadProfiles() {
@@ -257,29 +339,6 @@ export function initHomeApp() {
     routeResult.textContent = pretty(payload);
   }
 
-  function protomapsStyleUrl() {
-    const key = String(window.PROTOMAPS_API_KEY || "").trim();
-    if (!key) {
-      return null;
-    }
-    return `https://api.protomaps.com/styles/v4/light/en.json?key=${encodeURIComponent(key)}`;
-  }
-
-  function mapStyleUrl() {
-    const explicit = String(window.MAP_STYLE_URL || "").trim();
-    if (explicit) {
-      return explicit;
-    }
-
-    const proto = protomapsStyleUrl();
-    if (proto) {
-      return proto;
-    }
-
-    // Fallback when no Protomaps key is configured.
-    return "https://tiles.openfreemap.org/styles/liberty";
-  }
-
   function clearMapMarkers() {
     routeLineMarkers.forEach((marker) => {
       marker.remove();
@@ -327,7 +386,7 @@ export function initHomeApp() {
       source.setData(pendingRouteGeoJson);
     }
 
-    if (pendingRouteBounds && pendingRouteBounds.count >= 2) {
+    if (pendingRouteBounds?.count >= 2) {
       routeMap.fitBounds(
         [
           [pendingRouteBounds.minLon, pendingRouteBounds.minLat],
@@ -335,7 +394,7 @@ export function initHomeApp() {
         ],
         { padding: 40, maxZoom: 13 },
       );
-    } else if (pendingRouteBounds && pendingRouteBounds.count === 1) {
+    } else if (pendingRouteBounds?.count === 1) {
       routeMap.easeTo({
         center: [pendingRouteBounds.minLon, pendingRouteBounds.minLat],
         zoom: 11,
@@ -370,7 +429,7 @@ export function initHomeApp() {
       ensureRouteSource();
       applyPendingRouteData();
 
-      if (String(window.PROTOMAPS_API_KEY || "").trim()) {
+      if (String(globalThis.PROTOMAPS_API_KEY || "").trim()) {
         routeMapStatus.textContent = "Map ready (MapLibre + Protomaps style).";
       } else {
         routeMapStatus.textContent =
@@ -408,46 +467,6 @@ export function initHomeApp() {
     }
   }
 
-  function decodePolyline(encoded, precision) {
-    const coords = [];
-    if (!encoded || typeof encoded !== "string") {
-      return coords;
-    }
-
-    const factor = 10 ** (Number.isFinite(precision) ? precision : 5);
-    let index = 0;
-    let lat = 0;
-    let lon = 0;
-
-    while (index < encoded.length) {
-      let result = 0;
-      let shift = 0;
-      let byte = 0;
-
-      do {
-        byte = encoded.charCodeAt(index++) - 63;
-        result |= (byte & 0x1f) << shift;
-        shift += 5;
-      } while (byte >= 0x20 && index < encoded.length + 1);
-
-      lat += result & 1 ? ~(result >> 1) : result >> 1;
-
-      result = 0;
-      shift = 0;
-      do {
-        byte = encoded.charCodeAt(index++) - 63;
-        result |= (byte & 0x1f) << shift;
-        shift += 5;
-      } while (byte >= 0x20 && index < encoded.length + 1);
-
-      lon += result & 1 ? ~(result >> 1) : result >> 1;
-
-      coords.push([lon / factor, lat / factor]);
-    }
-
-    return coords;
-  }
-
   function legLineCoordinates(leg) {
     if (leg?.legGeometry?.points) {
       try {
@@ -478,17 +497,6 @@ export function initHomeApp() {
     return [];
   }
 
-  function updateBounds(bounds, lon, lat) {
-    if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
-      return;
-    }
-    bounds.minLat = Math.min(bounds.minLat, lat);
-    bounds.maxLat = Math.max(bounds.maxLat, lat);
-    bounds.minLon = Math.min(bounds.minLon, lon);
-    bounds.maxLon = Math.max(bounds.maxLon, lon);
-    bounds.count += 1;
-  }
-
   function drawRouteMap(payload) {
     if (!ensureMap()) {
       return;
@@ -501,12 +509,12 @@ export function initHomeApp() {
       ? route.itineraries
       : [];
     const direct = Array.isArray(route.direct) ? route.direct : [];
-    const selected =
-      itineraries.length > 0
-        ? itineraries[0]
-        : direct.length > 0
-          ? direct[0]
-          : null;
+    let selected = null;
+    if (itineraries.length > 0) {
+      selected = itineraries[0];
+    } else if (direct.length > 0) {
+      selected = direct[0];
+    }
 
     if (
       !selected ||
@@ -610,7 +618,7 @@ export function initHomeApp() {
   function renderRouteSummary(payload) {
     clearElement(routeSummary);
 
-    if (!payload || !payload.ok || !payload.route) {
+    if (!payload?.ok || !payload?.route) {
       const fallback = document.createElement("p");
       fallback.className = "muted";
       fallback.textContent = "No route data available.";
@@ -723,12 +731,14 @@ export function initHomeApp() {
     event.preventDefault();
 
     const formData = new FormData(routeForm);
-    const datetimeLocal = String(formData.get("datetime") || "");
+    const datetimeLocal = getFormFieldString(formData, "datetime");
     const datetime = datetimeLocal ? new Date(datetimeLocal).toISOString() : "";
 
     const payload = {
-      origin: resolveStationToken(formData.get("origin")),
-      destination: resolveStationToken(formData.get("destination")),
+      origin: resolveStationToken(getFormFieldString(formData, "origin")),
+      destination: resolveStationToken(
+        getFormFieldString(formData, "destination"),
+      ),
       datetime,
     };
 

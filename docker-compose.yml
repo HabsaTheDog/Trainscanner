@@ -79,6 +79,7 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+      - .env.local
     depends_on:
       - motis
       - postgis

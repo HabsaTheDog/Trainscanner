@@ -30,9 +30,7 @@ class AppError extends Error {
     this.statusCode =
       Number.isInteger(statusCode) && statusCode > 0
         ? statusCode
-        : (ERROR_DEFINITIONS[this.code] &&
-            ERROR_DEFINITIONS[this.code].statusCode) ||
-          500;
+        : ERROR_DEFINITIONS[this.code]?.statusCode || 500;
     this.details = details || null;
     if (cause) {
       this.cause = cause;

@@ -4,10 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>MOTIS GTFS Debug MVP</title>
-    <script src="/config.js"></script>
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main-home.jsx"></script>
+    <script type="module">
+      import "./src/runtime-config.js";
+      import "./src/main-home.jsx";
+    </script>
   </body>
 </html>

@@ -24,6 +24,7 @@ What it does:
   5) Runs MOTIS import (unless --skip-import)
   6) Updates services/orchestrator/state/active-gtfs.json
 USAGE
+  return 0
 }
 
 while [[ $# -gt 0 ]]; do
@@ -107,6 +108,7 @@ motis_cmd0_from_image() {
       }
     } catch {}
   ' || true
+  return 0
 }
 
 MOTIS_DETECTED_STYLE=""

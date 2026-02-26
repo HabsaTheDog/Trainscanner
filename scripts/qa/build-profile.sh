@@ -27,15 +27,18 @@ Options:
   --force                 Rebuild even if matching manifest/artifact already exists
   -h, --help              Show this help
 USAGE
+  return 0
 }
 
 log() {
   printf '[build-profile] %s\n' "$*"
+  return 0
 }
 
 fail() {
   printf '[build-profile] ERROR: %s\n' "$*" >&2
   exit 1
+  return 1
 }
 
 is_iso_date() {

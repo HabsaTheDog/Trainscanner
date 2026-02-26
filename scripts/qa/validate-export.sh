@@ -19,15 +19,18 @@ Optional feed validator hook:
   Set GTFS_FEED_VALIDATOR_CMD with '{zip}' placeholder, e.g.
     GTFS_FEED_VALIDATOR_CMD='gtfs-validator --input {zip} --output /tmp/gtfs-report'
 USAGE
+  return 0
 }
 
 log() {
   printf '[validate-export] %s\n' "$*"
+  return 0
 }
 
 fail() {
   printf '[validate-export] ERROR: %s\n' "$*" >&2
   exit 1
+  return 1
 }
 
 while [[ $# -gt 0 ]]; do

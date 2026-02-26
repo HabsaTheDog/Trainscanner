@@ -275,18 +275,18 @@ function parseCsv(text) {
 function normalizeLookupName(value) {
   const ascii = String(value || "")
     .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
+    .replaceAll(/[\u0300-\u036f]/g, "")
     .toLowerCase();
 
-  return ascii.replace(/[^a-z0-9]+/g, " ").trim();
+  return ascii.replaceAll(/[^a-z0-9]+/g, " ").trim();
 }
 
 function normalizeUicCode(raw) {
-  const digits = String(raw || "").replace(/[^0-9]/g, "");
+  const digits = String(raw || "").replaceAll(/[^0-9]/g, "");
   if (digits.length < 5 || digits.length > 12) {
     return "";
   }
-  const trimmed = digits.replace(/^0+(?=\d)/, "");
+  const trimmed = digits.replaceAll(/^0+(?=\d)/, "");
   return trimmed.length >= 5 ? trimmed : "";
 }
 
@@ -324,18 +324,27 @@ function toFiniteNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function resolveRawUicRows(payload) {
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+  if (Array.isArray(payload?.stations)) {
+    return payload.stations;
+  }
+  if (Array.isArray(payload?.records)) {
+    return payload.records;
+  }
+  if (Array.isArray(payload?.data)) {
+    return payload.data;
+  }
+  if (Array.isArray(payload?.items)) {
+    return payload.items;
+  }
+  return [];
+}
+
 function parseUicRowsFromJsonPayload(payload, sourceLabel) {
-  const rawRows = Array.isArray(payload)
-    ? payload
-    : Array.isArray(payload?.stations)
-      ? payload.stations
-      : Array.isArray(payload?.records)
-        ? payload.records
-        : Array.isArray(payload?.data)
-          ? payload.data
-          : Array.isArray(payload?.items)
-            ? payload.items
-            : [];
+  const rawRows = resolveRawUicRows(payload);
 
   return rawRows
     .map((row) => {
@@ -570,16 +579,19 @@ out tags center;`;
 function formatUtcTimestampSlug(date = new Date()) {
   return date
     .toISOString()
-    .replace(/[-:]/g, "")
-    .replace(/\.\d{3}Z$/, "Z");
+    .replaceAll(/[-:]/g, "")
+    .replaceAll(/\.\d{3}Z$/, "Z");
 }
 
 async function fileExists(filePath) {
   try {
     await fs.stat(filePath);
     return true;
-  } catch (_err) {
-    return false;
+  } catch (err) {
+    if (err?.code === "ENOENT") {
+      return false;
+    }
+    throw err;
   }
 }
 
@@ -1026,8 +1038,8 @@ async function loadOverpassPayloadForCountry(country, options) {
 
 function resolveUicMatch(country, tags, stationName, uicIndex) {
   const codesFromTags = extractUicCodesFromTags(tags);
-
-  for (const code of codesFromTags) {
+  const code = codesFromTags[0];
+  if (code) {
     const key = `${country}|${code}`;
     const row = uicIndex.byCode.get(key) || null;
     return {
@@ -1195,8 +1207,12 @@ function finalizeAggregateRows(aggregateMap) {
       last_seen_snapshot_date: row.last_seen_snapshot_date,
       uic_code: row.uic_code,
       uic_match_source: row.uic_match_source,
-      source_refs: Array.from(row._source_refs.values()).sort(),
-      name_variants: Array.from(row._name_variants.values()).sort(),
+      source_refs: Array.from(row._source_refs.values()).sort((a, b) =>
+        String(a).localeCompare(String(b)),
+      ),
+      name_variants: Array.from(row._name_variants.values()).sort((a, b) =>
+        String(a).localeCompare(String(b)),
+      ),
       name_translations: row.name_translations,
     }))
     .sort((a, b) => {
@@ -1434,10 +1450,14 @@ async function run() {
 }
 
 if (require.main === module) {
-  run().catch((err) => {
-    printCliError("seed-base-spatial", err, "Seed base spatial data failed");
-    process.exit(1);
-  });
+  (async () => {
+    try {
+      await run();
+    } catch (err) {
+      printCliError("seed-base-spatial", err, "Seed base spatial data failed");
+      process.exit(1);
+    }
+  })();
 }
 
 module.exports = {
