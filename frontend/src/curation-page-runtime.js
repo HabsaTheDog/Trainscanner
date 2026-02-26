@@ -313,30 +313,35 @@ export function initCurationApp() {
     return refs;
   }
 
-  function getMergeDerivedMemberStationIds() {
-    const stationIds = new Set();
-
-    if (Array.isArray(activeCuratedProjectionItems)) {
-      for (const item of activeCuratedProjectionItems) {
-        if (normalizeText(item?.derived_operation) !== "merge") {
-          continue;
-        }
-
-        for (const member of Array.isArray(item?.members) ? item.members : []) {
-          const stationId = String(member?.canonical_station_id || "").trim();
-          if (stationId) {
-            stationIds.add(stationId);
-          }
+  function collectMergeMemberStationIdsFromCurated(stationIds, items) {
+    if (!Array.isArray(items)) {
+      return;
+    }
+    for (const item of items) {
+      if (normalizeText(item?.derived_operation) !== "merge") {
+        continue;
+      }
+      for (const member of Array.isArray(item?.members) ? item.members : []) {
+        const stationId = String(member?.canonical_station_id || "").trim();
+        if (stationId) {
+          stationIds.add(stationId);
         }
       }
     }
+  }
 
-    for (const mergeItem of draftState.mergeItems) {
+  function collectMergeMemberStationIdsFromDraft(stationIds, mergeItems) {
+    for (const mergeItem of mergeItems) {
       for (const stationId of uniqueStrings(mergeItem.member_station_ids)) {
         stationIds.add(stationId);
       }
     }
+  }
 
+  function getMergeDerivedMemberStationIds() {
+    const stationIds = new Set();
+    collectMergeMemberStationIdsFromCurated(stationIds, activeCuratedProjectionItems);
+    collectMergeMemberStationIdsFromDraft(stationIds, draftState.mergeItems);
     return stationIds;
   }
 
@@ -2078,47 +2083,37 @@ export function initCurationApp() {
     }
   }
 
-  function renderClusterDetail() {
-    const headerEl = document.getElementById("clusterHeader");
-    const metaEl = document.getElementById("clusterMeta");
-    const candidatesEl = document.getElementById("candidateList");
-    const evidenceEl = document.getElementById("evidenceList");
-    const decisionsEl = document.getElementById("decisionHistoryList");
+  function getClusterDetailElements() {
+    return {
+      headerEl: document.getElementById("clusterHeader"),
+      metaEl: document.getElementById("clusterMeta"),
+      candidatesEl: document.getElementById("candidateList"),
+      evidenceEl: document.getElementById("evidenceList"),
+      decisionsEl: document.getElementById("decisionHistoryList"),
+    };
+  }
 
-    if (!activeClusterDetail) {
-      headerEl.textContent = "Select a cluster";
-      metaEl.textContent = "Cluster details will appear here.";
-      candidatesEl.innerHTML = '<p class="muted">No cluster selected.</p>';
-      evidenceEl.innerHTML = '<p class="muted">No cluster selected.</p>';
-      decisionsEl.innerHTML = '<p class="muted">No cluster selected.</p>';
-      document.getElementById("editPayloadPreview").textContent = "{}";
-      updateSelectionSummary();
-      renderSelectedServiceContext();
-      renderGroupEditor();
-      updateEditPreview();
-      return;
-    }
+  function renderEmptyClusterDetail(elements) {
+    elements.headerEl.textContent = "Select a cluster";
+    elements.metaEl.textContent = "Cluster details will appear here.";
+    elements.candidatesEl.innerHTML = '<p class="muted">No cluster selected.</p>';
+    elements.evidenceEl.innerHTML = '<p class="muted">No cluster selected.</p>';
+    elements.decisionsEl.innerHTML = '<p class="muted">No cluster selected.</p>';
+    document.getElementById("editPayloadPreview").textContent = "{}";
+    updateSelectionSummary();
+    renderSelectedServiceContext();
+    renderGroupEditor();
+    updateEditPreview();
+  }
 
-    pruneHiddenSelections();
-    pruneGroupReferences();
-
-    headerEl.textContent =
-      activeClusterDetail.display_name || activeClusterDetail.cluster_id;
-    metaEl.textContent = `${activeClusterDetail.country} • ${activeClusterDetail.severity} • ${activeClusterDetail.status} • scope ${activeClusterDetail.scope_tag}`;
-
-    const visibleCandidates = getVisibleStandaloneCandidates();
-
-    candidatesEl.innerHTML = "";
-    renderDraftMergesInline(candidatesEl);
-    renderCuratedCandidatesInline(candidatesEl);
-
+  function renderStandaloneCandidates(candidatesEl, visibleCandidates) {
     if (visibleCandidates.length === 0) {
       const emptyStandaloneMessage = document.createElement("p");
-      emptyStandaloneMessage.className =
-        "muted tiny candidate-list-empty-muted";
+      emptyStandaloneMessage.className = "muted tiny candidate-list-empty-muted";
       emptyStandaloneMessage.textContent =
         "No standalone candidates remain. Members are shown inside merged derived cards.";
       candidatesEl.appendChild(emptyStandaloneMessage);
+      return;
     }
 
     for (const candidate of visibleCandidates) {
@@ -2177,31 +2172,34 @@ export function initCurationApp() {
       bindInlineRenameControls(card);
       candidatesEl.appendChild(card);
     }
+  }
 
+  function renderEvidenceRows(evidenceEl, evidenceRows) {
     evidenceEl.innerHTML = "";
-    const evidenceRows = activeClusterDetail.evidence || [];
     if (evidenceRows.length === 0) {
-      evidenceEl.innerHTML =
-        '<p class="muted">No evidence rows for this cluster.</p>';
-    } else {
-      for (const row of evidenceRows.slice(0, 30)) {
-        const div = document.createElement("div");
-        div.className = "evidence-row";
-        div.innerHTML = `<strong>${escapeHtml(row.evidence_type)}</strong> • ${escapeHtml(row.source_canonical_station_id)} ↔ ${escapeHtml(row.target_canonical_station_id)} • score ${escapeHtml(row.score ?? "n/a")}`;
-        evidenceEl.appendChild(div);
-      }
+      evidenceEl.innerHTML = '<p class="muted">No evidence rows for this cluster.</p>';
+      return;
     }
 
+    for (const row of evidenceRows.slice(0, 30)) {
+      const div = document.createElement("div");
+      div.className = "evidence-row";
+      div.innerHTML = `<strong>${escapeHtml(row.evidence_type)}</strong> • ${escapeHtml(row.source_canonical_station_id)} ↔ ${escapeHtml(row.target_canonical_station_id)} • score ${escapeHtml(row.score ?? "n/a")}`;
+      evidenceEl.appendChild(div);
+    }
+  }
+
+  function renderHistoryRows(decisionsEl, detail) {
     decisionsEl.innerHTML = "";
     const historyRows = [];
-    for (const decision of activeClusterDetail.decisions || []) {
+    for (const decision of detail.decisions || []) {
       historyRows.push({
         title: decision.operation,
         requested_by: decision.requested_by,
         created_at: decision.created_at,
       });
     }
-    for (const event of activeClusterDetail.edit_history || []) {
+    for (const event of detail.edit_history || []) {
       historyRows.push({
         title: event.event_type,
         requested_by: event.requested_by,
@@ -2212,19 +2210,52 @@ export function initCurationApp() {
     if (historyRows.length === 0) {
       decisionsEl.innerHTML =
         '<p class="muted">No applied edits recorded for this cluster.</p>';
-    } else {
-      historyRows
-        .toSorted((a, b) =>
-          String(b.created_at || "").localeCompare(String(a.created_at || "")),
-        )
-        .slice(0, 15)
-        .forEach((item) => {
-          const div = document.createElement("div");
-          div.className = "decision-row";
-          div.innerHTML = `<strong>${escapeHtml(item.title)}</strong> • ${escapeHtml(item.requested_by)} • ${escapeHtml(item.created_at)}`;
-          decisionsEl.appendChild(div);
-        });
+      return;
     }
+
+    historyRows
+      .toSorted((a, b) =>
+        String(b.created_at || "").localeCompare(String(a.created_at || "")),
+      )
+      .slice(0, 15)
+      .forEach((item) => {
+        const div = document.createElement("div");
+        div.className = "decision-row";
+        div.innerHTML = `<strong>${escapeHtml(item.title)}</strong> • ${escapeHtml(item.requested_by)} • ${escapeHtml(item.created_at)}`;
+        decisionsEl.appendChild(div);
+      });
+  }
+
+  function renderClusterDetail() {
+    const { headerEl, metaEl, candidatesEl, evidenceEl, decisionsEl } =
+      getClusterDetailElements();
+
+    if (!activeClusterDetail) {
+      renderEmptyClusterDetail({
+        headerEl,
+        metaEl,
+        candidatesEl,
+        evidenceEl,
+        decisionsEl,
+      });
+      return;
+    }
+
+    pruneHiddenSelections();
+    pruneGroupReferences();
+
+    headerEl.textContent =
+      activeClusterDetail.display_name || activeClusterDetail.cluster_id;
+    metaEl.textContent = `${activeClusterDetail.country} • ${activeClusterDetail.severity} • ${activeClusterDetail.status} • scope ${activeClusterDetail.scope_tag}`;
+
+    const visibleCandidates = getVisibleStandaloneCandidates();
+
+    candidatesEl.innerHTML = "";
+    renderDraftMergesInline(candidatesEl);
+    renderCuratedCandidatesInline(candidatesEl);
+    renderStandaloneCandidates(candidatesEl, visibleCandidates);
+    renderEvidenceRows(evidenceEl, activeClusterDetail.evidence || []);
+    renderHistoryRows(decisionsEl, activeClusterDetail);
 
     focusLocations(visibleCandidates);
     updateSelectionSummary();
