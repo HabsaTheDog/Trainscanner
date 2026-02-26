@@ -13,6 +13,16 @@ async function graphqlQuery(query, variables = {}) {
   return data.data;
 }
 
+function getClusterDetailElements() {
+  return {
+    headerEl: document.getElementById("clusterHeader"),
+    metaEl: document.getElementById("clusterMeta"),
+    candidatesEl: document.getElementById("candidateList"),
+    evidenceEl: document.getElementById("evidenceList"),
+    decisionsEl: document.getElementById("decisionHistoryList"),
+  };
+}
+
 export function initCurationApp() {
   const MAP_MODE_SESSION_KEY = "qa.curation.mapMode";
 
@@ -2081,16 +2091,6 @@ export function initCurationApp() {
       `;
       candidatesEl.appendChild(summary);
     }
-  }
-
-  function getClusterDetailElements() {
-    return {
-      headerEl: document.getElementById("clusterHeader"),
-      metaEl: document.getElementById("clusterMeta"),
-      candidatesEl: document.getElementById("candidateList"),
-      evidenceEl: document.getElementById("evidenceList"),
-      decisionsEl: document.getElementById("decisionHistoryList"),
-    };
   }
 
   function renderEmptyClusterDetail(elements) {
