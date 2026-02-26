@@ -1348,7 +1348,9 @@ function buildSeedSummary({
   dbRows,
   dbSummary,
 }) {
-  const hardIdRows = dbRows.filter((row) => row.match_method === "hard_id").length;
+  const hardIdRows = dbRows.filter(
+    (row) => row.match_method === "hard_id",
+  ).length;
   const nameGeoRows = dbRows.filter(
     (row) => row.match_method === "name_geo",
   ).length;
@@ -1410,11 +1412,8 @@ async function run() {
     );
   }
 
-  const { aggregateMap, osmStatsByCountry } = await collectSeedCandidatesByCountry(
-    args,
-    outputDir,
-    uicIndex,
-  );
+  const { aggregateMap, osmStatsByCountry } =
+    await collectSeedCandidatesByCountry(args, outputDir, uicIndex);
 
   let manifestRows = finalizeAggregateRows(aggregateMap);
   if (args.limit > 0 && manifestRows.length > args.limit) {

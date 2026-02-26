@@ -102,7 +102,9 @@ function parseReportReviewQueueArgs(args = []) {
         parsed.helpRequested = true;
         break;
       case "--country":
-        parsed.country = parseCountry(readRequiredTokenValue(tokens, i, "--country"));
+        parsed.country = parseCountry(
+          readRequiredTokenValue(tokens, i, "--country"),
+        );
         i += 1;
         break;
       case "--as-of":
@@ -143,8 +145,9 @@ function createQaService(deps = {}) {
       const args = Array.isArray(options.args) ? options.args : [];
       const runId = options.runId || "";
       const defaultJobOrchestrationEnabled =
-        String(process.env.PIPELINE_JOB_ORCHESTRATION_ENABLED || "true")
-          .toLowerCase() !== "false";
+        String(
+          process.env.PIPELINE_JOB_ORCHESTRATION_ENABLED || "true",
+        ).toLowerCase() !== "false";
       const jobOrchestrationEnabled =
         options.jobOrchestrationEnabled === undefined
           ? defaultJobOrchestrationEnabled

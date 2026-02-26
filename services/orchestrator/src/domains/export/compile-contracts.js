@@ -68,7 +68,9 @@ function validateCompileGtfsRequest(body) {
 
   const tier = normalizeTier(body.tier);
   if (!VALID_TIERS.has(tier)) {
-    invalidRequest("Field 'tier' must be one of: high-speed, regional, local, all");
+    invalidRequest(
+      "Field 'tier' must be one of: high-speed, regional, local, all",
+    );
   }
 
   const asOfRaw =

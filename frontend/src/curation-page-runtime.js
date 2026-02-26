@@ -350,7 +350,10 @@ export function initCurationApp() {
 
   function getMergeDerivedMemberStationIds() {
     const stationIds = new Set();
-    collectMergeMemberStationIdsFromCurated(stationIds, activeCuratedProjectionItems);
+    collectMergeMemberStationIdsFromCurated(
+      stationIds,
+      activeCuratedProjectionItems,
+    );
     collectMergeMemberStationIdsFromDraft(stationIds, draftState.mergeItems);
     return stationIds;
   }
@@ -2096,9 +2099,11 @@ export function initCurationApp() {
   function renderEmptyClusterDetail(elements) {
     elements.headerEl.textContent = "Select a cluster";
     elements.metaEl.textContent = "Cluster details will appear here.";
-    elements.candidatesEl.innerHTML = '<p class="muted">No cluster selected.</p>';
+    elements.candidatesEl.innerHTML =
+      '<p class="muted">No cluster selected.</p>';
     elements.evidenceEl.innerHTML = '<p class="muted">No cluster selected.</p>';
-    elements.decisionsEl.innerHTML = '<p class="muted">No cluster selected.</p>';
+    elements.decisionsEl.innerHTML =
+      '<p class="muted">No cluster selected.</p>';
     document.getElementById("editPayloadPreview").textContent = "{}";
     updateSelectionSummary();
     renderSelectedServiceContext();
@@ -2109,7 +2114,8 @@ export function initCurationApp() {
   function renderStandaloneCandidates(candidatesEl, visibleCandidates) {
     if (visibleCandidates.length === 0) {
       const emptyStandaloneMessage = document.createElement("p");
-      emptyStandaloneMessage.className = "muted tiny candidate-list-empty-muted";
+      emptyStandaloneMessage.className =
+        "muted tiny candidate-list-empty-muted";
       emptyStandaloneMessage.textContent =
         "No standalone candidates remain. Members are shown inside merged derived cards.";
       candidatesEl.appendChild(emptyStandaloneMessage);
@@ -2177,7 +2183,8 @@ export function initCurationApp() {
   function renderEvidenceRows(evidenceEl, evidenceRows) {
     evidenceEl.innerHTML = "";
     if (evidenceRows.length === 0) {
-      evidenceEl.innerHTML = '<p class="muted">No evidence rows for this cluster.</p>';
+      evidenceEl.innerHTML =
+        '<p class="muted">No evidence rows for this cluster.</p>';
       return;
     }
 

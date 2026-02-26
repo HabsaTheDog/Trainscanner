@@ -29,7 +29,8 @@ function computeBackoffMs(attempt, options = {}) {
   const lower = Math.max(0, raw - jitter);
   const upper = raw + jitter;
 
-  return Math.floor(lower + Math.random() * (upper - lower));
+  const randomVal = crypto.randomBytes(4).readUInt32LE() / 0x100000000;
+  return Math.floor(lower + randomVal * (upper - lower));
 }
 
 function isDuplicateIdempotencyError(err) {
@@ -178,7 +179,10 @@ function createJobOrchestrator(options = {}) {
       };
     }
 
-    if (existingJob.status === "queued" || existingJob.status === "retry_wait") {
+    if (
+      existingJob.status === "queued" ||
+      existingJob.status === "retry_wait"
+    ) {
       logger.info("job idempotency resumed pending job", {
         jobType,
         jobId: existingJob.jobId,
@@ -244,7 +248,10 @@ function createJobOrchestrator(options = {}) {
   }
 
   async function findOrCreateJob(context) {
-    let job = await jobsRepo.getByIdempotency(context.jobType, context.idempotencyKey);
+    let job = await jobsRepo.getByIdempotency(
+      context.jobType,
+      context.idempotencyKey,
+    );
     const existingOutcome = resolveExistingJob(job, context);
     if (existingOutcome) {
       return { outcome: existingOutcome, job: null };
@@ -268,7 +275,10 @@ function createJobOrchestrator(options = {}) {
       if (!isDuplicateIdempotencyError(err)) {
         throw err;
       }
-      job = await jobsRepo.getByIdempotency(context.jobType, context.idempotencyKey);
+      job = await jobsRepo.getByIdempotency(
+        context.jobType,
+        context.idempotencyKey,
+      );
       const racedOutcome = resolveExistingJob(job, context);
       if (racedOutcome) {
         return { outcome: racedOutcome, job: null };
@@ -441,7 +451,7 @@ function createJobOrchestrator(options = {}) {
 
     let job = initialJob;
     let attempt = Math.max(0, job.attempt || 0);
-    let checkpoint =
+    const checkpoint =
       job.checkpoint && typeof job.checkpoint === "object"
         ? { ...job.checkpoint }
         : {};
@@ -451,7 +461,10 @@ function createJobOrchestrator(options = {}) {
       const runningJob = await claimRunningJob(job, context, attempt);
 
       if (!runningJob) {
-        const backpressureOutcome = await throwBackpressureForClaim(job, context);
+        const backpressureOutcome = await throwBackpressureForClaim(
+          job,
+          context,
+        );
         if (backpressureOutcome) {
           return backpressureOutcome;
         }
@@ -465,7 +478,6 @@ function createJobOrchestrator(options = {}) {
         const retry = await handleAttemptFailure(err, job, context, attempt);
         if (retry?.shouldRetry) {
           job = retry.job;
-          continue;
         }
       }
     }

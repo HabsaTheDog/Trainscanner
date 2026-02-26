@@ -22,8 +22,9 @@ function createIngestService(deps = {}) {
       const args = Array.isArray(options.args) ? options.args : [];
       const runId = options.runId || "";
       const defaultJobOrchestrationEnabled =
-        String(process.env.PIPELINE_JOB_ORCHESTRATION_ENABLED || "true")
-          .toLowerCase() !== "false";
+        String(
+          process.env.PIPELINE_JOB_ORCHESTRATION_ENABLED || "true",
+        ).toLowerCase() !== "false";
       const jobOrchestrationEnabled =
         options.jobOrchestrationEnabled === undefined
           ? defaultJobOrchestrationEnabled

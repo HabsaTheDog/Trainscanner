@@ -263,7 +263,10 @@ function toRefreshJobPayload(job) {
   let scope = {};
   if (checkpoint.scope && typeof checkpoint.scope === "object") {
     scope = checkpoint.scope;
-  } else if (job?.runContext?.scope && typeof job.runContext.scope === "object") {
+  } else if (
+    job?.runContext?.scope &&
+    typeof job.runContext.scope === "object"
+  ) {
     scope = job.runContext.scope;
   }
 
@@ -619,9 +622,9 @@ function collectServiceContextValues(payload, sets) {
 }
 
 function applyServiceDirectionHints(payload, sets) {
-  const directionText = SERVICE_DIRECTION_KEYS
-    .map((key) => toCleanString(payload[key]).toLowerCase())
-    .find(Boolean);
+  const directionText = SERVICE_DIRECTION_KEYS.map((key) =>
+    toCleanString(payload[key]).toLowerCase(),
+  ).find(Boolean);
   if (!directionText) {
     return;
   }
@@ -637,7 +640,10 @@ function applyServiceDirectionHints(payload, sets) {
     pushUnique(sets.incoming, label);
     return;
   }
-  if (directionText.includes("outbound") || directionText.includes("outgoing")) {
+  if (
+    directionText.includes("outbound") ||
+    directionText.includes("outgoing")
+  ) {
     pushUnique(sets.outgoing, label);
   }
 }
@@ -975,7 +981,8 @@ function hasSplitSections(decision) {
 function listNonEmptyDecisionGroups(groups) {
   return (Array.isArray(groups) ? groups : []).filter(
     (group) =>
-      Array.isArray(group.memberStationIds) && group.memberStationIds.length > 0,
+      Array.isArray(group.memberStationIds) &&
+      group.memberStationIds.length > 0,
   );
 }
 
@@ -1031,7 +1038,9 @@ function normalizeWalkLinks(segmentAction) {
 
 function parseWalkLink(rawLink) {
   const input = rawLink && typeof rawLink === "object" ? rawLink : {};
-  const fromSegmentId = toCleanString(input.from_segment_id || input.fromSegmentId);
+  const fromSegmentId = toCleanString(
+    input.from_segment_id || input.fromSegmentId,
+  );
   const toSegmentId = toCleanString(input.to_segment_id || input.toSegmentId);
   if (!fromSegmentId || !toSegmentId || fromSegmentId === toSegmentId) {
     return null;
@@ -1940,7 +1949,8 @@ function buildDecisionMembersPayload(decision) {
     });
   }
 
-  const memberAction = decision.operation === "merge" ? "merge_member" : "candidate";
+  const memberAction =
+    decision.operation === "merge" ? "merge_member" : "candidate";
   for (const group of decision.groups) {
     for (const stationId of group.memberStationIds) {
       pushRow(stationId, group.groupLabel, memberAction, {

@@ -140,7 +140,11 @@ function parseBuildCanonicalArgs(args = []) {
         i += 1;
         break;
       case "--source-id":
-        parsed.scope.sourceId = readRequiredTokenValue(tokens, i, "--source-id");
+        parsed.scope.sourceId = readRequiredTokenValue(
+          tokens,
+          i,
+          "--source-id",
+        );
         i += 1;
         break;
       default:
@@ -225,8 +229,9 @@ function createCanonicalService(deps = {}) {
     const args = Array.isArray(options.args) ? options.args : [];
     const runId = options.runId || "";
     const defaultJobOrchestrationEnabled =
-      String(process.env.PIPELINE_JOB_ORCHESTRATION_ENABLED || "true")
-        .toLowerCase() !== "false";
+      String(
+        process.env.PIPELINE_JOB_ORCHESTRATION_ENABLED || "true",
+      ).toLowerCase() !== "false";
     const jobOrchestrationEnabled =
       options.jobOrchestrationEnabled === undefined
         ? defaultJobOrchestrationEnabled

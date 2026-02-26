@@ -11,7 +11,7 @@ function generateId(prefix) {
   const core =
     typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      : `${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
   if (!prefix) {
     return core;
   }

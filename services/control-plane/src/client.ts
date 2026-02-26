@@ -5,7 +5,9 @@ function run() {
   return (async () => {
     try {
       // Connect to the default Server location
-      const connection = await Connection.connect({ address: "localhost:7233" });
+      const connection = await Connection.connect({
+        address: "localhost:7233",
+      });
 
       // In production, instantiate the Client using a namespace
       const client = new Client({

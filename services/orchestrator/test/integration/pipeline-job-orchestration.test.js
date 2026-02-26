@@ -82,15 +82,17 @@ function createInMemoryJobsRepo() {
 
 async function waitFor(fn, timeoutMs = 2000, intervalMs = 20) {
   const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    // eslint-disable-next-line no-await-in-loop
+  async function check() {
+    if (Date.now() >= deadline) {
+      throw new Error("Timed out waiting for condition");
+    }
     if (await fn()) {
       return;
     }
-    // eslint-disable-next-line no-await-in-loop
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    return check();
   }
-  throw new Error("Timed out waiting for condition");
+  return check();
 }
 
 test("ingest service job orchestration reuses completed job for same args", async () => {

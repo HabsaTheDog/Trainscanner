@@ -276,7 +276,9 @@ function createStationFromRow(row, indices) {
   const name = (row[indices.idxName] || "").trim();
   const id = (row[indices.idxId] || "").trim();
   const locationType =
-    indices.idxLocationType >= 0 ? (row[indices.idxLocationType] || "").trim() : "";
+    indices.idxLocationType >= 0
+      ? (row[indices.idxLocationType] || "").trim()
+      : "";
   if (shouldSkipStationRow(name, id, locationType)) {
     return null;
   }
@@ -611,9 +613,11 @@ async function handleQaJobsRequest(req, res, url) {
     const body = await parseJsonBody(req);
     const refreshArgs = buildRefreshArgs(body);
     const workflowId = `review-pipeline-${Date.now()}`;
-    const handle = await startTemporalWorkflow("stationReviewPipeline", workflowId, [
-      { skipMigrate: !!body.skipMigrate, refreshArgs },
-    ]);
+    const handle = await startTemporalWorkflow(
+      "stationReviewPipeline",
+      workflowId,
+      [{ skipMigrate: !!body.skipMigrate, refreshArgs }],
+    );
     sendJson(res, 202, {
       message: "Temporal Workflow Accepted",
       workflowId: handle.workflowId,
@@ -715,7 +719,10 @@ async function handleGtfsStationsRequest(res, url) {
   const limit = parseLimit(url.searchParams.get("limit"), 50, 1, 200);
   const requestedProfile = (url.searchParams.get("profile") || "").trim();
   const profilesWithMeta = await switcher.getProfilesWithMeta();
-  const profileName = resolveLookupProfileName(profilesWithMeta, requestedProfile);
+  const profileName = resolveLookupProfileName(
+    profilesWithMeta,
+    requestedProfile,
+  );
 
   if (!profileName) {
     sendJson(res, 404, {
@@ -784,7 +791,12 @@ function makeResolvedStation(input) {
   };
 }
 
-async function resolveRouteStationInputs(routeProfile, origin, destination, requestLogger) {
+async function resolveRouteStationInputs(
+  routeProfile,
+  origin,
+  destination,
+  requestLogger,
+) {
   let originResolved = makeResolvedStation(origin);
   let destinationResolved = makeResolvedStation(destination);
 
@@ -811,7 +823,12 @@ async function resolveRouteStationInputs(routeProfile, origin, destination, requ
   return { originResolved, destinationResolved };
 }
 
-function buildRouteResolutionDetails(routeProfile, originResolved, destinationResolved, datetime) {
+function buildRouteResolutionDetails(
+  routeProfile,
+  originResolved,
+  destinationResolved,
+  datetime,
+) {
   return {
     profile: routeProfile || null,
     origin: originResolved,
@@ -842,12 +859,13 @@ async function handleRoutesRequest(req, res, url, requestLogger) {
 
   const validated = validateRouteRequestBody(body);
   const routeProfile = await resolveRouteProfileName(status);
-  const { originResolved, destinationResolved } = await resolveRouteStationInputs(
-    routeProfile,
-    validated.origin,
-    validated.destination,
-    requestLogger,
-  );
+  const { originResolved, destinationResolved } =
+    await resolveRouteStationInputs(
+      routeProfile,
+      validated.origin,
+      validated.destination,
+      requestLogger,
+    );
 
   const routeRequest = {
     origin: originResolved.resolved,

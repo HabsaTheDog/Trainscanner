@@ -23,13 +23,13 @@ function normalizeProfiles(raw) {
 function normalizeRuntimeDescriptor(runtime) {
   return {
     mode: String(runtime.mode || runtime.source || "canonical-export").trim(),
-    profile:
-      typeof runtime.profile === "string" ? runtime.profile.trim() : "",
+    profile: typeof runtime.profile === "string" ? runtime.profile.trim() : "",
     asOf: typeof runtime.asOf === "string" ? runtime.asOf.trim() : "latest",
-    country:
-      typeof runtime.country === "string" ? runtime.country.trim() : "",
+    country: typeof runtime.country === "string" ? runtime.country.trim() : "",
     artifactPath:
-      typeof runtime.artifactPath === "string" ? runtime.artifactPath.trim() : "",
+      typeof runtime.artifactPath === "string"
+        ? runtime.artifactPath.trim()
+        : "",
   };
 }
 
@@ -46,7 +46,8 @@ function normalizeProfileEntry(entry) {
     return null;
   }
 
-  const description = typeof entry.description === "string" ? entry.description : "";
+  const description =
+    typeof entry.description === "string" ? entry.description : "";
   if (entry.runtime && typeof entry.runtime === "object") {
     return {
       sourceType: "runtime",
@@ -272,7 +273,12 @@ async function resolveRuntimeProfileArtifact(
     zipPath = runtime.artifactPath;
   } else {
     const runtimeProfile = runtime.profile || profileName;
-    const runtimeRootAbs = path.join(dataDir, "gtfs", "runtime", runtimeProfile);
+    const runtimeRootAbs = path.join(
+      dataDir,
+      "gtfs",
+      "runtime",
+      runtimeProfile,
+    );
     const requestedAsOf = runtime.asOf || "latest";
     const resolved = await resolveRuntimeDate({
       profileName,

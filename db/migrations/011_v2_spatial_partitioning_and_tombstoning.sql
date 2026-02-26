@@ -82,7 +82,7 @@ CREATE INDEX IF NOT EXISTS idx_canonical_stations_geom_partitioned
 -- Copy existing rows if legacy table exists.
 DO $$
 BEGIN
-  IF to_regclass('canonical_stations' || '_legacy') IS NOT NULL THEN
+  IF to_regclass('canonical_stations_legacy') IS NOT NULL THEN
     INSERT INTO canonical_stations (
       canonical_station_id,
       canonical_name,
@@ -127,7 +127,7 @@ END $$;
 DO $$
 DECLARE
   r record;
-  v_canonical_legacy regclass := to_regclass('canonical_stations' || '_legacy');
+  v_canonical_legacy regclass := to_regclass('canonical_stations_legacy');
 BEGIN
   IF v_canonical_legacy IS NOT NULL THEN
     FOR r IN

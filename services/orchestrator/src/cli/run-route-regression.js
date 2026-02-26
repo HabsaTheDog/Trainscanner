@@ -198,7 +198,11 @@ function run() {
       };
 
       const reportFile = `route-regression-${new Date().toISOString().replaceAll(/[:.]/g, "-")}.json`;
-      const reportPath = await writeQaReport(args.reportDir, reportFile, report);
+      const reportPath = await writeQaReport(
+        args.reportDir,
+        reportFile,
+        report,
+      );
 
       process.stdout.write(`[route-regression] report=${reportPath}\n`);
       process.stdout.write(

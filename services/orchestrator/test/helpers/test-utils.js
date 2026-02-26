@@ -14,15 +14,19 @@ async function waitFor(checkFn, options = {}) {
   const intervalMs = options.intervalMs || 100;
   const started = Date.now();
 
-  while (Date.now() - started < timeoutMs) {
+  async function check() {
+    if (Date.now() - started >= timeoutMs) {
+      throw new Error(`Timed out after ${timeoutMs}ms`);
+    }
     const result = await checkFn();
     if (result) {
       return result;
     }
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    return check();
   }
 
-  throw new Error(`Timed out after ${timeoutMs}ms`);
+  return check();
 }
 
 async function writeJson(filePath, payload) {
@@ -111,7 +115,10 @@ async function createGtfsZip(zipPath) {
   const script = String.raw`
 import csv
 import io
+import sys
 import zipfile
+
+zip_path = sys.argv[1]
 
 files = {
   'agency.txt': [
@@ -142,16 +149,16 @@ files = {
   ]
 }
 
-with zipfile.ZipFile(r'''${zipPath}''', 'w') as zf:
+with zipfile.ZipFile(zip_path, 'w') as zf:
   for name in ['agency.txt','stops.txt','routes.txt','trips.txt','stop_times.txt','calendar.txt']:
     rows = files[name]
     out = io.StringIO()
-    writer = csv.writer(out, lineterminator='\\\\n')
+    writer = csv.writer(out, lineterminator='\\n')
     writer.writerows(rows)
     zf.writestr(name, out.getvalue())
 `;
   await new Promise((resolve, reject) => {
-    const proc = spawn("python3", ["-c", script], {
+    const proc = spawn("python3", ["-c", script, zipPath], {
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stderr = "";

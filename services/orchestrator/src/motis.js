@@ -467,7 +467,12 @@ async function tryRouteRequestsForPath({
     destinationCandidates,
     datetime,
   )) {
-    const response = await requestRouteVariant(config, planPath, params, attempts);
+    const response = await requestRouteVariant(
+      config,
+      planPath,
+      params,
+      attempts,
+    );
 
     if (response.ok) {
       return {

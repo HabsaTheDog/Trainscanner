@@ -102,7 +102,7 @@ function readRequiredValue(tokens, index, flagName) {
   return value;
 }
 
-function applyOptionWithValue(options, tokens, index, flagName, applyValue) {
+function applyOptionWithValue(tokens, index, flagName, applyValue) {
   const value = readRequiredValue(tokens, index, flagName);
   applyValue(value);
   return index + 1;
@@ -123,45 +123,27 @@ function parseArgsToken(options, tokens, index) {
       options.help = true;
       return index;
     case "--country":
-      return applyOptionWithValue(
-        options,
-        tokens,
-        index,
-        "--country",
-        (value) => {
-          options.country = value.toUpperCase();
-        },
-      );
+      return applyOptionWithValue(tokens, index, "--country", (value) => {
+        options.country = value.toUpperCase();
+      });
     case "--as-of":
-      return applyOptionWithValue(options, tokens, index, "--as-of", (value) => {
+      return applyOptionWithValue(tokens, index, "--as-of", (value) => {
         options.asOf = value;
       });
     case "--source-id":
-      return applyOptionWithValue(
-        options,
-        tokens,
-        index,
-        "--source-id",
-        (value) => {
-          options.sourceId = value;
-        },
-      );
+      return applyOptionWithValue(tokens, index, "--source-id", (value) => {
+        options.sourceId = value;
+      });
     case "--only":
-      return applyOptionWithValue(options, tokens, index, "--only", (value) => {
+      return applyOptionWithValue(tokens, index, "--only", (value) => {
         options.onlySteps.push(...tokenizeStepList(value));
       });
     case "--from-step":
-      return applyOptionWithValue(
-        options,
-        tokens,
-        index,
-        "--from-step",
-        (value) => {
-          options.fromStep = parseStepToken(value);
-        },
-      );
+      return applyOptionWithValue(tokens, index, "--from-step", (value) => {
+        options.fromStep = parseStepToken(value);
+      });
     case "--to-step":
-      return applyOptionWithValue(options, tokens, index, "--to-step", (value) => {
+      return applyOptionWithValue(tokens, index, "--to-step", (value) => {
         options.toStep = parseStepToken(value);
       });
     case "--dry-run":
