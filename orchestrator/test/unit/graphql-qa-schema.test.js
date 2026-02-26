@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * test/unit/graphql-qa-schema.test.js
  *

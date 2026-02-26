@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * mvt.js  –  Task 5.1: Dynamic MapVector Tile (MVT) serving via PostGIS ST_AsMVT.
  *
@@ -108,15 +106,13 @@ async function serveMvtTile(client, { z, x, y }) {
     { z, x, y },
   );
 
-  const canonicalBuf =
-    canonicalResult && canonicalResult.tile
-      ? Buffer.from(canonicalResult.tile, "hex")
-      : Buffer.alloc(0);
+  const canonicalBuf = canonicalResult?.tile
+    ? Buffer.from(canonicalResult.tile, "hex")
+    : Buffer.alloc(0);
 
-  const stagingBuf =
-    stagingResult && stagingResult.tile
-      ? Buffer.from(stagingResult.tile, "hex")
-      : Buffer.alloc(0);
+  const stagingBuf = stagingResult?.tile
+    ? Buffer.from(stagingResult.tile, "hex")
+    : Buffer.alloc(0);
 
   // Concatenate both layers into one .pbf blob
   return Buffer.concat([canonicalBuf, stagingBuf]);

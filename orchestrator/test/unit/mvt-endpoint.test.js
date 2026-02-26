@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * test/unit/mvt-endpoint.test.js
  *

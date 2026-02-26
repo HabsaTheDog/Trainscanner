@@ -1,5 +1,3 @@
-"use strict";
-
 /**
  * ai-queue.js
  *
@@ -72,7 +70,7 @@ async function getLowConfidenceQueue(client, { limit = 50, offset = 0 } = {}) {
   );
 
   return {
-    total: (totalRow && totalRow.total) || 0,
+    total: totalRow?.total || 0,
     items: items.map((row) => ({
       evidence_id: String(row.evidence_id),
       cluster_id: row.cluster_id,

@@ -862,8 +862,8 @@ button:disabled {
 .qa-table-row:hover {
   background: #f0f9fc;
 }
-.qa-row-active {
-  background: #e0f5fa !important;
+.qa-table-row.qa-row-active {
+  background: #e0f5fa;
 }
 .qa-row-selected {
   background: #f0fdf4;
@@ -1670,8 +1670,8 @@ button:disabled {
 .qa-table-row:hover {
   background: #f0f9fc;
 }
-.qa-row-active {
-  background: #e0f5fa !important;
+.qa-table-row.qa-row-active {
+  background: #e0f5fa;
 }
 .qa-row-selected {
   background: #f0fdf4;
