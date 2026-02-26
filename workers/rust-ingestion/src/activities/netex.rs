@@ -1,13 +1,12 @@
 use anyhow::{Context, Result};
 use log::{info, warn};
 use postgres::{Client, NoTls};
-use serde_json::json;
-use std::env;
-use std::io::Write;
-use temporal_sdk::ActContext;
 use quick_xml::events::Event;
 use quick_xml::Reader;
+use serde_json::json;
+use std::env;
 use std::io::BufReader;
+use std::io::Write;
 use temporal_sdk::ActContext;
 
 fn compute_grid_id(country: &str, latitude: f64, longitude: f64) -> String {
@@ -174,7 +173,10 @@ pub async fn extract_netex_stops(
                     {
                         in_target_node = false;
 
-                        if !current_stop_id.is_empty() && !current_lat.is_empty() && !current_lon.is_empty() {
+                        if !current_stop_id.is_empty()
+                            && !current_lat.is_empty()
+                            && !current_lon.is_empty()
+                        {
                             let safe_name = current_name.replace("\"", "\"\"");
                             let safe_id = current_stop_id.replace("\"", "\"\"");
 
@@ -308,7 +310,10 @@ mod tests {
                         || tag_name.ends_with("Site")
                     {
                         in_target_node = false;
-                        println!("Found Stop: {} - {} ({}, {})", current_stop_id, current_name, current_lat, current_lon);
+                        println!(
+                            "Found Stop: {} - {} ({}, {})",
+                            current_stop_id, current_name, current_lat, current_lon
+                        );
                         assert_eq!(current_stop_id, "SP1");
                         assert_eq!(current_name, "Test Station");
                         assert_eq!(current_lat, "52.52");
