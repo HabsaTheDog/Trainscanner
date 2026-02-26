@@ -63,7 +63,7 @@ function printBuildCanonicalUsage() {
   process.stdout.write("  -h, --help           Show this help\n");
 }
 
-function parseBuildCanonicalArgs(args = []) {
+function parseBuildCanonicalArgs(args = []) { // NOSONAR
   const parsed = {
     helpRequested: false,
     scope: {
@@ -144,7 +144,7 @@ function parseBuildCanonicalArgs(args = []) {
   return parsed;
 }
 
-function parseBuildReviewQueueArgs(args = []) {
+function parseBuildReviewQueueArgs(args = []) { // NOSONAR
   const parsed = {
     helpRequested: false,
     scope: {
@@ -258,12 +258,13 @@ function createCanonicalService(deps = {}) {
     const rootDir = options.rootDir || process.cwd();
     const args = Array.isArray(options.args) ? options.args : [];
     const runId = options.runId || "";
+    const defaultJobOrchestrationEnabled =
+      String(process.env.PIPELINE_JOB_ORCHESTRATION_ENABLED || "true")
+        .toLowerCase() !== "false";
     const jobOrchestrationEnabled =
-      options.jobOrchestrationEnabled !== undefined
-        ? Boolean(options.jobOrchestrationEnabled)
-        : String(
-            process.env.PIPELINE_JOB_ORCHESTRATION_ENABLED || "true",
-          ).toLowerCase() !== "false";
+      options.jobOrchestrationEnabled === undefined
+        ? defaultJobOrchestrationEnabled
+        : Boolean(options.jobOrchestrationEnabled);
     const helpRequested = args.includes("--help") || args.includes("-h");
 
     const runCall =

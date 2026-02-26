@@ -277,14 +277,6 @@ BEGIN
 END $$;
 
 COMMIT;
-
--- Validation example (partition pruning + spatial predicate):
--- EXPLAIN (COSTS OFF)
--- SELECT canonical_station_id
--- FROM canonical_stations
--- WHERE grid_id = ST_GeoHash(ST_SetSRID(ST_MakePoint(13.4050, 52.5200), 4326), 3)
---   AND ST_Intersects(geom, ST_MakeEnvelope(13.35, 52.48, 13.45, 52.56, 4326));
---
 -- Manual down migration recipe (forward-only runner; execute manually if needed):
 -- 1) Rename current tables to *_grid_legacy.
 -- 2) Recreate LIST(country) partitioned tables with PK (country, canonical_station_id)

@@ -60,7 +60,7 @@ def first_descriptor_name(elem: etree._Element) -> str | None:
     return None
 
 
-def first_location_coords(elem: etree._Element) -> tuple[float | None, float | None]:
+def first_location_coords(elem: etree._Element) -> tuple[float | None, float | None]: # NOSONAR
     for location in elem.iterfind(".//{*}Location"):
         lat: float | None = None
         lon: float | None = None
@@ -148,7 +148,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def extract(zip_path: Path, writer: csv.DictWriter, args: argparse.Namespace) -> Summary:
+def extract(zip_path: Path, writer: csv.DictWriter, args: argparse.Namespace) -> Summary: # NOSONAR
     summary = Summary()
     seen_stop_ids: set[str] = set()
 

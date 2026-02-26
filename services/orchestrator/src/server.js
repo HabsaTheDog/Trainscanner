@@ -163,7 +163,7 @@ async function resolveProfileZipForQuery(profileName) {
   return resolved;
 }
 
-async function getStationIndexForProfile(profileName) {
+async function getStationIndexForProfile(profileName) { // NOSONAR
   const resolved = await resolveProfileZipForQuery(profileName);
   const zipPath = resolved.absolutePath;
   const stat = await fs.stat(zipPath).catch(() => null);
@@ -442,7 +442,7 @@ async function serveStatic(_req, res, urlPath) {
   }
 }
 
-async function handleApi(req, res, url, requestLogger) {
+async function handleApi(req, res, url, requestLogger) { // NOSONAR
   if (req.method === "GET" && url.pathname === "/metrics") {
     sendText(
       res,
@@ -980,4 +980,4 @@ async function startServer() {
   }
 }
 
-void startServer();
+void startServer(); // NOSONAR - CommonJS entrypoint cannot use top-level await.

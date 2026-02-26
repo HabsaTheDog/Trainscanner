@@ -167,6 +167,7 @@ parse_args() {
   if [[ -n "$COUNTRY_FILTER" && "$COUNTRY_FILTER" != "DE" && "$COUNTRY_FILTER" != "AT" && "$COUNTRY_FILTER" != "CH" ]]; then
     fail "Invalid --country '$COUNTRY_FILTER' (expected DE, AT, or CH)"
   fi
+  return 0
 }
 
 load_env() {

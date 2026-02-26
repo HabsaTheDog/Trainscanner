@@ -176,6 +176,7 @@ parse_args() {
   if [[ -n "$DEPARTURE_TIME" ]] && ! is_iso_date_time "$DEPARTURE_TIME"; then
     fail "Invalid --departure-time '$DEPARTURE_TIME' (expected YYYY-MM-DDTHH:MM:SSZ)"
   fi
+  return 0
 }
 
 resolve_provider_json() {

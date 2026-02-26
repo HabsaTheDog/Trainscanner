@@ -27,7 +27,11 @@ def calculate_string_similarity(str1: str, str2: str) -> float:
     return difflib.SequenceMatcher(None, str1.lower(), str2.lower()).ratio()
 
 
-@app.post("/score-cluster", response_model=ScoreResponse)
+@app.post(
+    "/score-cluster",
+    response_model=ScoreResponse,
+    responses={400: {"description": "Candidates list cannot be empty"}},
+)
 async def score_cluster(request: ScoreRequest):
     if not request.candidates:
         raise HTTPException(status_code=400, detail="Candidates list cannot be empty")

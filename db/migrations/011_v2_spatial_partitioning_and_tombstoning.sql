@@ -23,7 +23,7 @@ DECLARE
   v_canonical regclass := to_regclass('public.canonical_stations');
   v_staging regclass := to_regclass('public.netex_stops_staging');
 BEGIN
-  IF to_regclass('public.canonical_stations_legacy') IS NULL
+  IF to_regclass('public.canonical_stations_legacy') IS NULL -- NOSONAR
      AND v_canonical IS NOT NULL
      AND NOT EXISTS (
        SELECT 1

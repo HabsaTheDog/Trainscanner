@@ -108,7 +108,7 @@ async function httpJson(url, options = {}) {
 async function createGtfsZip(zipPath) {
   const dir = path.dirname(zipPath);
   await fs.mkdir(dir, { recursive: true });
-  const script = `
+  const script = String.raw`
 import csv
 import io
 import zipfile

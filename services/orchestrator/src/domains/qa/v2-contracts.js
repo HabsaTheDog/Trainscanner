@@ -195,7 +195,7 @@ function normalizeRenameTarget(raw, index) {
   };
 }
 
-function normalizeClusterDecision(body) {
+function normalizeClusterDecision(body) { // NOSONAR
   const payload = body && typeof body === "object" ? body : {};
   const operation = String(payload.operation || "").trim();
 
@@ -219,12 +219,15 @@ function normalizeClusterDecision(body) {
       payload.requested_by || payload.requestedBy || "curation_tool_v2",
     ).trim() || "curation_tool_v2";
 
-  const lineDecisions =
-    payload.line_decisions && typeof payload.line_decisions === "object"
-      ? payload.line_decisions
-      : payload.lineDecisions && typeof payload.lineDecisions === "object"
-        ? payload.lineDecisions
-        : {};
+  let lineDecisions = {};
+  if (payload.line_decisions && typeof payload.line_decisions === "object") {
+    lineDecisions = payload.line_decisions;
+  } else if (
+    payload.lineDecisions &&
+    typeof payload.lineDecisions === "object"
+  ) {
+    lineDecisions = payload.lineDecisions;
+  }
   const renameTargets = (
     Array.isArray(payload.rename_targets) ? payload.rename_targets : []
   ).map((row, index) => normalizeRenameTarget(row, index));

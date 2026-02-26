@@ -22,7 +22,7 @@ function toInt(value, fallback) {
 }
 
 function resolveConnectionConfig(options = {}) {
-  const env = { ...process.env, ...(options.env || {}) };
+  const env = { ...process.env, ...options.env };
 
   const rootDir = path.resolve(options.rootDir || process.cwd());
   const mode = String(options.mode || env.CANONICAL_DB_MODE || "auto").trim();
@@ -67,7 +67,7 @@ function resolveConnectionConfig(options = {}) {
 }
 
 function escapeRegex(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
+  return String(value).replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
 }
 
 function toSqlLiteral(value) {

@@ -1,8 +1,8 @@
 function escapeLabelValue(value) {
   return String(value)
-    .replaceAll(/\\/g, "\\\\")
-    .replaceAll(/\n/g, "\\n")
-    .replaceAll('"', '\\"');
+    .replaceAll("\\", String.raw`\\`)
+    .replaceAll("\n", String.raw`\n`)
+    .replaceAll('"', String.raw`\"`);
 }
 
 function labelsKey(labels = {}) {

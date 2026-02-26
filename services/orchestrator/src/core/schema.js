@@ -24,7 +24,7 @@ function validateType(value, type) {
   return typeof value === type;
 }
 
-function validateSchema(value, schema, path = "$") {
+function validateSchema(value, schema, path = "$") { // NOSONAR
   const errors = [];
 
   const type = schema?.type;

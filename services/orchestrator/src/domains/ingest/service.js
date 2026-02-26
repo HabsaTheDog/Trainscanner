@@ -21,12 +21,13 @@ function createIngestService(deps = {}) {
       const rootDir = options.rootDir || process.cwd();
       const args = Array.isArray(options.args) ? options.args : [];
       const runId = options.runId || "";
+      const defaultJobOrchestrationEnabled =
+        String(process.env.PIPELINE_JOB_ORCHESTRATION_ENABLED || "true")
+          .toLowerCase() !== "false";
       const jobOrchestrationEnabled =
-        options.jobOrchestrationEnabled !== undefined
-          ? Boolean(options.jobOrchestrationEnabled)
-          : String(
-              process.env.PIPELINE_JOB_ORCHESTRATION_ENABLED || "true",
-            ).toLowerCase() !== "false";
+        options.jobOrchestrationEnabled === undefined
+          ? defaultJobOrchestrationEnabled
+          : Boolean(options.jobOrchestrationEnabled);
       const helpRequested = args.includes("--help") || args.includes("-h");
 
       const runScriptCall = () =>

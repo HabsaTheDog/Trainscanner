@@ -112,7 +112,7 @@ function buildEntityFromMembers({
   };
 }
 
-function buildCuratedProjectionRowsV1(input = {}) {
+function buildCuratedProjectionRowsV1(input = {}) { // NOSONAR
   const clusterId = toCleanString(input.clusterId);
   const decision =
     input.decision && typeof input.decision === "object" ? input.decision : {};

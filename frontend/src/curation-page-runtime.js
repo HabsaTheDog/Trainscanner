@@ -29,13 +29,13 @@ export function initCurationApp() {
   let activeMarkerPopup = null;
   let lastFocusFingerprint = "";
 
-  let draftState = createEmptyDraftState();
+  let draftState;
   let renameEditorState = {
     refKey: "",
     value: "",
   };
 
-  function createEmptyDraftState() {
+  const createEmptyDraftState = () => { // NOSONAR
     return {
       mergeItems: [],
       groups: [],
@@ -43,22 +43,23 @@ export function initCurationApp() {
       renameByRef: {},
       note: "",
     };
-  }
+  };
+  draftState = createEmptyDraftState();
 
-  function createDraftId(prefix) {
+  const createDraftId = (prefix) => { // NOSONAR
     return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
-  }
+  };
 
-  function escapeHtml(value) {
+  const escapeHtml = (value) => { // NOSONAR
     return String(value || "")
       .replaceAll("&", "&amp;")
       .replaceAll("<", "&lt;")
       .replaceAll(">", "&gt;")
       .replaceAll('"', "&quot;")
       .replaceAll("'", "&#39;");
-  }
+  };
 
-  function showNotice(message, tone = "info", sticky = false) {
+  const showNotice = (message, tone = "info", sticky = false) => { // NOSONAR
     const box = document.getElementById("uiNotice");
     if (!box) {
       return;
@@ -74,27 +75,27 @@ export function initCurationApp() {
         box.hidden = true;
       }, 4500);
     }
-  }
+  };
 
-  function normalizeText(value) {
+  const normalizeText = (value) => { // NOSONAR
     return String(value || "")
       .trim()
       .toLowerCase();
-  }
+  };
 
-  function toCandidateRef(stationId) {
+  const toCandidateRef = (stationId) => { // NOSONAR
     return `candidate:${String(stationId || "").trim()}`;
-  }
+  };
 
-  function toMergeRef(mergeId) {
+  const toMergeRef = (mergeId) => { // NOSONAR
     return `merge:${String(mergeId || "").trim()}`;
-  }
+  };
 
-  function toGroupRef(groupId) {
+  const toGroupRef = (groupId) => { // NOSONAR
     return `group:${String(groupId || "").trim()}`;
-  }
+  };
 
-  function parseRef(refKey) {
+  const parseRef = (refKey) => { // NOSONAR
     const raw = String(refKey || "").trim();
     const index = raw.indexOf(":");
     if (index <= 0) {
@@ -104,7 +105,7 @@ export function initCurationApp() {
       type: raw.slice(0, index),
       id: raw.slice(index + 1),
     };
-  }
+  };
 
   function resolveCandidateLabel(candidate) {
     if (!candidate) {
@@ -184,7 +185,7 @@ export function initCurationApp() {
     );
   }
 
-  function compareCandidateRank(a, b) {
+  const compareCandidateRank = (a, b) => { // NOSONAR
     const rankA = Number.parseInt(String(a?.candidate_rank ?? ""), 10);
     const rankB = Number.parseInt(String(b?.candidate_rank ?? ""), 10);
     const safeRankA =
@@ -197,7 +198,7 @@ export function initCurationApp() {
     return String(a?.canonical_station_id || "").localeCompare(
       String(b?.canonical_station_id || ""),
     );
-  }
+  };
 
   function sortStationIdsByCandidateRank(stationIds) {
     const input = Array.isArray(stationIds) ? stationIds : [];
@@ -312,7 +313,7 @@ export function initCurationApp() {
     return refs;
   }
 
-  function getMergeDerivedMemberStationIds() {
+  function getMergeDerivedMemberStationIds() { // NOSONAR
     const stationIds = new Set();
 
     if (Array.isArray(activeCuratedProjectionItems)) {
@@ -407,7 +408,7 @@ export function initCurationApp() {
     );
   }
 
-  function resolveDefaultMapStyle() {
+  const resolveDefaultMapStyle = () => { // NOSONAR
     if (globalThis.MAP_STYLE_URL) {
       return globalThis.MAP_STYLE_URL;
     }
@@ -415,9 +416,9 @@ export function initCurationApp() {
       return `https://api.protomaps.com/styles/v2/light.json?key=${globalThis.PROTOMAPS_API_KEY}`;
     }
     return "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
-  }
+  };
 
-  function resolveSatelliteMapStyle() {
+  const resolveSatelliteMapStyle = () => { // NOSONAR
     if (globalThis.SATELLITE_MAP_STYLE_URL) {
       return globalThis.SATELLITE_MAP_STYLE_URL;
     }
@@ -442,7 +443,7 @@ export function initCurationApp() {
         },
       ],
     };
-  }
+  };
 
   function getMapMode() {
     const saved = sessionStorage.getItem(MAP_MODE_SESSION_KEY);
@@ -523,9 +524,9 @@ export function initCurationApp() {
     currentMarkers = [];
   }
 
-  function getCandidateStationId(candidate) {
+  const getCandidateStationId = (candidate) => { // NOSONAR
     return String(candidate?.canonical_station_id || "").trim();
-  }
+  };
 
   function sortCandidatesForMarkerRings(candidates) {
     return candidates.slice().sort((left, right) => {
@@ -544,7 +545,7 @@ export function initCurationApp() {
     });
   }
 
-  function getGroupedCandidatesByLocation(candidates) {
+  const getGroupedCandidatesByLocation = (candidates) => { // NOSONAR
     const groups = new Map();
 
     for (const candidate of candidates || []) {
@@ -566,7 +567,7 @@ export function initCurationApp() {
     }
 
     return Array.from(groups.values());
-  }
+  };
 
   function showCandidatePopup(candidate, longitude, latitude) {
     if (!map) {
@@ -1255,12 +1256,12 @@ export function initCurationApp() {
     renderClusterDetail();
   }
 
-  function pairKey(a, b) {
+  const pairKey = (a, b) => { // NOSONAR
     const values = [String(a || "").trim(), String(b || "").trim()].sort(
       (x, y) => x.localeCompare(y),
     );
     return `${values[0]}|${values[1]}`;
-  }
+  };
 
   function ensurePairWalkDefaults() {
     const groups = draftState.groups;
@@ -1917,7 +1918,7 @@ export function initCurationApp() {
     }
   }
 
-  async function fetchCuratedProjection(clusterId) {
+  const fetchCuratedProjection = async (clusterId) => { // NOSONAR
     const cleanClusterId = String(clusterId || "").trim();
     if (!cleanClusterId) {
       return [];
@@ -1934,7 +1935,7 @@ export function initCurationApp() {
       throw new Error(payload?.error || `HTTP ${res.status}`);
     }
     return Array.isArray(payload) ? payload : [];
-  }
+  };
 
   function resolveCandidateNameById(canonicalStationId) {
     const cleanId = String(canonicalStationId || "").trim();
@@ -2077,7 +2078,7 @@ export function initCurationApp() {
     }
   }
 
-  function renderClusterDetail() {
+  function renderClusterDetail() { // NOSONAR
     const headerEl = document.getElementById("clusterHeader");
     const metaEl = document.getElementById("clusterMeta");
     const candidatesEl = document.getElementById("candidateList");

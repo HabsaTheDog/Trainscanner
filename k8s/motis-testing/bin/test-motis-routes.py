@@ -170,7 +170,7 @@ def run_single_query(query: dict[str, object]) -> dict[str, object]:
     attempts: list[dict[str, object]] = []
 
     for path in PLAN_PATHS:
-        probe_status, probe_body = fetch_json(f"{MOTIS_BASE_URL}{path}")
+        probe_status, _ = fetch_json(f"{MOTIS_BASE_URL}{path}")
         attempts.append({"path": path, "probeStatus": probe_status})
         if probe_status == 404:
             continue

@@ -69,13 +69,23 @@ db_has_explicit_direct_target() {
 }
 
 db_probe_direct_connection() {
+  local probe_status
   if [[ -n "$DB_URL" ]]; then
-    PGCONNECT_TIMEOUT=3 PGPASSWORD="$DB_PASSWORD" \
-      psql "$DB_URL" -v ON_ERROR_STOP=1 -At -c 'SELECT 1' >/dev/null 2>&1
+    if PGCONNECT_TIMEOUT=3 PGPASSWORD="$DB_PASSWORD" \
+      psql "$DB_URL" -v ON_ERROR_STOP=1 -At -c 'SELECT 1' >/dev/null 2>&1; then
+      probe_status=0
+    else
+      probe_status=$?
+    fi
   else
-    PGCONNECT_TIMEOUT=3 PGPASSWORD="$DB_PASSWORD" \
-      psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -At -c 'SELECT 1' >/dev/null 2>&1
+    if PGCONNECT_TIMEOUT=3 PGPASSWORD="$DB_PASSWORD" \
+      psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -At -c 'SELECT 1' >/dev/null 2>&1; then
+      probe_status=0
+    else
+      probe_status=$?
+    fi
   fi
+  return "$probe_status"
 }
 
 db_resolve_connection() {

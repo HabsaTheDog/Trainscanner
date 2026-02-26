@@ -97,6 +97,7 @@ parse_args() {
   if [[ -n "$AS_OF" ]] && ! is_iso_date "$AS_OF"; then
     fail "Invalid --as-of value '$AS_OF' (expected YYYY-MM-DD)"
   fi
+  return 0
 }
 
 mark_run_failed() {

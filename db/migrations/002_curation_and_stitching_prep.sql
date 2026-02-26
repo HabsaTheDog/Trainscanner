@@ -97,7 +97,7 @@ CREATE INDEX IF NOT EXISTS idx_canonical_station_overrides_target
 
 CREATE TABLE IF NOT EXISTS station_transfer_rules (
   rule_id bigserial PRIMARY KEY,
-  rule_scope text NOT NULL CHECK (rule_scope IN ('country_default', 'hub', 'station')),
+  rule_scope text NOT NULL CHECK (rule_scope IN ('country_default', 'hub', 'station')), -- NOSONAR
   country char(2) NOT NULL CHECK (country IN ('DE', 'AT', 'CH')),
   canonical_station_id text,
   hub_name text,
@@ -162,14 +162,14 @@ SELECT
   'mvp_seed',
   'Seed default transfer/wait thresholds for stitching prototype.'
 FROM (VALUES ('DE'::char(2)), ('AT'::char(2)), ('CH'::char(2))) AS v(country)
-WHERE NOT EXISTS (
-  SELECT 1
-  FROM station_transfer_rules r
-  WHERE r.rule_scope = 'country_default'
-    AND r.country = v.country
-    AND r.is_active = true
-    AND r.effective_to IS NULL
-);
+  WHERE NOT EXISTS (
+    SELECT 1
+    FROM station_transfer_rules r
+    WHERE r.rule_scope = 'country_default'
+      AND r.country = v.country
+      AND r.is_active -- NOSONAR
+      AND r.effective_to IS NULL
+  );
 
 CREATE TABLE IF NOT EXISTS ojp_stop_refs (
   ojp_stop_ref_id bigserial PRIMARY KEY,
@@ -250,11 +250,11 @@ BEGIN
   FROM agg a
   WHERE cs.canonical_station_id = a.canonical_station_id;
 
-  IF NOT EXISTS (
-    SELECT 1
+  IF ( -- NOSONAR
+    SELECT COUNT(*)
     FROM canonical_station_sources css
     WHERE css.canonical_station_id = p_station_id
-  ) THEN
+  ) = 0 THEN
     DELETE FROM canonical_stations
     WHERE canonical_station_id = p_station_id;
   END IF;

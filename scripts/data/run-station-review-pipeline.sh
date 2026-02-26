@@ -113,10 +113,10 @@ on_error() {
   fi
 
   print_summary
-  exit "$exit_code"
+  return "$exit_code"
 }
 
-trap 'on_error $LINENO' ERR
+trap 'on_error "$LINENO" || exit $?' ERR
 
 run_step() {
   local step_name="$1"

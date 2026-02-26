@@ -100,6 +100,7 @@ parse_args() {
   [[ "$MOCK_PORT" =~ ^[0-9]+$ ]] || fail "--port must be an integer"
   [[ "$WAIT_SEC" =~ ^[0-9]+$ ]] || fail "--wait-sec must be an integer"
   [[ -f "$MOCK_CONFIG_FILE" ]] || fail "Mock config not found: $MOCK_CONFIG_FILE"
+  return 0
 }
 
 wait_for_health() {

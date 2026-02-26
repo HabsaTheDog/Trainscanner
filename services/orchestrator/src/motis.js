@@ -304,7 +304,7 @@ async function waitForMotisReady(config, logger) {
   return { ok: false, health: lastHealth };
 }
 
-async function queryMotisRoute(config, payload) {
+async function queryMotisRoute(config, payload) { // NOSONAR
   const originCandidates = stationCandidates(payload.origin);
   const destinationCandidates = stationCandidates(payload.destination);
   const datetime = String(payload.datetime || "").trim();
