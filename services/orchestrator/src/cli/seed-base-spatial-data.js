@@ -270,20 +270,22 @@ function parseCsv(text) {
     inQuotes: false,
   };
 
-  for (let i = 0; i < text.length; i += 1) {
-    const quoteIndex = handleCsvQuote(text, state, i);
+  let index = 0;
+  while (index < text.length) {
+    const quoteIndex = handleCsvQuote(text, state, index);
     if (quoteIndex !== null) {
-      i = quoteIndex;
+      index = quoteIndex + 1;
       continue;
     }
 
-    const separatorIndex = handleCsvSeparator(text, state, i);
+    const separatorIndex = handleCsvSeparator(text, state, index);
     if (separatorIndex !== null) {
-      i = separatorIndex;
+      index = separatorIndex + 1;
       continue;
     }
 
-    state.currentField += text[i];
+    state.currentField += text[index];
+    index += 1;
   }
 
   flushCsvField(state);

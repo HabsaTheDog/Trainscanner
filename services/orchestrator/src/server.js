@@ -166,16 +166,50 @@ async function resolveProfileZipForQuery(profileName) {
 async function getStationIndexForProfile(profileName) {
   const resolved = await resolveProfileZipForQuery(profileName);
   const zipPath = resolved.absolutePath;
-  const stat = await fs.stat(zipPath).catch(() => null);
-  if (!stat?.isFile()) {
-    throw new AppError({
-      code: "PROFILE_ARTIFACT_MISSING",
-      statusCode: 404,
-      message: `GTFS zip not found for profile '${profileName}': ${zipPath}`,
-    });
-  }
+  const stat = await readZipStatOrThrow(profileName, zipPath);
 
   const signature = `${zipPath}:${stat.size}:${stat.mtimeMs}`;
+  const cached = readCachedStationIndex(profileName, signature);
+  if (cached) {
+    return cached;
+  }
+
+  const lines = await readStopsLines(zipPath);
+  const headerIndices = resolveStopsHeaderIndices(lines[0], zipPath);
+  const stationLookup = buildStationLookup(lines, headerIndices);
+  const stations = Array.from(stationLookup.byValue.values()).sort((a, b) =>
+    a.name.localeCompare(b.name, "de"),
+  );
+  const searchBuckets = buildSearchBuckets(stations);
+
+  const result = createStationIndexResult({
+    signature,
+    profileName,
+    zipPath,
+    stations,
+    byId: stationLookup.byId,
+    byNameFold: stationLookup.byNameFold,
+    byValueFold: stationLookup.byValueFold,
+    searchBuckets,
+  });
+  touchStationCache(profileName, result);
+  pruneStationCache();
+  return result;
+}
+
+async function readZipStatOrThrow(profileName, zipPath) {
+  const stat = await fs.stat(zipPath).catch(() => null);
+  if (stat?.isFile()) {
+    return stat;
+  }
+  throw new AppError({
+    code: "PROFILE_ARTIFACT_MISSING",
+    statusCode: 404,
+    message: `GTFS zip not found for profile '${profileName}': ${zipPath}`,
+  });
+}
+
+function readCachedStationIndex(profileName, signature) {
   const cached = stationIndexCache.get(profileName);
   if (
     cached?.signature === signature &&
@@ -184,7 +218,10 @@ async function getStationIndexForProfile(profileName) {
     touchStationCache(profileName, cached);
     return cached;
   }
+  return null;
+}
 
+async function readStopsLines(zipPath) {
   const unzip = await execFileAsync("unzip", ["-p", zipPath, "stops.txt"], {
     maxBuffer: 64 * 1024 * 1024,
   }).catch((err) => {
@@ -206,75 +243,78 @@ async function getStationIndexForProfile(profileName) {
       message: `stops.txt is empty in ${zipPath}`,
     });
   }
+  return lines;
+}
 
-  const header = parseCsvLine(lines[0]);
-  const idxName = header.indexOf("stop_name");
-  const idxId = header.indexOf("stop_id");
-  const idxLat = header.indexOf("stop_lat");
-  const idxLon = header.indexOf("stop_lon");
-  const idxLocationType = header.indexOf("location_type");
-  if (idxName < 0 || idxId < 0) {
+function resolveStopsHeaderIndices(headerLine, zipPath) {
+  const header = parseCsvLine(headerLine);
+  const indices = {
+    idxName: header.indexOf("stop_name"),
+    idxId: header.indexOf("stop_id"),
+    idxLat: header.indexOf("stop_lat"),
+    idxLon: header.indexOf("stop_lon"),
+    idxLocationType: header.indexOf("location_type"),
+  };
+  if (indices.idxName < 0 || indices.idxId < 0) {
     throw new AppError({
       code: "STATION_INDEX_FAILED",
       statusCode: 500,
       message: `stops.txt missing required columns stop_name/stop_id in ${zipPath}`,
     });
   }
+  return indices;
+}
 
+function shouldSkipStationRow(name, id, locationType) {
+  if (!name || !id) {
+    return true;
+  }
+  return locationType === "2" || locationType === "3" || locationType === "4";
+}
+
+function createStationFromRow(row, indices) {
+  const name = (row[indices.idxName] || "").trim();
+  const id = (row[indices.idxId] || "").trim();
+  const locationType =
+    indices.idxLocationType >= 0 ? (row[indices.idxLocationType] || "").trim() : "";
+  if (shouldSkipStationRow(name, id, locationType)) {
+    return null;
+  }
+
+  const latRaw = indices.idxLat >= 0 ? (row[indices.idxLat] || "").trim() : "";
+  const lonRaw = indices.idxLon >= 0 ? (row[indices.idxLon] || "").trim() : "";
+  const lat = Number.parseFloat(latRaw);
+  const lon = Number.parseFloat(lonRaw);
+  const hasCoords = isFiniteCoordinate(lat, lon);
+  const value = `${name} [${id}]`;
+
+  return {
+    id,
+    name,
+    value,
+    token: toTaggedStopId(config.motisDatasetTag, id),
+    coordinateToken: hasCoords ? `${lat},${lon}` : null,
+    lat: hasCoords ? lat : null,
+    lon: hasCoords ? lon : null,
+    locationType,
+    nameFold: foldText(name),
+    valueFold: foldText(value),
+  };
+}
+
+function buildStationLookup(lines, indices) {
   const byValue = new Map();
   const byId = new Map();
   const byNameFold = new Map();
   const byValueFold = new Map();
-  const bucketSets = new Map();
-  function addBucketValue(bucket, stationIndex) {
-    if (!bucket || bucket.length < 3) {
-      return;
-    }
-    const key = bucket.slice(0, 3);
-    const set = bucketSets.get(key) || new Set();
-    set.add(stationIndex);
-    bucketSets.set(key, set);
-  }
 
   for (let i = 1; i < lines.length; i += 1) {
-    const row = parseCsvLine(lines[i]);
-    const name = (row[idxName] || "").trim();
-    const id = (row[idxId] || "").trim();
-    const latRaw = idxLat >= 0 ? (row[idxLat] || "").trim() : "";
-    const lonRaw = idxLon >= 0 ? (row[idxLon] || "").trim() : "";
-    const lat = Number.parseFloat(latRaw);
-    const lon = Number.parseFloat(lonRaw);
-    const hasCoords = isFiniteCoordinate(lat, lon);
-    const locationType =
-      idxLocationType >= 0 ? (row[idxLocationType] || "").trim() : "";
-    if (!name || !id) {
+    const station = createStationFromRow(parseCsvLine(lines[i]), indices);
+    if (!station || byValue.has(station.value)) {
       continue;
     }
-
-    // Prefer stations / stops, skip entrances/exits.
-    if (locationType === "2" || locationType === "3" || locationType === "4") {
-      continue;
-    }
-
-    const value = `${name} [${id}]`;
-    if (byValue.has(value)) {
-      continue;
-    }
-
-    const station = {
-      id,
-      name,
-      value,
-      token: toTaggedStopId(config.motisDatasetTag, id),
-      coordinateToken: hasCoords ? `${lat},${lon}` : null,
-      lat: hasCoords ? lat : null,
-      lon: hasCoords ? lon : null,
-      locationType,
-      nameFold: foldText(name),
-      valueFold: foldText(value),
-    };
-    byValue.set(value, station);
-    byId.set(id, pickPreferredStation(byId.get(id), station));
+    byValue.set(station.value, station);
+    byId.set(station.id, pickPreferredStation(byId.get(station.id), station));
     byNameFold.set(
       station.nameFold,
       pickPreferredStation(byNameFold.get(station.nameFold), station),
@@ -285,37 +325,48 @@ async function getStationIndexForProfile(profileName) {
     );
   }
 
-  const stations = Array.from(byValue.values()).sort((a, b) =>
-    a.name.localeCompare(b.name, "de"),
-  );
+  return { byValue, byId, byNameFold, byValueFold };
+}
 
+function addStationBucket(bucketSets, bucket, stationIndex) {
+  if (!bucket || bucket.length < 3) {
+    return;
+  }
+  const key = bucket.slice(0, 3);
+  const set = bucketSets.get(key) || new Set();
+  set.add(stationIndex);
+  bucketSets.set(key, set);
+}
+
+function buildSearchBuckets(stations) {
+  const bucketSets = new Map();
   for (let i = 0; i < stations.length; i += 1) {
     const station = stations[i];
-    addBucketValue(station.nameFold, i);
-    addBucketValue(station.valueFold, i);
-    addBucketValue(station.id, i);
+    addStationBucket(bucketSets, station.nameFold, i);
+    addStationBucket(bucketSets, station.valueFold, i);
+    addStationBucket(bucketSets, station.id, i);
   }
 
   const searchBuckets = new Map();
   for (const [key, idsSet] of bucketSets.entries()) {
     searchBuckets.set(key, Array.from(idsSet));
   }
+  return searchBuckets;
+}
 
-  const result = {
-    signature,
-    profileName,
-    zipPath,
-    stations,
-    byId,
-    byNameFold,
-    byValueFold,
-    searchBuckets,
+function createStationIndexResult(input) {
+  return {
+    signature: input.signature,
+    profileName: input.profileName,
+    zipPath: input.zipPath,
+    stations: input.stations,
+    byId: input.byId,
+    byNameFold: input.byNameFold,
+    byValueFold: input.byValueFold,
+    searchBuckets: input.searchBuckets,
     cachedAt: Date.now(),
     lastAccessAt: Date.now(),
   };
-  touchStationCache(profileName, result);
-  pruneStationCache();
-  return result;
 }
 
 async function resolveRouteProfileName(status) {
@@ -442,51 +493,56 @@ async function serveStatic(_req, res, urlPath) {
   }
 }
 
-async function handleApi(req, res, url, requestLogger) {
-  if (req.method === "GET" && url.pathname === "/metrics") {
-    sendText(
-      res,
-      200,
-      metrics.renderPrometheus(),
-      "text/plain; version=0.0.4; charset=utf-8",
-    );
-    return;
+let tileDbClient = null;
+
+async function handleMetricsRequest(req, res, url) {
+  if (req.method !== "GET" || url.pathname !== "/metrics") {
+    return false;
   }
+  sendText(
+    res,
+    200,
+    metrics.renderPrometheus(),
+    "text/plain; version=0.0.4; charset=utf-8",
+  );
+  return true;
+}
 
-  // ---> NEW GRAPHQL ENDPOINT <---
-  if (req.method === "POST" && url.pathname === "/api/graphql") {
-    const { graphql } = require("graphql");
-    const { schema } = require("./graphql/schema");
-    const { rootValue } = require("./graphql/resolvers");
-    const requestBody = validateGraphqlRequestBody(await parseJsonBody(req));
-
-    try {
-      const response = await graphql({
-        schema,
-        source: requestBody.query,
-        rootValue,
-        variableValues: requestBody.variables,
-        operationName: requestBody.operationName,
-      });
-      sendJson(res, 200, response);
-    } catch (e) {
-      sendJson(res, 500, { errors: [e.message] });
-    }
-    return;
+async function handleGraphqlRequest(req, res, url) {
+  if (req.method !== "POST" || url.pathname !== "/api/graphql") {
+    return false;
   }
+  const { graphql } = require("graphql");
+  const { schema } = require("./graphql/schema");
+  const { rootValue } = require("./graphql/resolvers");
+  const requestBody = validateGraphqlRequestBody(await parseJsonBody(req));
 
+  try {
+    const response = await graphql({
+      schema,
+      source: requestBody.query,
+      rootValue,
+      variableValues: requestBody.variables,
+      operationName: requestBody.operationName,
+    });
+    sendJson(res, 200, response);
+  } catch (e) {
+    sendJson(res, 500, { errors: [e.message] });
+  }
+  return true;
+}
+
+async function handleQaV2ClusterRequest(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/qa/v2/clusters") {
     const { getReviewClustersV2 } = require("./domains/qa/api");
-    const data = await getReviewClustersV2(url);
-    sendJson(res, 200, data);
-    return;
+    sendJson(res, 200, await getReviewClustersV2(url));
+    return true;
   }
 
   if (req.method === "GET" && url.pathname === "/api/qa/v2/curated-stations") {
     const { getCuratedStationsV1 } = require("./domains/qa/api");
-    const data = await getCuratedStationsV1(url);
-    sendJson(res, 200, data);
-    return;
+    sendJson(res, 200, await getCuratedStationsV1(url));
+    return true;
   }
 
   if (req.method === "GET") {
@@ -496,9 +552,8 @@ async function handleApi(req, res, url, requestLogger) {
     if (clusterDetailMatch) {
       const { getReviewClusterDetailV2 } = require("./domains/qa/api");
       const clusterId = decodeURIComponent(clusterDetailMatch[1]);
-      const data = await getReviewClusterDetailV2(clusterId);
-      sendJson(res, 200, data);
-      return;
+      sendJson(res, 200, await getReviewClusterDetailV2(clusterId));
+      return true;
     }
 
     const curatedDetailMatch = url.pathname.match(
@@ -507,9 +562,8 @@ async function handleApi(req, res, url, requestLogger) {
     if (curatedDetailMatch) {
       const { getCuratedStationDetailV1 } = require("./domains/qa/api");
       const curatedStationId = decodeURIComponent(curatedDetailMatch[1]);
-      const data = await getCuratedStationDetailV1(curatedStationId);
-      sendJson(res, 200, data);
-      return;
+      sendJson(res, 200, await getCuratedStationDetailV1(curatedStationId));
+      return true;
     }
   }
 
@@ -521,87 +575,87 @@ async function handleApi(req, res, url, requestLogger) {
       const body = await parseJsonBody(req);
       const { postReviewClusterDecisionV2 } = require("./domains/qa/api");
       const clusterId = decodeURIComponent(clusterDecisionMatch[1]);
-      const data = await postReviewClusterDecisionV2(clusterId, body);
-      sendJson(res, 200, data);
-      return;
+      sendJson(res, 200, await postReviewClusterDecisionV2(clusterId, body));
+      return true;
     }
   }
 
+  return false;
+}
+
+function buildRefreshArgs(body = {}) {
+  const refreshArgs = [];
+  if (body.country) refreshArgs.push("--country", body.country);
+  if (body.asOf) refreshArgs.push("--as-of", body.asOf);
+  if (body.sourceId) refreshArgs.push("--source-id", body.sourceId);
+  if (body.dryRun) refreshArgs.push("--dry-run");
+  if (body.skipMigrate) refreshArgs.push("--skip-migrate");
+  return refreshArgs;
+}
+
+async function startTemporalWorkflow(workflowType, workflowId, args) {
+  const { Connection, Client } = require("@temporalio/client");
+  const connection = await Connection.connect({
+    address: process.env.TEMPORAL_ADDRESS || "localhost:7233",
+  });
+  const client = new Client({ connection });
+  return client.workflow.start(workflowType, {
+    taskQueue: "review-pipeline",
+    workflowId,
+    args,
+  });
+}
+
+async function handleQaJobsRequest(req, res, url) {
   if (req.method === "POST" && url.pathname === "/api/qa/jobs/refresh") {
     const body = await parseJsonBody(req);
-
-    // Connect to Temporal
-    const { Connection, Client } = require("@temporalio/client");
-    const connection = await Connection.connect({
-      address: process.env.TEMPORAL_ADDRESS || "localhost:7233",
-    });
-    const client = new Client({ connection });
-
-    // Convert body args into bash args for the backwards compatible script wrapper
-    const refreshArgs = [];
-    if (body.country) refreshArgs.push("--country", body.country);
-    if (body.asOf) refreshArgs.push("--as-of", body.asOf);
-    if (body.sourceId) refreshArgs.push("--source-id", body.sourceId);
-    if (body.dryRun) refreshArgs.push("--dry-run");
-    if (body.skipMigrate) refreshArgs.push("--skip-migrate");
-
-    // Trigger the Workflow
+    const refreshArgs = buildRefreshArgs(body);
     const workflowId = `review-pipeline-${Date.now()}`;
-    const handle = await client.workflow.start("stationReviewPipeline", {
-      taskQueue: "review-pipeline",
-      workflowId,
-      args: [{ skipMigrate: !!body.skipMigrate, refreshArgs }],
-    });
-
+    const handle = await startTemporalWorkflow("stationReviewPipeline", workflowId, [
+      { skipMigrate: !!body.skipMigrate, refreshArgs },
+    ]);
     sendJson(res, 202, {
       message: "Temporal Workflow Accepted",
       workflowId: handle.workflowId,
     });
-    return;
+    return true;
   }
 
-  if (req.method === "GET") {
-    const match = url.pathname.match(/^\/api\/qa\/jobs\/([^/]+)$/);
-    if (match) {
-      const { getRefreshJob } = require("./domains/qa/api");
-      const jobId = decodeURIComponent(match[1]);
-      const result = await getRefreshJob(jobId, {
-        rootDir: process.cwd(),
-      });
-      sendJson(res, 200, result);
-      return;
-    }
+  if (req.method !== "GET") {
+    return false;
   }
+  const match = url.pathname.match(/^\/api\/qa\/jobs\/([^/]+)$/);
+  if (!match) {
+    return false;
+  }
+  const { getRefreshJob } = require("./domains/qa/api");
+  const jobId = decodeURIComponent(match[1]);
+  const result = await getRefreshJob(jobId, { rootDir: process.cwd() });
+  sendJson(res, 200, result);
+  return true;
+}
 
+async function handleGtfsRequest(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/gtfs/profiles") {
-    const payload = await switcher.getProfilesWithMeta();
-    sendJson(res, 200, payload);
-    return;
+    sendJson(res, 200, await switcher.getProfilesWithMeta());
+    return true;
   }
 
   if (req.method === "POST" && url.pathname === "/api/gtfs/compile") {
     const body = await parseJsonBody(req);
     const compileArgs = validateCompileGtfsRequest(body);
-
-    const { Connection, Client } = require("@temporalio/client");
-    const connection = await Connection.connect({
-      address: process.env.TEMPORAL_ADDRESS || "localhost:7233",
-    });
-    const client = new Client({ connection });
-
     const workflowId = `gtfs-compile-${compileArgs.tier}-${Date.now()}`;
-    const handle = await client.workflow.start("compileGtfsArtifact", {
-      taskQueue: "review-pipeline",
+    const handle = await startTemporalWorkflow(
+      "compileGtfsArtifact",
       workflowId,
-      args: [compileArgs],
-    });
-
+      [compileArgs],
+    );
     sendJson(res, 202, {
       message: "Temporal Workflow Accepted",
       workflowId: handle.workflowId,
       request: compileArgs,
     });
-    return;
+    return true;
   }
 
   if (req.method === "POST" && url.pathname === "/api/gtfs/activate") {
@@ -613,228 +667,275 @@ async function handleApi(req, res, url, requestLogger) {
         message: "Missing required field: profile",
       });
     }
-
     const result = await switcher.start(body.profile);
-    const statusCode = result.noop ? 200 : 202;
-    sendJson(res, statusCode, result);
-    return;
+    sendJson(res, result.noop ? 200 : 202, result);
+    return true;
   }
 
   if (req.method === "GET" && url.pathname === "/api/gtfs/status") {
-    const status = await switcher.getStatus();
-    sendJson(res, 200, status);
-    return;
+    sendJson(res, 200, await switcher.getStatus());
+    return true;
   }
 
   if (req.method === "GET" && url.pathname === "/api/gtfs/stations") {
-    const query = (url.searchParams.get("q") || "").trim();
-    const limit = parseLimit(url.searchParams.get("limit"), 50, 1, 200);
-    const requestedProfile = (url.searchParams.get("profile") || "").trim();
+    await handleGtfsStationsRequest(res, url);
+    return true;
+  }
 
-    const profilesWithMeta = await switcher.getProfilesWithMeta();
-    const profileName =
-      requestedProfile ||
-      profilesWithMeta.activeProfile ||
-      (profilesWithMeta.profiles[0] ? profilesWithMeta.profiles[0].name : "");
+  return false;
+}
 
-    if (!profileName) {
-      sendJson(res, 404, {
-        error: "No GTFS profile available for station lookup",
-      });
-      return;
-    }
+function resolveLookupProfileName(profilesWithMeta, requestedProfile) {
+  return (
+    requestedProfile ||
+    profilesWithMeta.activeProfile ||
+    (profilesWithMeta.profiles[0] ? profilesWithMeta.profiles[0].name : "")
+  );
+}
 
-    const index = await getStationIndexForProfile(profileName);
-    const qFold = foldText(query);
-    const bucketKey = qFold.length >= 3 ? qFold.slice(0, 3) : "";
-    const bucketRows =
-      bucketKey && index.searchBuckets?.has(bucketKey)
-        ? index.searchBuckets.get(bucketKey).map((idx) => index.stations[idx])
-        : index.stations;
-
-    const filtered = qFold
-      ? bucketRows.filter(
-          (station) =>
-            station.nameFold.includes(qFold) ||
-            station.valueFold.includes(qFold) ||
-            station.id.includes(query),
-        )
+function buildFilteredStationRows(index, query) {
+  const qFold = foldText(query);
+  const bucketKey = qFold.length >= 3 ? qFold.slice(0, 3) : "";
+  const bucketRows =
+    bucketKey && index.searchBuckets?.has(bucketKey)
+      ? index.searchBuckets.get(bucketKey).map((idx) => index.stations[idx])
       : index.stations;
+  return qFold
+    ? bucketRows.filter(
+        (station) =>
+          station.nameFold.includes(qFold) ||
+          station.valueFold.includes(qFold) ||
+          station.id.includes(query),
+      )
+    : index.stations;
+}
 
-    sendJson(res, 200, {
-      profile: profileName,
-      query,
-      total: filtered.length,
-      stations: filtered.slice(0, limit).map((station) => ({
-        id: station.id,
-        name: station.name,
-        value: station.value,
-        token: station.token,
-        lat: station.lat,
-        lon: station.lon,
-      })),
+async function handleGtfsStationsRequest(res, url) {
+  const query = (url.searchParams.get("q") || "").trim();
+  const limit = parseLimit(url.searchParams.get("limit"), 50, 1, 200);
+  const requestedProfile = (url.searchParams.get("profile") || "").trim();
+  const profilesWithMeta = await switcher.getProfilesWithMeta();
+  const profileName = resolveLookupProfileName(profilesWithMeta, requestedProfile);
+
+  if (!profileName) {
+    sendJson(res, 404, {
+      error: "No GTFS profile available for station lookup",
     });
     return;
   }
 
-  if (req.method === "GET" && url.pathname === "/health") {
-    const motis = await checkMotisHealth(config);
-    const motisDataDir = path.dirname(config.motisActiveGtfsPath);
-    const motisData = {
-      configExists: false,
-      activeGtfsExists: false,
-    };
+  const index = await getStationIndexForProfile(profileName);
+  const filtered = buildFilteredStationRows(index, query);
+  sendJson(res, 200, {
+    profile: profileName,
+    query,
+    total: filtered.length,
+    stations: filtered.slice(0, limit).map((station) => ({
+      id: station.id,
+      name: station.name,
+      value: station.value,
+      token: station.token,
+      lat: station.lat,
+      lon: station.lon,
+    })),
+  });
+}
 
-    try {
-      const configStat = await fs.stat(path.join(motisDataDir, "config.yml"));
-      motisData.configExists = configStat.isFile();
-    } catch {}
+async function readMotisDataStatus() {
+  const motisDataDir = path.dirname(config.motisActiveGtfsPath);
+  const motisData = {
+    configExists: false,
+    activeGtfsExists: false,
+  };
+  try {
+    const configStat = await fs.stat(path.join(motisDataDir, "config.yml"));
+    motisData.configExists = configStat.isFile();
+  } catch {}
+  try {
+    const gtfsStat = await fs.stat(config.motisActiveGtfsPath);
+    motisData.activeGtfsExists = gtfsStat.isFile();
+  } catch {}
+  return motisData;
+}
 
-    try {
-      const gtfsStat = await fs.stat(config.motisActiveGtfsPath);
-      motisData.activeGtfsExists = gtfsStat.isFile();
-    } catch {}
+async function handleHealthRequest(req, res, url) {
+  if (req.method !== "GET" || url.pathname !== "/health") {
+    return false;
+  }
+  const motis = await checkMotisHealth(config);
+  const motisData = await readMotisDataStatus();
+  sendJson(res, 200, {
+    status: "ok",
+    service: "orchestrator",
+    motisReady: motis.ok,
+    motisStatusCode: motis.status,
+    motisData,
+    checkedAt: new Date().toISOString(),
+  });
+  return true;
+}
 
-    sendJson(res, 200, {
-      status: "ok",
-      service: "orchestrator",
-      motisReady: motis.ok,
-      motisStatusCode: motis.status,
-      motisData,
-      checkedAt: new Date().toISOString(),
-    });
-    return;
+function makeResolvedStation(input) {
+  return {
+    input,
+    resolved: input,
+    strategy: "raw",
+    matched: null,
+  };
+}
+
+async function resolveRouteStationInputs(routeProfile, origin, destination, requestLogger) {
+  let originResolved = makeResolvedStation(origin);
+  let destinationResolved = makeResolvedStation(destination);
+
+  if (!routeProfile) {
+    return { originResolved, destinationResolved };
   }
 
-  if (req.method === "POST" && url.pathname === "/api/routes") {
-    const body = await parseJsonBody(req);
-    const status = await switcher.getStatus();
-
-    if (status.state !== "ready") {
-      throw new AppError({
-        code: "ROUTE_NOT_READY",
-        statusCode: 409,
-        message:
-          "MOTIS is not ready. Route search disabled while switching/importing/restarting.",
-        details: {
-          state: status.state,
-          message: status.message,
-        },
-      });
-    }
-
-    const validated = validateRouteRequestBody(body);
-    const origin = validated.origin;
-    const destination = validated.destination;
-    const datetime = validated.datetime;
-
-    const routeProfile = await resolveRouteProfileName(status);
-    let originResolved = {
-      input: origin,
-      resolved: origin,
-      strategy: "raw",
-      matched: null,
-    };
-    let destinationResolved = {
-      input: destination,
-      resolved: destination,
-      strategy: "raw",
-      matched: null,
-    };
-
-    if (routeProfile) {
-      try {
-        [originResolved, destinationResolved] = await Promise.all([
-          resolveStationInput(routeProfile, origin),
-          resolveStationInput(routeProfile, destination),
-        ]);
-      } catch (err) {
-        requestLogger.warn(
-          "Failed to resolve station inputs, forwarding raw values to MOTIS",
-          {
-            step: "route_resolve",
-            profile: routeProfile,
-            error: err.message,
-          },
-        );
-      }
-    }
-
-    const routeRequest = {
-      origin: originResolved.resolved,
-      destination: destinationResolved.resolved,
-      datetime,
-    };
-
-    const routeResponse = await queryMotisRoute(config, routeRequest);
-    if (!routeResponse.ok) {
-      throw new AppError({
-        code: "MOTIS_UNAVAILABLE",
-        statusCode: routeResponse.status || 502,
-        message: "MOTIS route query failed",
-        details: {
-          motisMethod: routeResponse.routeMethod,
-          motisPath: routeResponse.routePath,
-          motisResponse: routeResponse.body,
-          motisAttempts: (routeResponse.routeAttempts || []).slice(0, 30),
-          routeRequestResolved: {
-            profile: routeProfile || null,
-            origin: originResolved,
-            destination: destinationResolved,
-            datetime,
-          },
-        },
-      });
-    }
-
-    sendJson(res, 200, {
-      ok: true,
-      profile: status.activeProfile || null,
-      motisMethod: routeResponse.routeMethod,
-      motisPath: routeResponse.routePath,
-      motisAttempts: (routeResponse.routeAttempts || []).slice(0, 30),
-      routeRequestResolved: {
-        profile: routeProfile || null,
-        origin: originResolved,
-        destination: destinationResolved,
-        datetime,
+  try {
+    [originResolved, destinationResolved] = await Promise.all([
+      resolveStationInput(routeProfile, origin),
+      resolveStationInput(routeProfile, destination),
+    ]);
+  } catch (err) {
+    requestLogger.warn(
+      "Failed to resolve station inputs, forwarding raw values to MOTIS",
+      {
+        step: "route_resolve",
+        profile: routeProfile,
+        error: err.message,
       },
-      route: routeResponse.body,
-    });
-    return;
+    );
   }
 
-  // --- Task 5.1: MVT Tile Endpoint -------------------------------------------
-  // GET /api/tiles/:z/:x/:y.pbf
-  // Serves dynamic Mapbox Vector Tiles from PostGIS using ST_AsMVT.
-  if (req.method === "GET") {
-    const tileMatch = url.pathname.match(
-      /^\/api\/tiles\/([^/]+)\/([^/]+)\/([^/]+)\.pbf$/,
-    );
-    if (tileMatch) {
-      const z = Number.parseInt(tileMatch[1], 10);
-      const x = Number.parseInt(tileMatch[2], 10);
-      const y = Number.parseInt(tileMatch[3], 10);
-      const { serveMvtTile } = require("./domains/qa/mvt");
-      const { createPostgisClient } = require("./data/postgis/client");
+  return { originResolved, destinationResolved };
+}
 
-      // Lazily initialise DB client for tile requests
-      if (!handleApi._tileDbClient) {
-        handleApi._tileDbClient = createPostgisClient();
-        await handleApi._tileDbClient.ensureReady();
-      }
-      const tileBuffer = await serveMvtTile(handleApi._tileDbClient, {
-        z,
-        x,
-        y,
-      });
-      res.writeHead(200, {
-        "content-type": "application/x-protobuf",
-        "content-length": tileBuffer.length,
-        "cache-control": "public, max-age=60",
-        "access-control-allow-origin": "*",
-      });
-      res.end(tileBuffer);
+function buildRouteResolutionDetails(routeProfile, originResolved, destinationResolved, datetime) {
+  return {
+    profile: routeProfile || null,
+    origin: originResolved,
+    destination: destinationResolved,
+    datetime,
+  };
+}
+
+async function handleRoutesRequest(req, res, url, requestLogger) {
+  if (req.method !== "POST" || url.pathname !== "/api/routes") {
+    return false;
+  }
+
+  const body = await parseJsonBody(req);
+  const status = await switcher.getStatus();
+  if (status.state !== "ready") {
+    throw new AppError({
+      code: "ROUTE_NOT_READY",
+      statusCode: 409,
+      message:
+        "MOTIS is not ready. Route search disabled while switching/importing/restarting.",
+      details: {
+        state: status.state,
+        message: status.message,
+      },
+    });
+  }
+
+  const validated = validateRouteRequestBody(body);
+  const routeProfile = await resolveRouteProfileName(status);
+  const { originResolved, destinationResolved } = await resolveRouteStationInputs(
+    routeProfile,
+    validated.origin,
+    validated.destination,
+    requestLogger,
+  );
+
+  const routeRequest = {
+    origin: originResolved.resolved,
+    destination: destinationResolved.resolved,
+    datetime: validated.datetime,
+  };
+  const routeResponse = await queryMotisRoute(config, routeRequest);
+  const routeRequestResolved = buildRouteResolutionDetails(
+    routeProfile,
+    originResolved,
+    destinationResolved,
+    validated.datetime,
+  );
+
+  if (!routeResponse.ok) {
+    throw new AppError({
+      code: "MOTIS_UNAVAILABLE",
+      statusCode: routeResponse.status || 502,
+      message: "MOTIS route query failed",
+      details: {
+        motisMethod: routeResponse.routeMethod,
+        motisPath: routeResponse.routePath,
+        motisResponse: routeResponse.body,
+        motisAttempts: (routeResponse.routeAttempts || []).slice(0, 30),
+        routeRequestResolved,
+      },
+    });
+  }
+
+  sendJson(res, 200, {
+    ok: true,
+    profile: status.activeProfile || null,
+    motisMethod: routeResponse.routeMethod,
+    motisPath: routeResponse.routePath,
+    motisAttempts: (routeResponse.routeAttempts || []).slice(0, 30),
+    routeRequestResolved,
+    route: routeResponse.body,
+  });
+  return true;
+}
+
+async function handleTileRequest(req, res, url) {
+  if (req.method !== "GET") {
+    return false;
+  }
+  const tileMatch = url.pathname.match(
+    /^\/api\/tiles\/([^/]+)\/([^/]+)\/([^/]+)\.pbf$/,
+  );
+  if (!tileMatch) {
+    return false;
+  }
+
+  const z = Number.parseInt(tileMatch[1], 10);
+  const x = Number.parseInt(tileMatch[2], 10);
+  const y = Number.parseInt(tileMatch[3], 10);
+  const { serveMvtTile } = require("./domains/qa/mvt");
+  const { createPostgisClient } = require("./data/postgis/client");
+
+  if (!tileDbClient) {
+    tileDbClient = createPostgisClient();
+    await tileDbClient.ensureReady();
+  }
+  const tileBuffer = await serveMvtTile(tileDbClient, { z, x, y });
+  res.writeHead(200, {
+    "content-type": "application/x-protobuf",
+    "content-length": tileBuffer.length,
+    "cache-control": "public, max-age=60",
+    "access-control-allow-origin": "*",
+  });
+  res.end(tileBuffer);
+  return true;
+}
+
+async function handleApi(req, res, url, requestLogger) {
+  const handlers = [
+    handleMetricsRequest,
+    handleGraphqlRequest,
+    handleQaV2ClusterRequest,
+    handleQaJobsRequest,
+    handleGtfsRequest,
+    handleHealthRequest,
+    (request, response, requestUrl) =>
+      handleRoutesRequest(request, response, requestUrl, requestLogger),
+    handleTileRequest,
+  ];
+
+  for (const handler of handlers) {
+    if (await handler(req, res, url)) {
       return;
     }
   }
