@@ -198,8 +198,10 @@ function parseArgs(argv = []) {
     dryRun: false,
   };
 
-  for (let i = 0; i < passthrough.length; i += 1) {
-    i = parseArgsToken(options, passthrough, i);
+  let index = 0;
+  while (index < passthrough.length) {
+    const nextIndex = parseArgsToken(options, passthrough, index);
+    index = nextIndex + 1;
   }
 
   if (options.help) {

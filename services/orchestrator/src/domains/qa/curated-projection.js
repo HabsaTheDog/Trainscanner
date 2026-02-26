@@ -112,6 +112,25 @@ function buildEntityFromMembers({
   };
 }
 
+function pushProjectionRows(target, candidateRows) {
+  if (!candidateRows) {
+    return;
+  }
+  target.entities.push(candidateRows.entity);
+  target.members.push(...candidateRows.memberRows);
+  target.fieldProvenance.push(...candidateRows.fieldRows);
+  target.lineage.push(...candidateRows.lineageRows);
+}
+
+function emptyProjectionRows() {
+  return {
+    entities: [],
+    members: [],
+    fieldProvenance: [],
+    lineage: [],
+  };
+}
+
 function buildCuratedProjectionRowsV1(input = {}) {
   const clusterId = toCleanString(input.clusterId);
   const decision =
@@ -122,18 +141,10 @@ function buildCuratedProjectionRowsV1(input = {}) {
   const groups = Array.isArray(decision.groups) ? decision.groups : [];
   const renameTo = toCleanString(decision.renameTo);
 
-  const entities = [];
-  const members = [];
-  const fieldProvenance = [];
-  const lineage = [];
+  const rows = emptyProjectionRows();
 
   if (!clusterId || !operation) {
-    return {
-      entities,
-      members,
-      fieldProvenance,
-      lineage,
-    };
+    return rows;
   }
 
   if (groups.length > 0) {
@@ -154,21 +165,10 @@ function buildCuratedProjectionRowsV1(input = {}) {
           section_name: toCleanString(group.sectionName),
         },
       });
-      if (!candidateRows) {
-        continue;
-      }
-      entities.push(candidateRows.entity);
-      members.push(...candidateRows.memberRows);
-      fieldProvenance.push(...candidateRows.fieldRows);
-      lineage.push(...candidateRows.lineageRows);
+      pushProjectionRows(rows, candidateRows);
     }
 
-    return {
-      entities,
-      members,
-      fieldProvenance,
-      lineage,
-    };
+    return rows;
   }
 
   const targetCanonicalStationId = selectedStationIds[0] || "";
@@ -186,26 +186,8 @@ function buildCuratedProjectionRowsV1(input = {}) {
     },
   });
 
-  if (!candidateRows) {
-    return {
-      entities,
-      members,
-      fieldProvenance,
-      lineage,
-    };
-  }
-
-  entities.push(candidateRows.entity);
-  members.push(...candidateRows.memberRows);
-  fieldProvenance.push(...candidateRows.fieldRows);
-  lineage.push(...candidateRows.lineageRows);
-
-  return {
-    entities,
-    members,
-    fieldProvenance,
-    lineage,
-  };
+  pushProjectionRows(rows, candidateRows);
+  return rows;
 }
 
 function persistCuratedProjectionV1(tx, input = {}) {

@@ -209,67 +209,89 @@ function isStrictIsoDate(value) {
   return date.toISOString().slice(0, 10) === value;
 }
 
+function flushCsvField(state) {
+  state.currentRow.push(state.currentField);
+  state.currentField = "";
+}
+
+function flushCsvRow(state, text) {
+  if (
+    state.currentRow.length === 1 &&
+    state.currentRow[0] === "" &&
+    (state.rows.length === 0 || text.endsWith("\n") || text.endsWith("\r"))
+  ) {
+    state.currentRow = [];
+    return;
+  }
+  state.rows.push(state.currentRow);
+  state.currentRow = [];
+}
+
+function handleCsvQuote(text, state, index) {
+  if (text[index] !== '"') {
+    return null;
+  }
+  const next = text[index + 1];
+  if (state.inQuotes && next === '"') {
+    state.currentField += '"';
+    return index + 1;
+  }
+  state.inQuotes = !state.inQuotes;
+  return index;
+}
+
+function handleCsvSeparator(text, state, index) {
+  const ch = text[index];
+  if (state.inQuotes) {
+    return null;
+  }
+  if (ch === ",") {
+    flushCsvField(state);
+    return index;
+  }
+  if (ch !== "\n" && ch !== "\r") {
+    return null;
+  }
+
+  let nextIndex = index;
+  if (ch === "\r" && text[index + 1] === "\n") {
+    nextIndex += 1;
+  }
+  flushCsvField(state);
+  flushCsvRow(state, text);
+  return nextIndex;
+}
+
 function parseCsv(text) {
-  const rows = [];
-  let currentRow = [];
-  let currentField = "";
-  let inQuotes = false;
-
-  const flushField = () => {
-    currentRow.push(currentField);
-    currentField = "";
-  };
-
-  const flushRow = () => {
-    if (
-      currentRow.length === 1 &&
-      currentRow[0] === "" &&
-      (rows.length === 0 || text.endsWith("\n") || text.endsWith("\r"))
-    ) {
-      currentRow = [];
-      return;
-    }
-    rows.push(currentRow);
-    currentRow = [];
+  const state = {
+    rows: [],
+    currentRow: [],
+    currentField: "",
+    inQuotes: false,
   };
 
   for (let i = 0; i < text.length; i += 1) {
-    const ch = text[i];
-
-    if (ch === '"') {
-      const next = text[i + 1];
-      if (inQuotes && next === '"') {
-        currentField += '"';
-        i += 1;
-      } else {
-        inQuotes = !inQuotes;
-      }
+    const quoteIndex = handleCsvQuote(text, state, i);
+    if (quoteIndex !== null) {
+      i = quoteIndex;
       continue;
     }
 
-    if (ch === "," && !inQuotes) {
-      flushField();
+    const separatorIndex = handleCsvSeparator(text, state, i);
+    if (separatorIndex !== null) {
+      i = separatorIndex;
       continue;
     }
 
-    if ((ch === "\n" || ch === "\r") && !inQuotes) {
-      if (ch === "\r" && text[i + 1] === "\n") {
-        i += 1;
-      }
-      flushField();
-      flushRow();
-      continue;
-    }
-
-    currentField += ch;
+    state.currentField += text[i];
   }
 
-  flushField();
-  if (currentRow.length > 0) {
-    flushRow();
+  flushCsvField(state);
+  if (state.currentRow.length > 0) {
+    flushCsvRow(state, text);
   }
 
-  return rows;
+  return state.rows;
 }
 
 function normalizeLookupName(value) {
@@ -804,8 +826,10 @@ function parseSeedArgs(args = []) {
 
   const tokens = Array.isArray(args) ? args : [];
 
-  for (let i = 0; i < tokens.length; i += 1) {
-    i = parseSeedArgsToken(parsed, tokens, i);
+  let index = 0;
+  while (index < tokens.length) {
+    const nextIndex = parseSeedArgsToken(parsed, tokens, index);
+    index = nextIndex + 1;
   }
 
   if (parsed.countries.length === 0) {
@@ -1239,6 +1263,121 @@ async function writeArtifacts(outputDir, payloads) {
   };
 }
 
+async function collectSeedCandidatesByCountry(args, outputDir, uicIndex) {
+  const aggregateMap = new Map();
+  const osmStatsByCountry = {};
+
+  for (const country of args.countries) {
+    log(`Fetching OSM station topology for ${country}`);
+    const payload = await loadOverpassPayloadForCountry(country, {
+      ...args,
+      outputDir,
+    });
+
+    const elements = Array.isArray(payload?.json?.elements)
+      ? payload.json.elements
+      : [];
+    osmStatsByCountry[country] = {
+      elements: elements.length,
+      cachePath: payload.cachePath,
+      fromCache: payload.fromCache,
+    };
+
+    for (const element of elements) {
+      const candidate = buildCandidateFromElement(
+        element,
+        country,
+        args.asOf,
+        uicIndex,
+      );
+      if (candidate) {
+        addCandidate(aggregateMap, candidate);
+      }
+    }
+
+    log(
+      `Country ${country}: parsed ${elements.length} OSM elements (${payload.fromCache ? "cache" : "network"})`,
+    );
+  }
+
+  return {
+    aggregateMap,
+    osmStatsByCountry,
+  };
+}
+
+async function upsertSeedRowsIfNeeded(args, rootDir, dbRows) {
+  const emptySummary = {
+    seedRows: dbRows.length,
+    insertedRows: 0,
+    updatedRows: 0,
+    movedGridRows: 0,
+    unchangedRows: 0,
+  };
+
+  if (args.dryRun) {
+    log("Dry-run enabled; skipped DB writes.");
+    return emptySummary;
+  }
+
+  if (dbRows.length === 0) {
+    return emptySummary;
+  }
+
+  const client = createPostgisClient({ rootDir });
+  try {
+    await client.ensureReady();
+    await ensureGridFunction(client);
+    const dbSummary = await upsertBaseStations(client, dbRows, args.asOf);
+    log(
+      `DB upsert complete inserted=${dbSummary.insertedRows} updated=${dbSummary.updatedRows} unchanged=${dbSummary.unchangedRows}`,
+    );
+    return dbSummary;
+  } finally {
+    await client.end();
+  }
+}
+
+function buildSeedSummary({
+  runId,
+  args,
+  uicSources,
+  osmStatsByCountry,
+  dbRows,
+  dbSummary,
+}) {
+  const hardIdRows = dbRows.filter((row) => row.match_method === "hard_id").length;
+  const nameGeoRows = dbRows.filter(
+    (row) => row.match_method === "name_geo",
+  ).length;
+
+  return {
+    runId,
+    generatedAt: new Date().toISOString(),
+    asOf: args.asOf,
+    countries: args.countries,
+    dryRun: args.dryRun,
+    offline: args.offline,
+    osmEndpoint: args.osmEndpoint,
+    uicSources,
+    legalIsolation: LEGAL_ISOLATION_NOTE,
+    counts: {
+      osmElements: Object.values(osmStatsByCountry).reduce(
+        (acc, item) => acc + Number(item.elements || 0),
+        0,
+      ),
+      seedRows: dbRows.length,
+      hardIdRows,
+      nameGeoRows,
+      insertedRows: dbSummary.insertedRows,
+      updatedRows: dbSummary.updatedRows,
+      unchangedRows: dbSummary.unchangedRows,
+      movedGridRows: dbSummary.movedGridRows,
+    },
+    osmStatsByCountry,
+  };
+}
+
 async function run() {
   const parsedCli = parsePipelineCliArgs(process.argv.slice(2));
   const args = parseSeedArgs(parsedCli.passthroughArgs);
@@ -1269,42 +1408,11 @@ async function run() {
     );
   }
 
-  const aggregateMap = new Map();
-  const osmStatsByCountry = {};
-
-  for (const country of args.countries) {
-    log(`Fetching OSM station topology for ${country}`);
-    const payload = await loadOverpassPayloadForCountry(country, {
-      ...args,
-      outputDir,
-    });
-
-    const elements = Array.isArray(payload?.json?.elements)
-      ? payload.json.elements
-      : [];
-    osmStatsByCountry[country] = {
-      elements: elements.length,
-      cachePath: payload.cachePath,
-      fromCache: payload.fromCache,
-    };
-
-    for (const element of elements) {
-      const candidate = buildCandidateFromElement(
-        element,
-        country,
-        args.asOf,
-        uicIndex,
-      );
-      if (!candidate) {
-        continue;
-      }
-      addCandidate(aggregateMap, candidate);
-    }
-
-    log(
-      `Country ${country}: parsed ${elements.length} OSM elements (${payload.fromCache ? "cache" : "network"})`,
-    );
-  }
+  const { aggregateMap, osmStatsByCountry } = await collectSeedCandidatesByCountry(
+    args,
+    outputDir,
+    uicIndex,
+  );
 
   let manifestRows = finalizeAggregateRows(aggregateMap);
   if (args.limit > 0 && manifestRows.length > args.limit) {
@@ -1312,63 +1420,15 @@ async function run() {
   }
 
   const dbRows = toDbRows(manifestRows);
-
-  const hardIdRows = dbRows.filter(
-    (row) => row.match_method === "hard_id",
-  ).length;
-  const nameGeoRows = dbRows.filter(
-    (row) => row.match_method === "name_geo",
-  ).length;
-
-  let dbSummary = {
-    seedRows: dbRows.length,
-    insertedRows: 0,
-    updatedRows: 0,
-    movedGridRows: 0,
-    unchangedRows: 0,
-  };
-
-  if (!args.dryRun && dbRows.length > 0) {
-    const client = createPostgisClient({ rootDir });
-    try {
-      await client.ensureReady();
-      await ensureGridFunction(client);
-      dbSummary = await upsertBaseStations(client, dbRows, args.asOf);
-      log(
-        `DB upsert complete inserted=${dbSummary.insertedRows} updated=${dbSummary.updatedRows} unchanged=${dbSummary.unchangedRows}`,
-      );
-    } finally {
-      await client.end();
-    }
-  } else if (args.dryRun) {
-    log("Dry-run enabled; skipped DB writes.");
-  }
-
-  const summary = {
+  const dbSummary = await upsertSeedRowsIfNeeded(args, rootDir, dbRows);
+  const summary = buildSeedSummary({
     runId: parsedCli.runId || "",
-    generatedAt: new Date().toISOString(),
-    asOf: args.asOf,
-    countries: args.countries,
-    dryRun: args.dryRun,
-    offline: args.offline,
-    osmEndpoint: args.osmEndpoint,
+    args,
     uicSources: uicLoad.sources,
-    legalIsolation: LEGAL_ISOLATION_NOTE,
-    counts: {
-      osmElements: Object.values(osmStatsByCountry).reduce(
-        (acc, item) => acc + Number(item.elements || 0),
-        0,
-      ),
-      seedRows: dbRows.length,
-      hardIdRows,
-      nameGeoRows,
-      insertedRows: dbSummary.insertedRows,
-      updatedRows: dbSummary.updatedRows,
-      unchangedRows: dbSummary.unchangedRows,
-      movedGridRows: dbSummary.movedGridRows,
-    },
     osmStatsByCountry,
-  };
+    dbRows,
+    dbSummary,
+  });
 
   const artifactPaths = await writeArtifacts(outputDir, {
     summary,

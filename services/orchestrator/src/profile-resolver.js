@@ -209,16 +209,17 @@ function buildMissingRuntimeArtifactResult(
   };
 }
 
-async function resolveRuntimeDate(
-  profileName,
-  runtimeProfile,
-  runtimeRootAbs,
-  requestedAsOf,
-  allowMissing,
-  mode,
-  projectRoot,
-  runtime,
-) {
+async function resolveRuntimeDate(options) {
+  const {
+    profileName,
+    runtimeProfile,
+    runtimeRootAbs,
+    requestedAsOf,
+    allowMissing,
+    mode,
+    projectRoot,
+    runtime,
+  } = options;
   if (requestedAsOf !== "latest") {
     if (!isStrictIsoDate(requestedAsOf)) {
       throw new AppError({
@@ -273,7 +274,7 @@ async function resolveRuntimeProfileArtifact(
     const runtimeProfile = runtime.profile || profileName;
     const runtimeRootAbs = path.join(dataDir, "gtfs", "runtime", runtimeProfile);
     const requestedAsOf = runtime.asOf || "latest";
-    const resolved = await resolveRuntimeDate(
+    const resolved = await resolveRuntimeDate({
       profileName,
       runtimeProfile,
       runtimeRootAbs,
@@ -282,7 +283,7 @@ async function resolveRuntimeProfileArtifact(
       mode,
       projectRoot,
       runtime,
-    );
+    });
 
     if (typeof resolved === "object") {
       return resolved;
