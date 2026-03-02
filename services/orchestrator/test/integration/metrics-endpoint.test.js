@@ -18,7 +18,8 @@ function jsonResponse(res, statusCode, payload) {
 }
 
 test("orchestrator exposes prometheus metrics at /metrics", async (t) => {
-  const repoRoot = path.resolve(__dirname, "../../..");
+  const servicesRoot = path.resolve(__dirname, "../../..");
+  const repoRoot = path.resolve(servicesRoot, "..");
   const temp = await mkTempDir("metrics-endpoint-");
 
   const configDir = path.join(temp, "config");
@@ -59,7 +60,7 @@ test("orchestrator exposes prometheus metrics at /metrics", async (t) => {
   await stopHttpServer(probeServer.server);
 
   const orchestrator = startNodeProcess(
-    path.join(repoRoot, "services", "orchestrator", "src", "server.js"),
+    path.join(servicesRoot, "orchestrator", "src", "server.js"),
     {
       cwd: repoRoot,
       env: {

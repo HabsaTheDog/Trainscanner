@@ -21,7 +21,8 @@ test(
   "qa cluster generation is deterministic and decisions are atomic",
   { skip: !shouldRun },
   async () => {
-    const repoRoot = path.resolve(__dirname, "../../..");
+    const servicesRoot = path.resolve(__dirname, "../../..");
+    const repoRoot = path.resolve(servicesRoot, "..");
 
     process.env.CANONICAL_DB_MODE = "docker-compose";
     process.env.CANONICAL_DB_DOCKER_PROFILE = "dach-data";

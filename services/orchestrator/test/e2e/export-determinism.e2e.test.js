@@ -19,7 +19,8 @@ function sha256(filePath) {
 }
 
 test("deterministic export produces stable artifact hash", async () => {
-  const repoRoot = path.resolve(__dirname, "../../..");
+  const servicesRoot = path.resolve(__dirname, "../../..");
+  const repoRoot = path.resolve(servicesRoot, "..");
   const temp = await mkTempDir("export-determinism-");
   const csvPath = path.join(temp, "stops.csv");
   const summaryA = path.join(temp, "summary-a.json");
@@ -83,7 +84,8 @@ test("deterministic export produces stable artifact hash", async () => {
 });
 
 test("group-aware export keeps user-facing parents and emits transfer links deterministically", async () => {
-  const repoRoot = path.resolve(__dirname, "../../..");
+  const servicesRoot = path.resolve(__dirname, "../../..");
+  const repoRoot = path.resolve(servicesRoot, "..");
   const temp = await mkTempDir("export-groups-");
   const csvPath = path.join(temp, "stops-groups.csv");
   const summaryA = path.join(temp, "summary-groups-a.json");
@@ -158,7 +160,8 @@ test("group-aware export keeps user-facing parents and emits transfer links dete
 });
 
 test("tiered export filters scoped stops and preserves route tier metadata", async () => {
-  const repoRoot = path.resolve(__dirname, "../../..");
+  const servicesRoot = path.resolve(__dirname, "../../..");
+  const repoRoot = path.resolve(servicesRoot, "..");
   const temp = await mkTempDir("export-tiers-");
   const csvPath = path.join(temp, "stops-tiers.csv");
   const highSpeedSummary = path.join(temp, "summary-high-speed.json");

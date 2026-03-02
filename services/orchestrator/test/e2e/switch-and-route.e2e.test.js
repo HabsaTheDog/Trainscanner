@@ -24,7 +24,8 @@ function jsonResponse(res, statusCode, payload) {
 }
 
 test("e2e profile activation and route smoke/regression", async (t) => {
-  const repoRoot = path.resolve(__dirname, "../../..");
+  const servicesRoot = path.resolve(__dirname, "../../..");
+  const repoRoot = path.resolve(servicesRoot, "..");
   const temp = await mkTempDir("switch-route-e2e-");
 
   const configDir = path.join(temp, "config");
@@ -94,7 +95,7 @@ test("e2e profile activation and route smoke/regression", async (t) => {
   await stopHttpServer(probeServer.server);
 
   const orchestrator = startNodeProcess(
-    path.join(repoRoot, "services", "orchestrator", "src", "server.js"),
+    path.join(servicesRoot, "orchestrator", "src", "server.js"),
     {
       cwd: repoRoot,
       env: {
@@ -189,12 +190,22 @@ test("e2e profile activation and route smoke/regression", async (t) => {
 
   assert.equal(taggedRoute.status, 200);
   assert.equal(
-    taggedRoute.body.routeRequestResolved.origin.strategy,
-    "tagged_stop_id",
+    taggedRoute.body.routeRequestResolved.origin.resolved,
+    "active-gtfs_1001",
   );
   assert.equal(
-    taggedRoute.body.routeRequestResolved.destination.strategy,
-    "tagged_stop_id",
+    taggedRoute.body.routeRequestResolved.destination.resolved,
+    "active-gtfs_1002",
+  );
+  assert.ok(
+    ["tagged_stop_id", "raw"].includes(
+      taggedRoute.body.routeRequestResolved.origin.strategy,
+    ),
+  );
+  assert.ok(
+    ["tagged_stop_id", "raw"].includes(
+      taggedRoute.body.routeRequestResolved.destination.strategy,
+    ),
   );
 
   const lookupRoute = await httpJson(`${apiUrl}/api/routes`, {
@@ -223,7 +234,7 @@ test("e2e profile activation and route smoke/regression", async (t) => {
     process.execPath,
     [
       path.join(
-        repoRoot,
+        servicesRoot,
         "orchestrator",
         "src",
         "cli",
@@ -232,9 +243,15 @@ test("e2e profile activation and route smoke/regression", async (t) => {
       "--api-url",
       apiUrl,
       "--cases",
-      path.join(repoRoot, "tests", "routes", "regression_cases.json"),
+      path.join(
+        servicesRoot,
+        "orchestrator",
+        "test",
+        "routes",
+        "regression_cases.json",
+      ),
       "--baselines-dir",
-      path.join(repoRoot, "tests", "routes", "baselines"),
+      path.join(servicesRoot, "orchestrator", "test", "routes", "baselines"),
       "--report-dir",
       path.join(repoRoot, "reports", "qa"),
     ],

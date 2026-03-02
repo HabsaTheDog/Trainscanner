@@ -20,7 +20,8 @@ test(
   "postgis repositories operate against local docker-compose postgis service",
   { skip: !shouldRun },
   async () => {
-    const repoRoot = path.resolve(__dirname, "../../..");
+    const servicesRoot = path.resolve(__dirname, "../../..");
+    const repoRoot = path.resolve(servicesRoot, "..");
 
     execFileSync(
       "bash",

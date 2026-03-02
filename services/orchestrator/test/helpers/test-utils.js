@@ -153,7 +153,7 @@ with zipfile.ZipFile(zip_path, 'w') as zf:
   for name in ['agency.txt','stops.txt','routes.txt','trips.txt','stop_times.txt','calendar.txt']:
     rows = files[name]
     out = io.StringIO()
-    writer = csv.writer(out, lineterminator='\\n')
+    writer = csv.writer(out, lineterminator='\n')
     writer.writerows(rows)
     zf.writestr(name, out.getvalue())
 `;

@@ -9,6 +9,7 @@ const {
   validateSourceDiscoveryConfig,
 } = require("../domains/source-discovery/contracts");
 const { validateOjpEndpointsConfig } = require("../domains/qa/ojp-contracts");
+const { normalizeProjectRoot } = require("./pipeline-common");
 
 function parseArgs(argv) {
   const args = {
@@ -65,7 +66,7 @@ function run() {
   return (async () => {
     try {
       const args = parseArgs(process.argv.slice(2));
-      const root = path.resolve(args.root);
+      const root = normalizeProjectRoot(args.root);
       const configDir = path.join(root, "config");
 
       const tasks = [

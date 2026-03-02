@@ -1,10 +1,54 @@
+const fs = require("node:fs");
 const path = require("node:path");
 
 const { AppError, toAppError } = require("../core/errors");
 
+function isDirectory(dirPath) {
+  try {
+    return fs.statSync(dirPath).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function looksLikeRepoRoot(rootDir) {
+  return (
+    isDirectory(path.join(rootDir, "config")) &&
+    isDirectory(path.join(rootDir, "scripts")) &&
+    isDirectory(path.join(rootDir, "services", "orchestrator"))
+  );
+}
+
+function normalizeProjectRoot(rootDir) {
+  const resolvedRoot = path.resolve(rootDir);
+
+  if (looksLikeRepoRoot(resolvedRoot)) {
+    return resolvedRoot;
+  }
+
+  if (path.basename(resolvedRoot) === "services") {
+    const parentRoot = path.dirname(resolvedRoot);
+    if (looksLikeRepoRoot(parentRoot)) {
+      return parentRoot;
+    }
+  }
+
+  if (
+    path.basename(resolvedRoot) === "orchestrator" &&
+    path.basename(path.dirname(resolvedRoot)) === "services"
+  ) {
+    const parentRoot = path.dirname(path.dirname(resolvedRoot));
+    if (looksLikeRepoRoot(parentRoot)) {
+      return parentRoot;
+    }
+  }
+
+  return resolvedRoot;
+}
+
 function parsePipelineCliArgs(argv = []) {
   const args = Array.isArray(argv) ? argv : [];
-  let rootDir = process.cwd();
+  let rootDir = normalizeProjectRoot(process.cwd());
   let runId = "";
   const passthroughArgs = [];
 
@@ -19,7 +63,7 @@ function parsePipelineCliArgs(argv = []) {
           message: "Missing value for --root",
         });
       }
-      rootDir = path.resolve(value);
+      rootDir = normalizeProjectRoot(value);
       i += 1;
       continue;
     }
@@ -71,6 +115,7 @@ function printCliError(prefix, err, fallbackMessage) {
 
 module.exports = {
   formatCliError,
+  normalizeProjectRoot,
   parsePipelineCliArgs,
   printCliError,
 };

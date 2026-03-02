@@ -19,7 +19,8 @@ function jsonResponse(res, statusCode, payload) {
 }
 
 test("POST /api/gtfs/compile validates request payload", async (t) => {
-  const repoRoot = path.resolve(__dirname, "../../..");
+  const servicesRoot = path.resolve(__dirname, "../../..");
+  const repoRoot = path.resolve(servicesRoot, "..");
   const temp = await mkTempDir("gtfs-compile-endpoint-");
 
   const configDir = path.join(temp, "config");
@@ -60,7 +61,7 @@ test("POST /api/gtfs/compile validates request payload", async (t) => {
   await stopHttpServer(probeServer.server);
 
   const orchestrator = startNodeProcess(
-    path.join(repoRoot, "services", "orchestrator", "src", "server.js"),
+    path.join(servicesRoot, "orchestrator", "src", "server.js"),
     {
       cwd: repoRoot,
       env: {
