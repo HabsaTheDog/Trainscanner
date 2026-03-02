@@ -297,7 +297,7 @@ SELECT json_build_object(
       AND (NULLIF(:'country_filter', '') IS NULL OR q.country = NULLIF(:'country_filter', '')::char(2))
       AND q.status IN ('resolved', 'auto_resolved')
   ),
-  'clustersV2', qa_rebuild_station_clusters_v2(
+  'clusters', qa_rebuild_station_clusters(
     NULLIF(:'country_filter', ''),
     NULLIF(:'as_of', '')::date
   )

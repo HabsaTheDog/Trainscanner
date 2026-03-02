@@ -1,4 +1,4 @@
-import { useCurationPageRuntime } from "./useCurationPageRuntime";
+import { useCurationPageRuntime } from "./use-curation-page-runtime";
 
 export function CurationPage() {
   useCurationPageRuntime();

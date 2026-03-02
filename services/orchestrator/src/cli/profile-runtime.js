@@ -4,7 +4,7 @@ const path = require("node:path");
 const {
   normalizeProfiles,
   resolveProfileArtifact,
-} = require("../profile-resolver");
+} = require("../gtfs-profile-resolver");
 
 function parseArgs(argv) {
   const args = {

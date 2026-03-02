@@ -1,11 +1,11 @@
 import { createRoot } from "react-dom/client";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./styles.css";
-import { CurationPage } from "./CurationPage";
+import { HomePage } from "./home-page";
 
 const root = document.getElementById("root");
 if (!root) {
-  throw new Error("Missing root element for curation page.");
+  throw new Error("Missing root element for home page.");
 }
 
-createRoot(root).render(<CurationPage />);
+createRoot(root).render(<HomePage />);

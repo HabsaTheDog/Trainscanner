@@ -2,11 +2,11 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
-  buildCuratedProjectionRowsV1,
-} = require("../../src/domains/qa/curated-projection");
+  buildCuratedProjectionRows,
+} = require("../../src/domains/qa/curated-station-projection");
 
-test("buildCuratedProjectionRowsV1 creates one merge entity from selected stations", () => {
-  const rows = buildCuratedProjectionRowsV1({
+test("buildCuratedProjectionRows creates one merge entity from selected stations", () => {
+  const rows = buildCuratedProjectionRows({
     clusterId: "clu_1",
     decision: {
       operation: "merge",
@@ -26,8 +26,8 @@ test("buildCuratedProjectionRowsV1 creates one merge entity from selected statio
   assert.equal(rows.members[0].canonical_station_id, "cstn_a");
 });
 
-test("buildCuratedProjectionRowsV1 creates one split entity from selected stations without explicit groups", () => {
-  const rows = buildCuratedProjectionRowsV1({
+test("buildCuratedProjectionRows creates one split entity from selected stations without explicit groups", () => {
+  const rows = buildCuratedProjectionRows({
     clusterId: "clu_2",
     decision: {
       operation: "split",
@@ -44,8 +44,8 @@ test("buildCuratedProjectionRowsV1 creates one split entity from selected statio
   assert.equal(rows.members[0].member_role, "primary");
 });
 
-test("buildCuratedProjectionRowsV1 creates section-aware entities for split groups", () => {
-  const rows = buildCuratedProjectionRowsV1({
+test("buildCuratedProjectionRows creates section-aware entities for split groups", () => {
+  const rows = buildCuratedProjectionRows({
     clusterId: "clu_3",
     decision: {
       operation: "split",

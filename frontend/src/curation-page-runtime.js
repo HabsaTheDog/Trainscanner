@@ -1910,7 +1910,7 @@ export function initCurationApp() {
     try {
       const payload = buildResolvePayload();
       const res = await fetch(
-        `/api/qa/v2/clusters/${encodeURIComponent(activeClusterDetail.cluster_id)}/decisions`,
+        `/api/qa/clusters/${encodeURIComponent(activeClusterDetail.cluster_id)}/decisions`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1947,7 +1947,7 @@ export function initCurationApp() {
     params.set("status", "active");
     params.set("limit", "25");
 
-    const res = await fetch(`/api/qa/v2/curated-stations?${params.toString()}`);
+    const res = await fetch(`/api/qa/curated-stations?${params.toString()}`);
     const payload = await res.json().catch(() => null);
     if (!res.ok) {
       throw new Error(payload?.error || `HTTP ${res.status}`);

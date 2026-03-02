@@ -6,12 +6,12 @@ const { promisify } = require("node:util");
 
 const { loadConfig } = require("./config");
 const { createLogger } = require("./logger");
-const { GtfsSwitcher } = require("./switcher");
+const { GtfsSwitcher } = require("./gtfs-profile-switcher");
 const {
   normalizeProfiles,
   resolveProfileArtifact,
-} = require("./profile-resolver");
-const { checkMotisHealth, queryMotisRoute } = require("./motis");
+} = require("./gtfs-profile-resolver");
+const { checkMotisHealth, queryMotisRoute } = require("./motis-client");
 const { AppError, errorToPayload, toAppError } = require("./core/errors");
 const { resolveCorrelationId } = require("./core/ids");
 const {
@@ -534,50 +534,50 @@ async function handleGraphqlRequest(req, res, url) {
   return true;
 }
 
-async function handleQaV2ClusterRequest(req, res, url) {
-  if (req.method === "GET" && url.pathname === "/api/qa/v2/clusters") {
-    const { getReviewClustersV2 } = require("./domains/qa/api");
-    sendJson(res, 200, await getReviewClustersV2(url));
+async function handleQaClusterRequest(req, res, url) {
+  if (req.method === "GET" && url.pathname === "/api/qa/clusters") {
+    const { getReviewClusters } = require("./domains/qa/api");
+    sendJson(res, 200, await getReviewClusters(url));
     return true;
   }
 
-  if (req.method === "GET" && url.pathname === "/api/qa/v2/curated-stations") {
-    const { getCuratedStationsV1 } = require("./domains/qa/api");
-    sendJson(res, 200, await getCuratedStationsV1(url));
+  if (req.method === "GET" && url.pathname === "/api/qa/curated-stations") {
+    const { getCuratedStations } = require("./domains/qa/api");
+    sendJson(res, 200, await getCuratedStations(url));
     return true;
   }
 
   if (req.method === "GET") {
     const clusterDetailMatch = url.pathname.match(
-      /^\/api\/qa\/v2\/clusters\/([^/]+)$/,
+      /^\/api\/qa\/clusters\/([^/]+)$/,
     );
     if (clusterDetailMatch) {
-      const { getReviewClusterDetailV2 } = require("./domains/qa/api");
+      const { getReviewClusterDetail } = require("./domains/qa/api");
       const clusterId = decodeURIComponent(clusterDetailMatch[1]);
-      sendJson(res, 200, await getReviewClusterDetailV2(clusterId));
+      sendJson(res, 200, await getReviewClusterDetail(clusterId));
       return true;
     }
 
     const curatedDetailMatch = url.pathname.match(
-      /^\/api\/qa\/v2\/curated-stations\/([^/]+)$/,
+      /^\/api\/qa\/curated-stations\/([^/]+)$/,
     );
     if (curatedDetailMatch) {
-      const { getCuratedStationDetailV1 } = require("./domains/qa/api");
+      const { getCuratedStationDetail } = require("./domains/qa/api");
       const curatedStationId = decodeURIComponent(curatedDetailMatch[1]);
-      sendJson(res, 200, await getCuratedStationDetailV1(curatedStationId));
+      sendJson(res, 200, await getCuratedStationDetail(curatedStationId));
       return true;
     }
   }
 
   if (req.method === "POST") {
     const clusterDecisionMatch = url.pathname.match(
-      /^\/api\/qa\/v2\/clusters\/([^/]+)\/decisions$/,
+      /^\/api\/qa\/clusters\/([^/]+)\/decisions$/,
     );
     if (clusterDecisionMatch) {
       const body = await parseJsonBody(req);
-      const { postReviewClusterDecisionV2 } = require("./domains/qa/api");
+      const { postReviewClusterDecision } = require("./domains/qa/api");
       const clusterId = decodeURIComponent(clusterDecisionMatch[1]);
-      sendJson(res, 200, await postReviewClusterDecisionV2(clusterId, body));
+      sendJson(res, 200, await postReviewClusterDecision(clusterId, body));
       return true;
     }
   }
@@ -591,7 +591,7 @@ function buildRefreshArgs(body = {}) {
   if (body.asOf) refreshArgs.push("--as-of", body.asOf);
   if (body.sourceId) refreshArgs.push("--source-id", body.sourceId);
   if (body.dryRun) refreshArgs.push("--dry-run");
-  if (body.skipMigrate) refreshArgs.push("--skip-migrate");
+  if (body.skipDbBootstrap) refreshArgs.push("--skip-db-bootstrap");
   return refreshArgs;
 }
 
@@ -616,7 +616,7 @@ async function handleQaJobsRequest(req, res, url) {
     const handle = await startTemporalWorkflow(
       "stationReviewPipeline",
       workflowId,
-      [{ skipMigrate: !!body.skipMigrate, refreshArgs }],
+      [{ skipDbBootstrap: !!body.skipDbBootstrap, refreshArgs }],
     );
     sendJson(res, 202, {
       message: "Temporal Workflow Accepted",
@@ -943,7 +943,7 @@ async function handleApi(req, res, url, requestLogger) {
   const handlers = [
     handleMetricsRequest,
     handleGraphqlRequest,
-    handleQaV2ClusterRequest,
+    handleQaClusterRequest,
     handleQaJobsRequest,
     handleGtfsRequest,
     handleHealthRequest,

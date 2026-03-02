@@ -1,6 +1,6 @@
 const {
-  getReviewClustersV2,
-  getReviewClusterDetailV2,
+  getReviewClusters,
+  getReviewClusterDetail,
 } = require("../domains/qa/api");
 const {
   getLowConfidenceQueue,
@@ -68,18 +68,18 @@ const rootValue = {
     if (country) mockUrl.searchParams.set("country", country);
 
     // Leverage the existing API layer from Phase 1
-    const result = await getReviewClustersV2(mockUrl);
+    const result = await getReviewClusters(mockUrl);
     return result.items || [];
   },
 
   cluster: async ({ id }) => {
-    const detail = await getReviewClusterDetailV2(id);
+    const detail = await getReviewClusterDetail(id);
     return detail;
   },
 
   requestAiScore: async ({ clusterId }) => {
     // 1. Fetch cluster details to get candidates
-    const detail = await getReviewClusterDetailV2(clusterId);
+    const detail = await getReviewClusterDetail(clusterId);
     if (!detail?.candidates) {
       throw new Error("Cluster not found to score");
     }

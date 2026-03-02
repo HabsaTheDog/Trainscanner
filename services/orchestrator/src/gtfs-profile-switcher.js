@@ -2,11 +2,11 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 
 const { acquireLock } = require("./lock");
-const { restartMotisContainer, waitForMotisReady } = require("./motis");
+const { restartMotisContainer, waitForMotisReady } = require("./motis-client");
 const {
   normalizeProfiles,
   resolveProfileArtifact,
-} = require("./profile-resolver");
+} = require("./gtfs-profile-resolver");
 const { AppError, toAppError } = require("./core/errors");
 const { generateId } = require("./core/ids");
 const {

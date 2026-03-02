@@ -216,8 +216,8 @@ function normalizeClusterDecision(body) {
   const note = String(payload.note || "").trim();
   const requestedBy =
     String(
-      payload.requested_by || payload.requestedBy || "curation_tool_v2",
-    ).trim() || "curation_tool_v2";
+      payload.requested_by || payload.requestedBy || "curation_tool",
+    ).trim() || "curation_tool";
 
   let lineDecisions = {};
   if (payload.line_decisions && typeof payload.line_decisions === "object") {

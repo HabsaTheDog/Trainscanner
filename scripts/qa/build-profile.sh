@@ -114,7 +114,7 @@ const path = require('node:path');
 const rootDir = process.argv[2];
 const profileName = process.argv[3];
 const profilesPath = path.join(rootDir, 'config', 'gtfs-profiles.json');
-const { normalizeProfiles } = require(path.join(rootDir, 'services', 'orchestrator', 'src', 'profile-resolver.js'));
+const { normalizeProfiles } = require(path.join(rootDir, 'services', 'orchestrator', 'src', 'gtfs-profile-resolver.js'));
 
 let raw;
 try {
@@ -205,7 +205,7 @@ db_load_env
 db_resolve_connection
 db_ensure_ready
 
-"${ROOT_DIR}/scripts/data/db-migrate.sh" --quiet
+"${ROOT_DIR}/scripts/data/db-bootstrap.sh" --quiet
 
 AS_OF_ESC="$(db_sql_escape "$AS_OF")"
 COUNTRY_FILTER_ESC="$(db_sql_escape "$COUNTRY_FILTER")"
@@ -289,7 +289,7 @@ active_groups AS (
     g.cluster_id,
     g.country,
     g.display_name
-  FROM qa_station_groups_v2 g
+  FROM qa_station_groups g
   WHERE g.is_active = true
     AND (NULLIF('${COUNTRY_FILTER_ESC}', '') IS NULL OR g.country = NULLIF('${COUNTRY_FILTER_ESC}', '')::char(2))
 ),
@@ -299,7 +299,7 @@ group_sections AS (
     s.group_id,
     s.section_name,
     s.section_type
-  FROM qa_station_group_sections_v2 s
+  FROM qa_station_group_sections s
   JOIN active_groups g
     ON g.group_id = s.group_id
 ),
@@ -309,7 +309,7 @@ section_members AS (
     gs.group_id,
     gm.canonical_station_id
   FROM group_sections gs
-  JOIN qa_station_group_section_members_v2 gm
+  JOIN qa_station_group_section_members gm
     ON gm.section_id = gs.section_id
 ),
 group_member_ids AS (
@@ -353,7 +353,7 @@ group_section_rows AS (
         'to_stop_id', l.to_section_id,
         'min_walk_minutes', l.min_walk_minutes
       ) ORDER BY l.to_section_id)
-      FROM qa_station_group_section_links_v2 l
+      FROM qa_station_group_section_links l
       WHERE l.from_section_id = gs.section_id
     ), '[]'::json) AS walk_links_json,
     gs.section_type,

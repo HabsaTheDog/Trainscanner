@@ -1,7 +1,7 @@
 import { createRoot } from "react-dom/client";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./styles.css";
-import { QAQueuePage } from "./QAQueuePage";
+import { QAQueuePage } from "./qa-queue-page";
 
 const root = document.getElementById("root");
 if (!root) {

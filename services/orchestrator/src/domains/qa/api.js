@@ -21,11 +21,11 @@ const { AppError, toAppError } = require("../../core/errors");
 const {
   normalizeClusterDecision,
   normalizeIsoCountry,
-} = require("./v2-contracts");
+} = require("./cluster-decision-contracts");
 const {
-  buildCuratedProjectionRowsV1,
-  persistCuratedProjectionV1,
-} = require("./curated-projection");
+  buildCuratedProjectionRows,
+  persistCuratedProjection,
+} = require("./curated-station-projection");
 const { isStrictIsoDate } = require("../../core/date");
 
 let dbClient = null;
@@ -827,7 +827,7 @@ async function loadClusterScope(client, clusterId) {
   const cluster = await client.queryOne(
     `
     SELECT c.cluster_id, c.country, c.status
-    FROM qa_station_clusters_v2 c
+    FROM qa_station_clusters c
     WHERE c.cluster_id = :'cluster_id'
     `,
     { cluster_id: clusterId },
@@ -846,7 +846,7 @@ async function loadClusterScope(client, clusterId) {
     SELECT
       cc.canonical_station_id,
       cc.segment_context
-    FROM qa_station_cluster_candidates_v2 cc
+    FROM qa_station_cluster_candidates cc
     WHERE cc.cluster_id = :'cluster_id'
     `,
     { cluster_id: clusterId },
@@ -869,8 +869,8 @@ async function loadClusterScope(client, clusterId) {
   const clusterSegments = await client.queryRows(
     `
     SELECT DISTINCT seg.segment_id
-    FROM qa_station_segments_v2 seg
-    JOIN qa_station_cluster_candidates_v2 cc
+    FROM qa_station_segments seg
+    JOIN qa_station_cluster_candidates cc
       ON cc.canonical_station_id = seg.canonical_station_id
     WHERE cc.cluster_id = :'cluster_id'
     `,
@@ -1185,7 +1185,7 @@ function normalizeCuratedStatusFilter(raw) {
   return value;
 }
 
-async function getReviewClustersV2(url) {
+async function getReviewClusters(url) {
   const client = await getDbClient();
   const country = normalizeIsoCountry(url.searchParams.get("country"), {
     allowEmpty: true,
@@ -1217,10 +1217,10 @@ async function getReviewClustersV2(url) {
           'latitude', cc.latitude,
           'longitude', cc.longitude
         ) ORDER BY cc.candidate_rank, cc.canonical_station_id), '[]'::json)
-        FROM qa_station_cluster_candidates_v2 cc
+        FROM qa_station_cluster_candidates cc
         WHERE cc.cluster_id = c.cluster_id
       ) AS candidates
-    FROM qa_station_clusters_v2 c
+    FROM qa_station_clusters c
     WHERE (NULLIF(:'country', '') IS NULL OR c.country = NULLIF(:'country', '')::char(2))
       AND (NULLIF(:'status', '') IS NULL OR c.status = NULLIF(:'status', ''))
       AND (NULLIF(:'scope_tag', '') IS NULL OR c.scope_tag = NULLIF(:'scope_tag', ''))
@@ -1241,7 +1241,7 @@ async function getReviewClustersV2(url) {
   return rows;
 }
 
-async function getReviewClusterDetailV2(clusterId) {
+async function getReviewClusterDetail(clusterId) {
   const client = await getDbClient();
   const cleanClusterId = String(clusterId || "").trim();
   if (!cleanClusterId) {
@@ -1271,7 +1271,7 @@ async function getReviewClusterDetailV2(clusterId) {
       c.resolved_by,
       c.created_at,
       c.updated_at
-    FROM qa_station_clusters_v2 c
+    FROM qa_station_clusters c
     WHERE c.cluster_id = :'cluster_id'
     `,
     { cluster_id: cleanClusterId },
@@ -1303,7 +1303,7 @@ async function getReviewClusterDetailV2(clusterId) {
         cc.service_context,
         cc.segment_context,
         cc.metadata
-      FROM qa_station_cluster_candidates_v2 cc
+      FROM qa_station_cluster_candidates cc
       WHERE cc.cluster_id = :'cluster_id'
       ORDER BY cc.candidate_rank, cc.canonical_station_id
       `,
@@ -1320,7 +1320,7 @@ async function getReviewClusterDetailV2(clusterId) {
         e.score,
         e.details,
         e.created_at
-      FROM qa_station_cluster_evidence_v2 e
+      FROM qa_station_cluster_evidence e
       WHERE e.cluster_id = :'cluster_id'
       ORDER BY e.evidence_type, e.source_canonical_station_id, e.target_canonical_station_id, e.evidence_id
       `,
@@ -1344,10 +1344,10 @@ async function getReviewClusterDetailV2(clusterId) {
             'action', m.action,
             'metadata', m.metadata
           ) ORDER BY m.canonical_station_id, m.group_label, m.action), '[]'::json)
-          FROM qa_station_cluster_decision_members_v2 m
+          FROM qa_station_cluster_decision_members m
           WHERE m.decision_id = d.decision_id
         ) AS members
-      FROM qa_station_cluster_decisions_v2 d
+      FROM qa_station_cluster_decisions d
       WHERE d.cluster_id = :'cluster_id'
       ORDER BY d.created_at DESC, d.decision_id DESC
       `,
@@ -1369,7 +1369,7 @@ async function getReviewClusterDetailV2(clusterId) {
   };
 }
 
-async function getCuratedStationsV1(url) {
+async function getCuratedStations(url) {
   const client = await getDbClient();
   const country = normalizeIsoCountry(url.searchParams.get("country"), {
     allowEmpty: true,
@@ -1401,7 +1401,7 @@ async function getCuratedStationsV1(url) {
           'member_rank', m.member_rank,
           'contribution', m.contribution
         ) ORDER BY m.member_rank, m.canonical_station_id), '[]'::json)
-        FROM qa_curated_station_members_v1 m
+        FROM qa_curated_station_members m
         WHERE m.curated_station_id = s.curated_station_id
       ) AS members,
       (
@@ -1412,7 +1412,7 @@ async function getCuratedStationsV1(url) {
           'source_ref', p.source_ref,
           'metadata', p.metadata
         ) ORDER BY p.field_name, p.source_kind, p.source_ref), '[]'::json)
-        FROM qa_curated_station_field_provenance_v1 p
+        FROM qa_curated_station_field_provenance p
         WHERE p.curated_station_id = s.curated_station_id
       ) AS field_provenance,
       (
@@ -1422,10 +1422,10 @@ async function getCuratedStationsV1(url) {
           'operation', l.operation,
           'created_at', l.created_at
         ) ORDER BY l.created_at DESC, l.decision_id DESC), '[]'::json)
-        FROM qa_curated_station_lineage_v1 l
+        FROM qa_curated_station_lineage l
         WHERE l.curated_station_id = s.curated_station_id
       ) AS lineage
-    FROM qa_curated_stations_v1 s
+    FROM qa_curated_stations s
     WHERE (NULLIF(:'country', '') IS NULL OR s.country = NULLIF(:'country', '')::char(2))
       AND (NULLIF(:'status', '') IS NULL OR s.status = NULLIF(:'status', ''))
       AND (NULLIF(:'cluster_id', '') IS NULL OR s.primary_cluster_id = NULLIF(:'cluster_id', ''))
@@ -1443,7 +1443,7 @@ async function getCuratedStationsV1(url) {
   return rows;
 }
 
-async function getCuratedStationDetailV1(curatedStationId) {
+async function getCuratedStationDetail(curatedStationId) {
   const client = await getDbClient();
   const cleanCuratedStationId = String(curatedStationId || "").trim();
   if (!cleanCuratedStationId) {
@@ -1473,7 +1473,7 @@ async function getCuratedStationDetailV1(curatedStationId) {
       p.members,
       p.field_provenance,
       p.lineage
-    FROM qa_curated_station_projection_v1 p
+    FROM qa_curated_station_projection p
     WHERE p.curated_station_id = :'curated_station_id'
     `,
     {
@@ -1725,7 +1725,7 @@ function persistGroupModel(tx, groupModel) {
 
   tx.add(
     `
-    UPDATE qa_station_groups_v2
+    UPDATE qa_station_groups
     SET
       is_active = false,
       updated_by = :'requested_by',
@@ -1741,7 +1741,7 @@ function persistGroupModel(tx, groupModel) {
 
   tx.add(
     `
-    INSERT INTO qa_station_groups_v2 (
+    INSERT INTO qa_station_groups (
       group_id,
       cluster_id,
       country,
@@ -1787,7 +1787,7 @@ function persistGroupModel(tx, groupModel) {
 
   tx.add(
     `
-    DELETE FROM qa_station_group_sections_v2
+    DELETE FROM qa_station_group_sections
     WHERE group_id = :'group_id'
     `,
     {
@@ -1798,7 +1798,7 @@ function persistGroupModel(tx, groupModel) {
   for (const section of groupModel.sections) {
     tx.add(
       `
-      INSERT INTO qa_station_group_sections_v2 (
+      INSERT INTO qa_station_group_sections (
         section_id,
         group_id,
         section_type,
@@ -1835,7 +1835,7 @@ function persistGroupModel(tx, groupModel) {
     ) {
       tx.add(
         `
-        INSERT INTO qa_station_group_section_members_v2 (
+        INSERT INTO qa_station_group_section_members (
           section_id,
           canonical_station_id,
           created_at
@@ -1863,7 +1863,7 @@ function persistGroupModel(tx, groupModel) {
   if (Array.isArray(groupModel.links) && groupModel.links.length > 0) {
     tx.add(
       `
-      INSERT INTO qa_station_group_section_links_v2 (
+      INSERT INTO qa_station_group_section_links (
         from_section_id,
         to_section_id,
         min_walk_minutes,
@@ -1888,7 +1888,7 @@ function persistGroupModel(tx, groupModel) {
       ON CONFLICT (from_section_id, to_section_id)
       DO UPDATE SET
         min_walk_minutes = EXCLUDED.min_walk_minutes,
-        metadata = qa_station_group_section_links_v2.metadata || EXCLUDED.metadata
+        metadata = qa_station_group_section_links.metadata || EXCLUDED.metadata
       `,
       {
         requested_by: groupModel.requestedBy,
@@ -2069,7 +2069,7 @@ function buildSegmentWalkLinks(decision) {
   return links;
 }
 
-async function postReviewClusterDecisionV2(clusterId, body) {
+async function postReviewClusterDecision(clusterId, body) {
   const client = await getDbClient();
   const cleanClusterId = String(clusterId || "").trim();
   if (!cleanClusterId) {
@@ -2100,7 +2100,7 @@ async function postReviewClusterDecisionV2(clusterId, body) {
     decision,
     stationToSegment,
   );
-  const curatedProjection = buildCuratedProjectionRowsV1({
+  const curatedProjection = buildCuratedProjectionRows({
     clusterId: cleanClusterId,
     decision,
   });
@@ -2115,7 +2115,7 @@ async function postReviewClusterDecisionV2(clusterId, body) {
       `
       CREATE TEMP TABLE _decision_ctx ON COMMIT DROP AS
       WITH inserted AS (
-        INSERT INTO qa_station_cluster_decisions_v2 (
+        INSERT INTO qa_station_cluster_decisions (
           cluster_id,
           operation,
           decision_payload,
@@ -2157,7 +2157,7 @@ async function postReviewClusterDecisionV2(clusterId, body) {
     if (membersPayload.length > 0) {
       tx.add(
         `
-        INSERT INTO qa_station_cluster_decision_members_v2 (
+        INSERT INTO qa_station_cluster_decision_members (
           decision_id,
           canonical_station_id,
           group_label,
@@ -2186,7 +2186,7 @@ async function postReviewClusterDecisionV2(clusterId, body) {
     if (renameTargets.length > 0) {
       tx.add(
         `
-        UPDATE qa_station_naming_overrides_v2 o
+        UPDATE qa_station_naming_overrides o
         SET is_active = false, updated_at = now()
         FROM jsonb_to_recordset(:'rename_targets'::jsonb) AS r(
           canonical_station_id text,
@@ -2207,7 +2207,7 @@ async function postReviewClusterDecisionV2(clusterId, body) {
 
       tx.add(
         `
-        INSERT INTO qa_station_naming_overrides_v2 (
+        INSERT INTO qa_station_naming_overrides (
           canonical_station_id,
           locale,
           display_name,
@@ -2224,7 +2224,7 @@ async function postReviewClusterDecisionV2(clusterId, body) {
           'und',
           r.rename_to,
           '[]'::jsonb,
-          'Created by curation v2 cluster decision',
+          'Created by curation cluster decision',
           :'requested_by',
           :'requested_by',
           true,
@@ -2251,7 +2251,7 @@ async function postReviewClusterDecisionV2(clusterId, body) {
     if (segmentWalkLinks.length > 0) {
       tx.add(
         `
-        INSERT INTO qa_station_segment_links_v2 (
+        INSERT INTO qa_station_segment_links (
           from_segment_id,
           to_segment_id,
           min_walk_minutes,
@@ -2278,7 +2278,7 @@ async function postReviewClusterDecisionV2(clusterId, body) {
         ON CONFLICT (from_segment_id, to_segment_id)
         DO UPDATE SET
           min_walk_minutes = EXCLUDED.min_walk_minutes,
-          metadata = qa_station_segment_links_v2.metadata || EXCLUDED.metadata
+          metadata = qa_station_segment_links.metadata || EXCLUDED.metadata
         `,
         {
           cluster_id: cleanClusterId,
@@ -2296,7 +2296,7 @@ async function postReviewClusterDecisionV2(clusterId, body) {
     }
 
     persistGroupModel(tx, groupModel);
-    persistCuratedProjectionV1(tx, {
+    persistCuratedProjection(tx, {
       clusterId: cleanClusterId,
       country: cluster.country,
       requestedBy: decision.requestedBy,
@@ -2314,7 +2314,7 @@ async function postReviewClusterDecisionV2(clusterId, body) {
 
     tx.add(
       `
-      UPDATE qa_station_cluster_decisions_v2
+      UPDATE qa_station_cluster_decisions
       SET applied_to_overrides = :'applied_to_overrides'::boolean
       WHERE decision_id = (SELECT decision_id FROM _decision_ctx LIMIT 1)
       `,
@@ -2325,7 +2325,7 @@ async function postReviewClusterDecisionV2(clusterId, body) {
 
     tx.add(
       `
-      UPDATE qa_station_clusters_v2
+      UPDATE qa_station_clusters
       SET
         status = CASE
           WHEN :'dismiss' = 'true' THEN 'dismissed'
@@ -2358,11 +2358,11 @@ async function postReviewClusterDecisionV2(clusterId, body) {
         status = CASE WHEN :'dismiss' = 'true' THEN 'dismissed' ELSE 'resolved' END,
         resolved_at = now(),
         resolved_by = :'requested_by',
-        resolution_note = COALESCE(NULLIF(:'note', ''), format('Resolved by v2 cluster decision on %s', :'cluster_id')),
+        resolution_note = COALESCE(NULLIF(:'note', ''), format('Resolved by cluster decision on %s', :'cluster_id')),
         updated_at = now()
       WHERE q.review_item_id IN (
         SELECT link.review_item_id
-        FROM qa_station_cluster_queue_items_v2 link
+        FROM qa_station_cluster_queue_items link
         WHERE link.cluster_id = :'cluster_id'
       )
       AND q.status IN ('open', 'confirmed')
@@ -2377,7 +2377,7 @@ async function postReviewClusterDecisionV2(clusterId, body) {
 
     tx.add(
       `
-      SELECT qa_refresh_station_display_names_v2(:'country')
+      SELECT qa_refresh_station_display_names(:'country')
       `,
       {
         country: cluster.country,
@@ -2388,7 +2388,7 @@ async function postReviewClusterDecisionV2(clusterId, body) {
   const latestDecision = await client.queryOne(
     `
     SELECT decision_id, operation, created_at, applied_to_overrides
-    FROM qa_station_cluster_decisions_v2
+    FROM qa_station_cluster_decisions
     WHERE cluster_id = :'cluster_id'
       AND requested_by = :'requested_by'
     ORDER BY created_at DESC, decision_id DESC
@@ -2412,11 +2412,11 @@ async function postReviewClusterDecisionV2(clusterId, body) {
 }
 
 module.exports = {
-  getReviewClustersV2,
-  getReviewClusterDetailV2,
-  getCuratedStationsV1,
-  getCuratedStationDetailV1,
-  postReviewClusterDecisionV2,
+  getReviewClusters,
+  getReviewClusterDetail,
+  getCuratedStations,
+  getCuratedStationDetail,
+  postReviewClusterDecision,
   postRefreshJob,
   getRefreshJob,
 };

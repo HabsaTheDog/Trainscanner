@@ -24,7 +24,7 @@ test(
 
     execFileSync(
       "bash",
-      [path.join(repoRoot, "scripts", "data", "db-migrate.sh"), "--quiet"],
+      [path.join(repoRoot, "scripts", "data", "db-bootstrap.sh"), "--quiet"],
       {
         cwd: repoRoot,
         stdio: "inherit",

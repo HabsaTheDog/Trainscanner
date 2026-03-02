@@ -1206,7 +1206,7 @@ async function ensureGridFunction(client) {
     throw new AppError({
       code: "INVALID_REQUEST",
       message:
-        "compute_geo_grid_id(...) is not available. Run DB migration 012_v2_bounding_box_partitioning.sql before seeding.",
+        "compute_geo_grid_id(...) is not available. Run the database bootstrap before seeding.",
     });
   }
 }

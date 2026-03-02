@@ -33,7 +33,7 @@ async function getLowConfidenceQueue(client, { limit = 50, offset = 0 } = {}) {
   const totalRow = await client.queryOne(
     `
     SELECT COUNT(*)::int AS total
-    FROM qa_station_cluster_evidence_v2
+    FROM qa_station_cluster_evidence
     WHERE ai_confidence IS NOT NULL
       AND ai_confidence < :'threshold'
     `,
@@ -55,13 +55,13 @@ async function getLowConfidenceQueue(client, { limit = 50, offset = 0 } = {}) {
       src_cand.longitude AS source_lon,
       tgt_cand.latitude  AS target_lat,
       tgt_cand.longitude AS target_lon
-    FROM qa_station_cluster_evidence_v2 e
-    LEFT JOIN qa_station_clusters_v2 c USING (cluster_id)
+    FROM qa_station_cluster_evidence e
+    LEFT JOIN qa_station_clusters c USING (cluster_id)
     -- pull coordinates from the cluster candidate table (populated during cluster rebuild)
-    LEFT JOIN qa_station_cluster_candidates_v2 src_cand
+    LEFT JOIN qa_station_cluster_candidates src_cand
       ON src_cand.cluster_id = e.cluster_id
      AND src_cand.canonical_station_id = e.source_canonical_station_id
-    LEFT JOIN qa_station_cluster_candidates_v2 tgt_cand
+    LEFT JOIN qa_station_cluster_candidates tgt_cand
       ON tgt_cand.cluster_id = e.cluster_id
      AND tgt_cand.canonical_station_id = e.target_canonical_station_id
     WHERE e.ai_confidence IS NOT NULL
@@ -145,7 +145,7 @@ async function recordAiMatchDecision(
   const evidenceRow = await client.queryOne(
     `
     SELECT ai_confidence
-    FROM qa_station_cluster_evidence_v2
+    FROM qa_station_cluster_evidence
     WHERE evidence_id = :'evidence_id'
       AND cluster_id = :'cluster_id'
     `,
@@ -173,7 +173,7 @@ async function recordAiMatchDecision(
 
   const row = await client.queryOne(
     `
-    INSERT INTO qa_station_cluster_decisions_v2 (
+    INSERT INTO qa_station_cluster_decisions (
       cluster_id,
       operation,
       decision_payload,
@@ -233,10 +233,10 @@ async function setMegaHubWalkTime(
 
   const safeMinutes = Math.round(walkMinutes);
 
-  // Use the hub_id unique partial index (migration 014) for upsert.
+  // Use the hub_id unique partial index created by the baseline schema for upsert.
   // hub_id = the stable frontend identifier (e.g. 'paris-cdg').
   // hub_name mirrors hub_id for backwards compatibility with legacy queries.
-  // country = 'EU' sentinel for pan-European mega-hubs (migration 014 widened CHECK).
+  // country = 'EU' sentinel for pan-European mega-hubs in the baseline schema.
   const row = await client.queryOne(
     `
     INSERT INTO station_transfer_rules (

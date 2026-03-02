@@ -5,11 +5,11 @@ const crypto = require("node:crypto");
 const { execFileSync, spawnSync } = require("node:child_process");
 
 const {
-  getReviewClustersV2,
-  getReviewClusterDetailV2,
-  postReviewClusterDecisionV2,
-  getCuratedStationsV1,
-  getCuratedStationDetailV1,
+  getReviewClusters,
+  getReviewClusterDetail,
+  postReviewClusterDecision,
+  getCuratedStations,
+  getCuratedStationDetail,
 } = require("../../src/domains/qa/api");
 const { createPostgisClient } = require("../../src/data/postgis/client");
 
@@ -18,7 +18,7 @@ const hasDocker =
 const shouldRun = hasDocker && process.env.ENABLE_POSTGIS_TESTS === "1";
 
 test(
-  "qa v2 cluster generation is deterministic and decisions are atomic",
+  "qa cluster generation is deterministic and decisions are atomic",
   { skip: !shouldRun },
   async () => {
     const repoRoot = path.resolve(__dirname, "../../..");
@@ -29,7 +29,7 @@ test(
 
     execFileSync(
       "bash",
-      [path.join(repoRoot, "scripts", "data", "db-migrate.sh"), "--quiet"],
+      [path.join(repoRoot, "scripts", "data", "db-bootstrap.sh"), "--quiet"],
       {
         cwd: repoRoot,
         stdio: "inherit",
@@ -165,7 +165,7 @@ test(
       provenance_run_tag = 'latest',
       updated_at = now();
 
-    INSERT INTO qa_station_complexes_v2 (
+    INSERT INTO qa_station_complexes (
       complex_id,
       country,
       complex_name,
@@ -180,7 +180,7 @@ test(
     )
     ON CONFLICT (complex_id) DO NOTHING;
 
-    INSERT INTO qa_station_segments_v2 (
+    INSERT INTO qa_station_segments (
       segment_id,
       complex_id,
       canonical_station_id,
@@ -213,14 +213,14 @@ test(
       },
     );
 
-    await client.exec(`SELECT qa_rebuild_station_clusters_v2('DE', NULL);`);
+    await client.exec(`SELECT qa_rebuild_station_clusters('DE', NULL);`);
     const firstRows = await client.queryRows(
-      `SELECT cluster_id FROM qa_station_clusters_v2 WHERE country = 'DE' AND scope_tag = 'latest' ORDER BY cluster_id`,
+      `SELECT cluster_id FROM qa_station_clusters WHERE country = 'DE' AND scope_tag = 'latest' ORDER BY cluster_id`,
     );
 
-    await client.exec(`SELECT qa_rebuild_station_clusters_v2('DE', NULL);`);
+    await client.exec(`SELECT qa_rebuild_station_clusters('DE', NULL);`);
     const secondRows = await client.queryRows(
-      `SELECT cluster_id FROM qa_station_clusters_v2 WHERE country = 'DE' AND scope_tag = 'latest' ORDER BY cluster_id`,
+      `SELECT cluster_id FROM qa_station_clusters WHERE country = 'DE' AND scope_tag = 'latest' ORDER BY cluster_id`,
     );
 
     assert.deepEqual(
@@ -229,9 +229,9 @@ test(
     );
 
     const listUrl = new URL(
-      "http://localhost/api/qa/v2/clusters?country=DE&scope_tag=latest&limit=20",
+      "http://localhost/api/qa/clusters?country=DE&scope_tag=latest&limit=20",
     );
-    const clusters = await getReviewClustersV2(listUrl);
+    const clusters = await getReviewClusters(listUrl);
     const cluster = clusters.find(
       (row) =>
         Array.isArray(row.candidates) &&
@@ -239,10 +239,10 @@ test(
           (candidate) => candidate.canonical_station_id === stationA,
         ),
     );
-    assert.ok(cluster, "expected seeded cluster in v2 list response");
+    assert.ok(cluster, "expected seeded cluster in cluster list response");
     assert.equal(Object.hasOwn(cluster, "queue_items"), false);
 
-    const detail = await getReviewClusterDetailV2(cluster.cluster_id);
+    const detail = await getReviewClusterDetail(cluster.cluster_id);
     assert.ok(Array.isArray(detail.candidates));
     assert.ok(
       detail.candidates.some(
@@ -260,7 +260,7 @@ test(
 
     await assert.rejects(
       () =>
-        postReviewClusterDecisionV2(cluster.cluster_id, {
+        postReviewClusterDecision(cluster.cluster_id, {
           operation: "merge",
           selected_station_ids: [stationA, "cstn_outside_scope"],
           requested_by: "integration_reviewer",
@@ -268,7 +268,7 @@ test(
       /not part of cluster/,
     );
 
-    const decision = await postReviewClusterDecisionV2(cluster.cluster_id, {
+    const decision = await postReviewClusterDecision(cluster.cluster_id, {
       operation: "merge",
       selected_station_ids: [stationA, stationB],
       groups: [
@@ -297,7 +297,7 @@ test(
     const mergeDecisionMemberActions = await client.queryRows(
       `
     SELECT action, COUNT(*)::integer AS items
-    FROM qa_station_cluster_decision_members_v2
+    FROM qa_station_cluster_decision_members
     WHERE decision_id = :'decision_id'
     GROUP BY action
     ORDER BY action
@@ -316,7 +316,7 @@ test(
     FROM canonical_review_queue
     WHERE review_item_id IN (
       SELECT review_item_id
-      FROM qa_station_cluster_queue_items_v2
+      FROM qa_station_cluster_queue_items
       WHERE cluster_id = :'cluster_id'
     )
     `,
@@ -343,7 +343,7 @@ test(
     const walkLinks = await client.queryRows(
       `
     SELECT from_segment_id, to_segment_id, min_walk_minutes
-    FROM qa_station_segment_links_v2
+    FROM qa_station_segment_links
     WHERE (from_segment_id = :'segment_a' AND to_segment_id = :'segment_b')
        OR (from_segment_id = :'segment_b' AND to_segment_id = :'segment_a')
     ORDER BY from_segment_id, to_segment_id
@@ -359,7 +359,7 @@ test(
     const mergeCuratedRows = await client.queryRows(
       `
     SELECT curated_station_id, status, derived_operation
-    FROM qa_curated_stations_v1
+    FROM qa_curated_stations
     WHERE primary_cluster_id = :'cluster_id'
       AND status = 'active'
     ORDER BY curated_station_id
@@ -374,7 +374,7 @@ test(
     const mergeCuratedMembers = await client.queryRows(
       `
     SELECT canonical_station_id, member_role
-    FROM qa_curated_station_members_v1
+    FROM qa_curated_station_members
     WHERE curated_station_id = :'curated_station_id'
     ORDER BY canonical_station_id
     `,
@@ -391,15 +391,15 @@ test(
     );
 
     const curatedListUrl = new URL(
-      `http://localhost/api/qa/v2/curated-stations?cluster_id=${encodeURIComponent(cluster.cluster_id)}&status=active&limit=20`,
+      `http://localhost/api/qa/curated-stations?cluster_id=${encodeURIComponent(cluster.cluster_id)}&status=active&limit=20`,
     );
-    const curatedList = await getCuratedStationsV1(curatedListUrl);
+    const curatedList = await getCuratedStations(curatedListUrl);
     assert.equal(curatedList.length, 1);
     assert.equal(curatedList[0].derived_operation, "merge");
     assert.ok(Array.isArray(curatedList[0].members));
     assert.equal(curatedList[0].members.length, 2);
 
-    const curatedDetail = await getCuratedStationDetailV1(
+    const curatedDetail = await getCuratedStationDetail(
       curatedList[0].curated_station_id,
     );
     assert.equal(
@@ -410,7 +410,7 @@ test(
     assert.ok(Array.isArray(curatedDetail.field_provenance));
     assert.ok(Array.isArray(curatedDetail.lineage));
 
-    const applied = await postReviewClusterDecisionV2(cluster.cluster_id, {
+    const applied = await postReviewClusterDecision(cluster.cluster_id, {
       operation: "split",
       selected_station_ids: [stationA, stationB],
       groups: [
@@ -448,8 +448,8 @@ test(
     const groupedRows = await client.queryRows(
       `
     SELECT g.group_id, g.display_name, s.section_id, s.section_type
-    FROM qa_station_groups_v2 g
-    JOIN qa_station_group_sections_v2 s
+    FROM qa_station_groups g
+    JOIN qa_station_group_sections s
       ON s.group_id = g.group_id
     WHERE g.cluster_id = :'cluster_id'
       AND g.is_active = true
@@ -464,7 +464,7 @@ test(
     const splitCuratedRows = await client.queryRows(
       `
     SELECT status, derived_operation, COUNT(*)::integer AS items
-    FROM qa_curated_stations_v1
+    FROM qa_curated_stations
     WHERE primary_cluster_id = :'cluster_id'
     GROUP BY status, derived_operation
     ORDER BY status, derived_operation
@@ -489,9 +489,9 @@ test(
     );
 
     const splitCuratedListUrl = new URL(
-      `http://localhost/api/qa/v2/curated-stations?cluster_id=${encodeURIComponent(cluster.cluster_id)}&status=active&limit=20`,
+      `http://localhost/api/qa/curated-stations?cluster_id=${encodeURIComponent(cluster.cluster_id)}&status=active&limit=20`,
     );
-    const splitCuratedList = await getCuratedStationsV1(splitCuratedListUrl);
+    const splitCuratedList = await getCuratedStations(splitCuratedListUrl);
     assert.ok(splitCuratedList.length >= 2);
     assert.ok(
       splitCuratedList.every((row) => row.derived_operation === "split"),
@@ -500,10 +500,10 @@ test(
     const sectionLinks = await client.queryRows(
       `
     SELECT l.from_section_id, l.to_section_id, l.min_walk_minutes
-    FROM qa_station_group_section_links_v2 l
-    JOIN qa_station_group_sections_v2 s
+    FROM qa_station_group_section_links l
+    JOIN qa_station_group_sections s
       ON s.section_id = l.from_section_id
-    JOIN qa_station_groups_v2 g
+    JOIN qa_station_groups g
       ON g.group_id = s.group_id
     WHERE g.cluster_id = :'cluster_id'
       AND g.is_active = true

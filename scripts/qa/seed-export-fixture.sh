@@ -65,7 +65,7 @@ db_load_env
 db_resolve_connection
 db_ensure_ready
 
-"${ROOT_DIR}/scripts/data/db-migrate.sh" --quiet
+"${ROOT_DIR}/scripts/data/db-bootstrap.sh" --quiet
 
 db_psql -v as_of="$AS_OF" <<'SQL'
 INSERT INTO import_runs (run_id, pipeline, status, source_id, country, snapshot_date, started_at, ended_at)

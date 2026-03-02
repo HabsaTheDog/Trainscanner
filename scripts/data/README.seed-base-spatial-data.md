@@ -1,6 +1,6 @@
 # Base Spatial Seeding (Task 1.2)
 
-This seeder pre-populates `canonical_stations` with OSM/UIC topology to reduce V2 cold-start novelty spikes.
+This seeder pre-populates `canonical_stations` with OSM/UIC topology to reduce cold-start novelty spikes.
 
 ## What It Does
 
@@ -18,7 +18,7 @@ This seeder only writes ODbL-derived topology into `canonical_stations` and does
 
 ## Prerequisites
 
-- Migration `012_v2_bounding_box_partitioning.sql` applied (requires `compute_geo_grid_id(...)`).
+- The current database bootstrap applied (requires `compute_geo_grid_id(...)`).
 - Reachable PostGIS (same env vars already used by orchestrator scripts).
 - Network access for Overpass unless `--offline` is used.
 

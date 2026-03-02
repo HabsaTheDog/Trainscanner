@@ -333,7 +333,7 @@ QueueRow.propTypes = {
 // Sub-component: Transfer Matrix Override
 // ---------------------------------------------------------------------------
 
-const WALK_KEY = "qa_walk_overrides_v1";
+const WALK_KEY = "qa_walk_overrides";
 
 function loadOverrides() {
   try {

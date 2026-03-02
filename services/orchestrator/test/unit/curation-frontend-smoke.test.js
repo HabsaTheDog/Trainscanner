@@ -10,7 +10,7 @@ test("curation frontend includes staged conflict editor and map mode hooks", asy
     "utf8",
   );
   const pageJsx = await fs.readFile(
-    path.join(repoRoot, "frontend", "src", "CurationPage.jsx"),
+    path.join(repoRoot, "frontend", "src", "curation-page.jsx"),
     "utf8",
   );
   const logicJs = await fs.readFile(
@@ -18,8 +18,10 @@ test("curation frontend includes staged conflict editor and map mode hooks", asy
     "utf8",
   );
 
-  const hasLegacyScriptTag = /src="\/src\/main-curation\.jsx"/.test(html);
-  const hasModuleImport = /import\s+"\.\/src\/main-curation\.jsx";/.test(html);
+  const hasLegacyScriptTag = /src="\/src\/curation-page-entry\.jsx"/.test(html);
+  const hasModuleImport = /import\s+"\.\/src\/curation-page-entry\.jsx";/.test(
+    html,
+  );
   assert.ok(hasLegacyScriptTag || hasModuleImport);
 
   assert.match(pageJsx, /id="mapModeDefaultBtn"/);
@@ -35,8 +37,8 @@ test("curation frontend includes staged conflict editor and map mode hooks", asy
   assert.doesNotMatch(pageJsx, /Linked Queue Items/);
   assert.doesNotMatch(pageJsx, /Keep Separate/);
 
-  assert.match(logicJs, /\/api\/qa\/v2\/clusters/);
-  assert.match(logicJs, /\/api\/qa\/v2\/curated-stations/);
+  assert.match(logicJs, /\/api\/qa\/clusters/);
+  assert.match(logicJs, /\/api\/qa\/curated-stations/);
   assert.match(logicJs, /renderCuratedCandidatesInline/);
   assert.match(logicJs, /renderDraftMergesInline/);
   assert.match(logicJs, /MAP_MODE_SESSION_KEY/);

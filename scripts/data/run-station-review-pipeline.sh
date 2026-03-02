@@ -4,7 +4,7 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
-SKIP_MIGRATE="false"
+SKIP_DB_BOOTSTRAP="false"
 DRY_RUN="false"
 RUN_ID=""
 STEP_SUMMARY=()
@@ -12,7 +12,7 @@ CURRENT_STEP=""
 CURRENT_CMD=""
 PIPELINE_STARTED_AT="$(date +%s)"
 REFRESH_ARGS=()
-STEP_DB_MIGRATE="db-migrate"
+STEP_DB_BOOTSTRAP="db-bootstrap"
 
 timestamp_utc() {
   date -u +"%Y-%m-%dT%H:%M:%SZ"
@@ -34,7 +34,7 @@ usage() {
 Usage: scripts/data/run-station-review-pipeline.sh [options]
 
 Run a full station-review data pipeline in one command:
-  1) apply DB migrations
+  1) bootstrap the current DB schema
   2) fetch latest sources
   3) ingest NeTEx snapshots
   4) build canonical stations
@@ -51,7 +51,7 @@ Options:
   --skip-ingest               Skip ingest step
   --skip-canonical            Skip canonical build step
   --skip-review-queue         Skip review queue build step
-  --skip-migrate              Skip DB migrations
+  --skip-db-bootstrap         Skip DB schema bootstrap
   --run-id <id>               Optional run id prefix for refresh stage logs
   --dry-run                   Show execution plan without mutating data
   -h, --help                  Show this help
@@ -60,7 +60,7 @@ Examples:
   scripts/data/run-station-review-pipeline.sh
   scripts/data/run-station-review-pipeline.sh --country CH
   scripts/data/run-station-review-pipeline.sh --country DE --as-of 2026-02-20
-  scripts/data/run-station-review-pipeline.sh --skip-migrate --from-step canonical
+  scripts/data/run-station-review-pipeline.sh --skip-db-bootstrap --from-step canonical
 USAGE
   return 0
 }
@@ -103,7 +103,7 @@ on_error() {
     log "Failed command: ${CURRENT_CMD}"
   fi
 
-  if [[ "$CURRENT_STEP" == "$STEP_DB_MIGRATE" ]]; then
+  if [[ "$CURRENT_STEP" == "$STEP_DB_BOOTSTRAP" ]]; then
     log "Hint: verify PostGIS is reachable and CANONICAL_DB_* env values are correct."
   fi
 
@@ -154,8 +154,8 @@ while [[ $# -gt 0 ]]; do
       REFRESH_ARGS+=("$1")
       shift
       ;;
-    --skip-migrate)
-      SKIP_MIGRATE="true"
+    --skip-db-bootstrap)
+      SKIP_DB_BOOTSTRAP="true"
       shift
       ;;
     --dry-run)
@@ -181,29 +181,29 @@ REFRESH_ARGS+=("--run-id" "$RUN_ID" "--root" "$ROOT_DIR")
 
 log "Root directory: ${ROOT_DIR}"
 log "Run ID: ${RUN_ID}"
-log "Migrate step: ${SKIP_MIGRATE}"
+log "DB bootstrap step: ${SKIP_DB_BOOTSTRAP}"
 log "Dry run: ${DRY_RUN}"
 log "Refresh args: ${REFRESH_ARGS[*]}"
 
 if [[ "$DRY_RUN" == "true" ]]; then
-  if [[ "$SKIP_MIGRATE" == "false" ]]; then
-    record_step "$STEP_DB_MIGRATE" "skipped" "0"
-    log "DRY-RUN step=${STEP_DB_MIGRATE} command=${ROOT_DIR}/scripts/data/db-migrate.sh"
+  if [[ "$SKIP_DB_BOOTSTRAP" == "false" ]]; then
+    record_step "$STEP_DB_BOOTSTRAP" "skipped" "0"
+    log "DRY-RUN step=${STEP_DB_BOOTSTRAP} command=${ROOT_DIR}/scripts/data/db-bootstrap.sh"
   fi
   run_step "refresh-station-review" "${ROOT_DIR}/scripts/data/refresh-station-review.sh" "${REFRESH_ARGS[@]}"
   print_summary
   exit 0
 fi
 
-if [[ "$SKIP_MIGRATE" == "false" ]]; then
-  run_step "$STEP_DB_MIGRATE" "${ROOT_DIR}/scripts/data/db-migrate.sh"
+if [[ "$SKIP_DB_BOOTSTRAP" == "false" ]]; then
+  run_step "$STEP_DB_BOOTSTRAP" "${ROOT_DIR}/scripts/data/db-bootstrap.sh"
 else
-  record_step "$STEP_DB_MIGRATE" "skipped" "0"
-  log "SKIP step=${STEP_DB_MIGRATE} (--skip-migrate)"
+  record_step "$STEP_DB_BOOTSTRAP" "skipped" "0"
+  log "SKIP step=${STEP_DB_BOOTSTRAP} (--skip-db-bootstrap)"
 fi
 
 run_step "refresh-station-review" "${ROOT_DIR}/scripts/data/refresh-station-review.sh" "${REFRESH_ARGS[@]}"
 
 print_summary
 log "Station review data pipeline completed successfully."
-log "Next: open http://localhost:3000/curation.html or query /api/qa/v2/clusters."
+log "Next: open http://localhost:3000/curation.html or query /api/qa/clusters."

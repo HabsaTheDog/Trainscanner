@@ -13,7 +13,7 @@ usage() {
   cat <<USAGE
 Usage: scripts/data/check-canonical-pipeline.sh [options]
 
-Minimal verification checks for migrations + ingest + canonical build outputs.
+Minimal verification checks for schema bootstrap + ingest + canonical build outputs.
 
 Options:
   --country DE|AT|CH   Restrict checks to one country
@@ -65,7 +65,7 @@ db_load_env
 db_resolve_connection
 db_ensure_ready
 
-"${SCRIPT_DIR}/db-migrate.sh" --quiet
+"${SCRIPT_DIR}/db-bootstrap.sh" --quiet
 country_filter_esc="$(db_sql_escape "$COUNTRY_FILTER")"
 
 metrics="$(db_psql -At -c "

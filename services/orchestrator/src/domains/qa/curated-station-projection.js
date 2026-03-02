@@ -131,12 +131,12 @@ function emptyProjectionRows() {
   };
 }
 
-function buildCuratedProjectionRowsV1(input = {}) {
+function buildCuratedProjectionRows(input = {}) {
   const clusterId = toCleanString(input.clusterId);
   const decision =
     input.decision && typeof input.decision === "object" ? input.decision : {};
   const operation = toCleanString(decision.operation);
-  const requestedBy = toCleanString(decision.requestedBy) || "curation_tool_v2";
+  const requestedBy = toCleanString(decision.requestedBy) || "curation_tool";
   const selectedStationIds = normalizeStringArray(decision.selectedStationIds);
   const groups = Array.isArray(decision.groups) ? decision.groups : [];
   const renameTo = toCleanString(decision.renameTo);
@@ -160,7 +160,7 @@ function buildCuratedProjectionRowsV1(input = {}) {
         memberStationIds: group.memberStationIds || [],
         targetCanonicalStationId: group.targetCanonicalStationId || "",
         metadata: {
-          source: "qa-v2-decision",
+          source: "qa-decision",
           section_type: toCleanString(group.sectionType),
           section_name: toCleanString(group.sectionName),
         },
@@ -182,7 +182,7 @@ function buildCuratedProjectionRowsV1(input = {}) {
     memberStationIds: selectedStationIds,
     targetCanonicalStationId,
     metadata: {
-      source: "qa-v2-decision",
+      source: "qa-decision",
     },
   });
 
@@ -190,14 +190,14 @@ function buildCuratedProjectionRowsV1(input = {}) {
   return rows;
 }
 
-function persistCuratedProjectionV1(tx, input = {}) {
+function persistCuratedProjection(tx, input = {}) {
   if (!tx || typeof tx.add !== "function") {
     return;
   }
 
   const clusterId = toCleanString(input.clusterId);
   const country = toCleanString(input.country).toUpperCase();
-  const requestedBy = toCleanString(input.requestedBy) || "curation_tool_v2";
+  const requestedBy = toCleanString(input.requestedBy) || "curation_tool";
   const decisionPayload =
     input.decisionPayload && typeof input.decisionPayload === "object"
       ? input.decisionPayload
@@ -215,7 +215,7 @@ function persistCuratedProjectionV1(tx, input = {}) {
 
   tx.add(
     `
-    UPDATE qa_curated_stations_v1
+    UPDATE qa_curated_stations
     SET
       status = 'superseded',
       updated_by = :'requested_by',
@@ -231,7 +231,7 @@ function persistCuratedProjectionV1(tx, input = {}) {
 
   tx.add(
     `
-    INSERT INTO qa_curated_stations_v1 (
+    INSERT INTO qa_curated_stations (
       curated_station_id,
       country,
       status,
@@ -276,7 +276,7 @@ function persistCuratedProjectionV1(tx, input = {}) {
       derived_operation = EXCLUDED.derived_operation,
       display_name = EXCLUDED.display_name,
       naming_reason = EXCLUDED.naming_reason,
-      metadata = qa_curated_stations_v1.metadata || EXCLUDED.metadata,
+      metadata = qa_curated_stations.metadata || EXCLUDED.metadata,
       updated_by = EXCLUDED.updated_by,
       updated_at = now()
     `,
@@ -291,7 +291,7 @@ function persistCuratedProjectionV1(tx, input = {}) {
   if (members.length > 0) {
     tx.add(
       `
-      DELETE FROM qa_curated_station_members_v1 m
+      DELETE FROM qa_curated_station_members m
       USING (
         SELECT DISTINCT x.curated_station_id
         FROM jsonb_to_recordset(:'members'::jsonb) AS x(
@@ -311,7 +311,7 @@ function persistCuratedProjectionV1(tx, input = {}) {
 
     tx.add(
       `
-      INSERT INTO qa_curated_station_members_v1 (
+      INSERT INTO qa_curated_station_members (
         curated_station_id,
         canonical_station_id,
         member_role,
@@ -350,7 +350,7 @@ function persistCuratedProjectionV1(tx, input = {}) {
   if (fieldProvenance.length > 0) {
     tx.add(
       `
-      DELETE FROM qa_curated_station_field_provenance_v1 p
+      DELETE FROM qa_curated_station_field_provenance p
       USING (
         SELECT DISTINCT x.curated_station_id
         FROM jsonb_to_recordset(:'field_rows'::jsonb) AS x(
@@ -372,7 +372,7 @@ function persistCuratedProjectionV1(tx, input = {}) {
 
     tx.add(
       `
-      INSERT INTO qa_curated_station_field_provenance_v1 (
+      INSERT INTO qa_curated_station_field_provenance (
         curated_station_id,
         field_name,
         field_value,
@@ -402,7 +402,7 @@ function persistCuratedProjectionV1(tx, input = {}) {
       ON CONFLICT (curated_station_id, field_name, source_kind, source_ref)
       DO UPDATE SET
         field_value = EXCLUDED.field_value,
-        metadata = qa_curated_station_field_provenance_v1.metadata || EXCLUDED.metadata
+        metadata = qa_curated_station_field_provenance.metadata || EXCLUDED.metadata
       `,
       {
         field_rows: JSON.stringify(fieldProvenance),
@@ -413,7 +413,7 @@ function persistCuratedProjectionV1(tx, input = {}) {
   if (lineage.length > 0) {
     tx.add(
       `
-      INSERT INTO qa_curated_station_lineage_v1 (
+      INSERT INTO qa_curated_station_lineage (
         curated_station_id,
         decision_id,
         cluster_id,
@@ -449,6 +449,6 @@ function persistCuratedProjectionV1(tx, input = {}) {
 }
 
 module.exports = {
-  buildCuratedProjectionRowsV1,
-  persistCuratedProjectionV1,
+  buildCuratedProjectionRows,
+  persistCuratedProjection,
 };

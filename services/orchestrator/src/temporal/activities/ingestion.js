@@ -14,10 +14,10 @@ function createIngestionActivities(_dbClient, config) {
   );
 
   return {
-    async runDbMigrate() {
-      // Re-use the existing bash script for the migration applying
+    async runDbBootstrap() {
+      // Re-use the existing bash script for schema bootstrap
       const { stdout, stderr } = await execFileAsync(
-        path.join(scriptsDir, "db-migrate.sh"),
+        path.join(scriptsDir, "db-bootstrap.sh"),
         [],
         {
           cwd: scriptsDir,

@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 
-const { GtfsSwitcher } = require("../../src/switcher");
+const { GtfsSwitcher } = require("../../src/gtfs-profile-switcher");
 const { createLogger } = require("../../src/logger");
 const { setSystemState } = require("../../src/data/postgis/system-state");
 const { mkTempDir, writeJson, waitFor } = require("../helpers/test-utils");

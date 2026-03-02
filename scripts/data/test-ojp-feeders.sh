@@ -344,7 +344,7 @@ main() {
     db_load_env
     db_resolve_connection
     db_ensure_ready
-    "${SCRIPT_DIR}/db-migrate.sh" --quiet
+    "${SCRIPT_DIR}/db-bootstrap.sh" --quiet
     from_ref="$(resolve_ojp_ref_from_db "$FROM_CANONICAL_ID" "$PROVIDER_ID" "$provider_country")"
     to_ref="$(resolve_ojp_ref_from_db "$TO_CANONICAL_ID" "$PROVIDER_ID" "$provider_country")"
     [[ -n "$from_ref" ]] || fail "No ojp_stop_refs mapping for from canonical station '$FROM_CANONICAL_ID' (provider '$PROVIDER_ID')"

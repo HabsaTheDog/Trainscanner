@@ -56,7 +56,7 @@ db_load_env
 db_resolve_connection
 db_ensure_ready
 
-"${SCRIPT_DIR}/db-migrate.sh" --quiet
+"${SCRIPT_DIR}/db-bootstrap.sh" --quiet
 
 log "Scope: ${COUNTRY_FILTER:-ALL}"
 country_filter_esc="$(db_sql_escape "$COUNTRY_FILTER")"

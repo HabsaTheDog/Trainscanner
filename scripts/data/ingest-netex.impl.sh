@@ -369,7 +369,7 @@ main() {
   db_resolve_connection
   db_ensure_ready
 
-  "${SCRIPT_DIR}/db-migrate.sh" --quiet
+  "${SCRIPT_DIR}/db-bootstrap.sh" --quiet
 
   if [[ -n "$SOURCE_ID_FILTER" ]]; then
     source_exists="$(jq -r --arg sid "$SOURCE_ID_FILTER" '.sources[] | select(.id == $sid) | .id' "$CONFIG_FILE" | head -n 1)"

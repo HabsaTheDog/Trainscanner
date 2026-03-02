@@ -1,4 +1,4 @@
-import { useHomePageRuntime } from "./useHomePageRuntime";
+import { useHomePageRuntime } from "./use-home-page-runtime";
 
 export function HomePage() {
   useHomePageRuntime();

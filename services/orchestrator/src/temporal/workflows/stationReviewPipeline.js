@@ -2,7 +2,7 @@ const { proxyActivities } = require("@temporalio/workflow");
 
 // Setup Node.js (Orchestrator) activities
 const {
-  runDbMigrate,
+  runDbBootstrap,
   runFetchSources,
   buildCanonicalAndReviewQueue,
   checkMotisReady,
@@ -30,14 +30,14 @@ const { extract_netex_stops } = proxyActivities({
 /**
  * Main Orchestration Workflow
  * @param {Object} args
- * @param {boolean} args.skipMigrate
+ * @param {boolean} args.skipDbBootstrap
  * @param {Array<string>} args.refreshArgs
  */
 async function stationReviewPipeline(args = {}) {
-  const { skipMigrate = false, refreshArgs = [] } = args;
+  const { skipDbBootstrap = false, refreshArgs = [] } = args;
 
-  if (!skipMigrate) {
-    await runDbMigrate();
+  if (!skipDbBootstrap) {
+    await runDbBootstrap();
   }
 
   // 1. Fetch ZIPs (Node.js Bash Wrapper)

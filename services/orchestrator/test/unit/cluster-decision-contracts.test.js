@@ -5,7 +5,7 @@ const {
   normalizeClusterDecision,
   normalizeIsoCountry,
   resolveCandidateDisplayName,
-} = require("../../src/domains/qa/v2-contracts");
+} = require("../../src/domains/qa/cluster-decision-contracts");
 
 test("normalizeIsoCountry accepts empty when allowed and valid alpha-2 codes", () => {
   assert.equal(normalizeIsoCountry("", { allowEmpty: true }), "");

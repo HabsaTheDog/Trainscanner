@@ -39,12 +39,13 @@ npm run stop
 - `POST /api/gtfs/activate` (Switch profile)
 - `POST /api/gtfs/compile` (Trigger tiered GTFS artifact compilation workflow)
 - `GET /api/gtfs/stations`, `POST /api/routes`
-- `GET /api/qa/v2/clusters`, `POST /api/qa/v2/clusters/:id/decisions` (QA Curation)
+- `GET /api/qa/clusters`, `POST /api/qa/clusters/:id/decisions` (QA Curation)
 
 **Key Scripts (`scripts/`):**
 
 - `npm run dev -- --profile <name>` / `scripts/run-test-env.sh --profile <name>`: Start test env.
 - `scripts/switch-gtfs.sh --profile <name>`: Switch active profile via API.
+- `scripts/data/db-bootstrap.sh`: Initialize the full PostGIS schema from scratch.
 - `scripts/data/run-station-review-pipeline.sh`: Run full QA ingestion/review pipeline.
 - `scripts/qa/build-profile.sh`: Build deterministic profile from Canonical PostGIS.
 - `scripts/data/fetch-dach-sources.sh`: Fetch raw DACH data snapshots.
