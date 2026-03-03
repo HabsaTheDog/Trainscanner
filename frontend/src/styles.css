@@ -280,7 +280,10 @@ button:disabled {
   padding: 10px 12px;
   margin-bottom: 8px;
   cursor: pointer;
-  transition: border-color 0.18s, background-color 0.18s, box-shadow 0.18s;
+  transition:
+    border-color 0.18s,
+    background-color 0.18s,
+    box-shadow 0.18s;
 }
 
 .curation-cluster-item:hover {
@@ -442,7 +445,9 @@ button:disabled {
   cursor: pointer;
   font-weight: 600;
   font-size: 0.85rem;
-  transition: opacity 0.15s, background 0.15s;
+  transition:
+    opacity 0.15s,
+    background 0.15s;
 }
 
 .curation-btn:disabled {
@@ -530,7 +535,9 @@ button:disabled {
   padding: 10px 12px;
   margin-bottom: 8px;
   background: #f8fafc;
-  transition: border-color 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
 }
 
 .curation-candidate--selected {
@@ -701,7 +708,9 @@ button:disabled {
   border: 2.5px solid #fff;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
   cursor: pointer;
-  transition: transform 0.12s, background 0.12s;
+  transition:
+    transform 0.12s,
+    background 0.12s;
 }
 
 .curation-marker:hover {
@@ -711,7 +720,9 @@ button:disabled {
 .curation-marker--selected {
   background: #b91c1c;
   border-color: #fff;
-  box-shadow: 0 0 0 3px rgba(185, 28, 28, 0.3), 0 1px 4px rgba(0, 0, 0, 0.35);
+  box-shadow:
+    0 0 0 3px rgba(185, 28, 28, 0.3),
+    0 1px 4px rgba(0, 0, 0, 0.35);
 }
 
 /* keep legacy shared bits */
