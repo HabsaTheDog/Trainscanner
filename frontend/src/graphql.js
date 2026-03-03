@@ -7,9 +7,7 @@
  * @returns {Promise<object>} Parsed `data` field from the GraphQL response
  */
 export async function graphqlQuery(query, variables = {}) {
-  const url =
-    globalThis.window?.__CONFIG__?.GRAPHQL_URL ||
-    "http://localhost:4000/graphql";
+  const url = globalThis.window?.__CONFIG__?.GRAPHQL_URL || "/api/graphql";
 
   const res = await fetch(url, {
     method: "POST",

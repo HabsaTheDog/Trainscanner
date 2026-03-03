@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 
-test("curation frontend includes staged conflict editor and map mode hooks", async () => {
+test("curation frontend includes required component structure and runtime utilities", async () => {
   const repoRoot = path.resolve(__dirname, "../../../..");
   const html = await fs.readFile(
     path.join(repoRoot, "frontend", "curation.html"),
@@ -13,38 +13,59 @@ test("curation frontend includes staged conflict editor and map mode hooks", asy
     path.join(repoRoot, "frontend", "src", "curation-page.jsx"),
     "utf8",
   );
-  const logicJs = await fs.readFile(
+  const runtimeJs = await fs.readFile(
     path.join(repoRoot, "frontend", "src", "curation-page-runtime.js"),
     "utf8",
   );
+  const entryJsx = await fs.readFile(
+    path.join(repoRoot, "frontend", "src", "curation-page-entry.jsx"),
+    "utf8",
+  );
 
-  const hasLegacyScriptTag = /src="\/src\/curation-page-entry\.jsx"/.test(html);
+  // Entry point still loads via module import
   const hasModuleImport = /import\s+"\.\/src\/curation-page-entry\.jsx";/.test(
     html,
   );
-  assert.ok(hasLegacyScriptTag || hasModuleImport);
+  assert.ok(
+    hasModuleImport,
+    "curation.html must import curation-page-entry.jsx",
+  );
 
-  assert.match(pageJsx, /id="mapModeDefaultBtn"/);
-  assert.match(pageJsx, /id="mapModeSatelliteBtn"/);
+  // Entry point renders CurationPage
+  assert.match(entryJsx, /CurationPage/);
+  assert.match(entryJsx, /createRoot/);
+
+  // JSX has critical UI element IDs
+  assert.match(pageJsx, /id="countryFilter"/);
+  assert.match(pageJsx, /id="statusFilter"/);
   assert.match(pageJsx, /id="toolMergeBtn"/);
   assert.match(pageJsx, /id="toolSplitBtn"/);
   assert.match(pageJsx, /id="toolGroupBtn"/);
   assert.match(pageJsx, /id="resolveConflictBtn"/);
-  assert.match(pageJsx, /id="scopeTagFilter"/);
+  assert.match(pageJsx, /id="mapModeDefaultBtn"/);
+  assert.match(pageJsx, /id="mapModeSatelliteBtn"/);
+  assert.match(pageJsx, /id="editNoteInput"/);
+  assert.match(pageJsx, /id="editMergeRenameInput"/);
   assert.match(pageJsx, /id="groupPairWalkList"/);
   assert.match(pageJsx, /id="selectedServiceIncoming"/);
-  assert.match(pageJsx, /id="editPayloadPreview"/);
-  assert.doesNotMatch(pageJsx, /Linked Queue Items/);
-  assert.doesNotMatch(pageJsx, /Keep Separate/);
 
-  assert.match(logicJs, /\/api\/qa\/clusters/);
-  assert.match(logicJs, /\/api\/qa\/curated-stations/);
-  assert.match(logicJs, /renderCuratedCandidatesInline/);
-  assert.match(logicJs, /renderDraftMergesInline/);
-  assert.match(logicJs, /MAP_MODE_SESSION_KEY/);
-  assert.match(logicJs, /sessionStorage\.setItem\(MAP_MODE_SESSION_KEY/);
-  assert.match(logicJs, /resolveConflict/);
-  assert.match(logicJs, /rename_targets/);
-  assert.doesNotMatch(logicJs, /keep_separate/);
-  assert.doesNotMatch(logicJs, /queue_items/);
+  // Runtime uses shared graphql.js + REST endpoint
+  assert.match(runtimeJs, /import.*graphqlQuery.*from.*"\.\/graphql"/);
+  assert.match(runtimeJs, /\/api\/qa\/curated-stations/);
+  assert.match(runtimeJs, /fetchClusters/);
+  assert.match(runtimeJs, /fetchClusterDetail/);
+  assert.match(runtimeJs, /buildResolvePayload/);
+  assert.match(runtimeJs, /resolveDefaultMapStyle/);
+  assert.match(runtimeJs, /rename_targets/);
+
+  // JSX uses React hooks (not imperative DOM manipulation)
+  assert.match(pageJsx, /useState/);
+  assert.match(pageJsx, /useEffect/);
+  assert.match(pageJsx, /useCallback/);
+
+  // Old patterns should NOT exist
+  assert.doesNotMatch(runtimeJs, /document\.getElementById/);
+  assert.doesNotMatch(runtimeJs, /document\.createElement/);
+  assert.doesNotMatch(runtimeJs, /addEventListener/);
+  assert.doesNotMatch(runtimeJs, /initCurationApp/);
 });

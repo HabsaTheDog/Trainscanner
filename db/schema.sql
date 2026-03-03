@@ -56,6 +56,8 @@ CREATE TABLE IF NOT EXISTS raw_snapshots (
 CREATE INDEX IF NOT EXISTS idx_raw_snapshots_country_snapshot
   ON raw_snapshots (country, snapshot_date DESC);
 
+-- Initial definitions commented out because they conflict with later partitioned definitions
+/*
 CREATE TABLE IF NOT EXISTS netex_stops_staging (
   staging_id bigserial PRIMARY KEY,
   import_run_id uuid NOT NULL REFERENCES import_runs(run_id),
@@ -123,6 +125,7 @@ CREATE INDEX IF NOT EXISTS idx_canonical_stations_country_name
 CREATE INDEX IF NOT EXISTS idx_canonical_stations_geom
   ON canonical_stations USING gist (geom)
   WHERE geom IS NOT NULL;
+*/
 
 CREATE TABLE IF NOT EXISTS canonical_station_sources (
   canonical_station_id text NOT NULL REFERENCES canonical_stations(canonical_station_id) ON DELETE CASCADE,
@@ -1908,6 +1911,7 @@ BEGIN
   END IF;
 END $$;
 
+/*
 -- 4. Create partitioned canonical_stations.
 CREATE TABLE IF NOT EXISTS canonical_stations (
   canonical_station_id text,
@@ -1935,6 +1939,7 @@ CREATE TABLE IF NOT EXISTS canonical_stations_at
   PARTITION OF canonical_stations FOR VALUES IN ('AT');
 CREATE TABLE IF NOT EXISTS canonical_stations_ch
   PARTITION OF canonical_stations FOR VALUES IN ('CH');
+*/
 
 CREATE INDEX IF NOT EXISTS idx_canonical_stations_name
   ON canonical_stations (country, normalized_name);
@@ -2009,6 +2014,7 @@ END $$;
 
 DROP TABLE IF EXISTS canonical_stations_legacy;
 
+/*
 -- 5. Create partitioned netex_stops_staging.
 CREATE TABLE IF NOT EXISTS netex_stops_staging (
   staging_id bigserial,
@@ -2041,7 +2047,9 @@ CREATE TABLE IF NOT EXISTS netex_stops_staging_at
   PARTITION OF netex_stops_staging FOR VALUES IN ('AT');
 CREATE TABLE IF NOT EXISTS netex_stops_staging_ch
   PARTITION OF netex_stops_staging FOR VALUES IN ('CH');
+*/
 
+/*
 CREATE UNIQUE INDEX IF NOT EXISTS idx_netex_stops_uniq
   ON netex_stops_staging (country, source_id, snapshot_date, source_stop_id);
 CREATE INDEX IF NOT EXISTS idx_netex_stops_staging_geom
@@ -2051,7 +2059,9 @@ CREATE INDEX IF NOT EXISTS idx_netex_stops_name
 CREATE INDEX IF NOT EXISTS idx_netex_stops_hard_id
   ON netex_stops_staging (country, hard_id)
   WHERE hard_id IS NOT NULL;
+*/
 
+/*
 DO $$
 BEGIN
   IF to_regclass('public.netex_stops_staging_legacy') IS NOT NULL THEN
@@ -2106,6 +2116,7 @@ BEGIN
 END $$;
 
 DROP TABLE IF EXISTS netex_stops_staging_legacy;
+*/
 
 COMMIT;
 
@@ -2119,8 +2130,15 @@ COMMIT;
 
 BEGIN;
 
-ALTER TABLE canonical_stations RENAME TO canonical_stations_country_partitioned_legacy;
-ALTER TABLE netex_stops_staging RENAME TO netex_stops_staging_country_partitioned_legacy;
+DO $$
+BEGIN
+  IF to_regclass('canonical_stations') IS NOT NULL AND to_regclass('canonical_stations_country_partitioned_legacy') IS NULL THEN
+    ALTER TABLE canonical_stations RENAME TO canonical_stations_country_partitioned_legacy;
+  END IF;
+  IF to_regclass('netex_stops_staging') IS NOT NULL AND to_regclass('netex_stops_staging_country_partitioned_legacy') IS NULL THEN
+    ALTER TABLE netex_stops_staging RENAME TO netex_stops_staging_country_partitioned_legacy;
+  END IF;
+END $$;
 
 CREATE OR REPLACE FUNCTION compute_geo_grid_id(
   p_country text,
@@ -2169,7 +2187,7 @@ BEGIN
   END LOOP;
 END $$;
 
-CREATE TABLE canonical_stations (
+CREATE TABLE IF NOT EXISTS canonical_stations (
   canonical_station_id text NOT NULL,
   canonical_name text NOT NULL,
   normalized_name text NOT NULL,
@@ -2187,7 +2205,7 @@ CREATE TABLE canonical_stations (
   deleted_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT canonical_stations_grid_pkey PRIMARY KEY (grid_id, canonical_station_id)
+  PRIMARY KEY (grid_id, canonical_station_id)
 ) PARTITION BY HASH (grid_id);
 
 DO $$
@@ -2196,62 +2214,67 @@ DECLARE
 BEGIN
   FOR i IN 0..31 LOOP
     EXECUTE format(
-      'CREATE TABLE canonical_stations_p%s PARTITION OF canonical_stations FOR VALUES WITH (MODULUS 32, REMAINDER %s)',
+      'CREATE TABLE IF NOT EXISTS canonical_stations_p%s PARTITION OF canonical_stations FOR VALUES WITH (MODULUS 32, REMAINDER %s)',
       lpad(i::text, 2, '0'),
       i
     );
   END LOOP;
 END $$;
 
-CREATE INDEX idx_canonical_stations_grid_country_name
+CREATE INDEX IF NOT EXISTS idx_canonical_stations_grid_country_name
   ON canonical_stations (country, normalized_name);
-CREATE INDEX idx_canonical_stations_grid_lookup
+CREATE INDEX IF NOT EXISTS idx_canonical_stations_grid_lookup
   ON canonical_stations (canonical_station_id, country);
-CREATE INDEX idx_canonical_stations_grid_geom
+CREATE INDEX IF NOT EXISTS idx_canonical_stations_grid_geom
   ON canonical_stations USING gist (geom);
 
-INSERT INTO canonical_stations (
-  canonical_station_id,
-  canonical_name,
-  normalized_name,
-  country,
-  latitude,
-  longitude,
-  geom,
-  grid_id,
-  match_method,
-  member_count,
-  first_seen_snapshot_date,
-  last_seen_snapshot_date,
-  last_built_run_id,
-  is_deleted,
-  deleted_at,
-  created_at,
-  updated_at
-)
-SELECT
-  canonical_station_id,
-  canonical_name,
-  normalized_name,
-  country,
-  latitude,
-  longitude,
-  geom,
-  compute_geo_grid_id(country::text, latitude, longitude, geom) AS grid_id,
-  match_method,
-  member_count,
-  first_seen_snapshot_date,
-  last_seen_snapshot_date,
-  last_built_run_id,
-  is_deleted,
-  deleted_at,
-  created_at,
-  updated_at
-FROM canonical_stations_country_partitioned_legacy;
+DO $$
+BEGIN
+  IF to_regclass('canonical_stations_country_partitioned_legacy') IS NOT NULL THEN
+    INSERT INTO canonical_stations (
+      canonical_station_id,
+      canonical_name,
+      normalized_name,
+      country,
+      latitude,
+      longitude,
+      geom,
+      grid_id,
+      match_method,
+      member_count,
+      first_seen_snapshot_date,
+      last_seen_snapshot_date,
+      last_built_run_id,
+      is_deleted,
+      deleted_at,
+      created_at,
+      updated_at
+    )
+    SELECT
+      canonical_station_id,
+      canonical_name,
+      normalized_name,
+      country,
+      latitude,
+      longitude,
+      geom,
+      compute_geo_grid_id(country::text, latitude, longitude, geom) AS grid_id,
+      match_method,
+      member_count,
+      first_seen_snapshot_date,
+      last_seen_snapshot_date,
+      last_built_run_id,
+      is_deleted,
+      deleted_at,
+      created_at,
+      updated_at
+    FROM canonical_stations_country_partitioned_legacy;
+  END IF;
+END $$;
 
 CREATE SEQUENCE netex_stops_staging_grid_seq AS bigint;
 
-CREATE TABLE netex_stops_staging (
+CREATE TABLE IF NOT EXISTS netex_stops_staging (
   staging_id bigint NOT NULL DEFAULT nextval('netex_stops_staging_grid_seq'),
   import_run_id uuid NOT NULL,
   source_id text NOT NULL,
@@ -2280,7 +2303,7 @@ CREATE TABLE netex_stops_staging (
   raw_payload jsonb NOT NULL DEFAULT '{}'::jsonb,
   inserted_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT netex_stops_staging_grid_pkey PRIMARY KEY (grid_id, staging_id)
+  PRIMARY KEY (grid_id, staging_id)
 ) PARTITION BY HASH (grid_id);
 
 ALTER SEQUENCE netex_stops_staging_grid_seq
@@ -2292,69 +2315,74 @@ DECLARE
 BEGIN
   FOR i IN 0..31 LOOP
     EXECUTE format(
-      'CREATE TABLE netex_stops_staging_p%s PARTITION OF netex_stops_staging FOR VALUES WITH (MODULUS 32, REMAINDER %s)',
+      'CREATE TABLE IF NOT EXISTS netex_stops_staging_p%s PARTITION OF netex_stops_staging FOR VALUES WITH (MODULUS 32, REMAINDER %s)',
       lpad(i::text, 2, '0'),
       i
     );
   END LOOP;
 END $$;
 
-CREATE UNIQUE INDEX idx_netex_stops_staging_grid_uniq
+CREATE UNIQUE INDEX IF NOT EXISTS idx_netex_stops_staging_grid_uniq
   ON netex_stops_staging (grid_id, source_id, snapshot_date, source_stop_id);
-CREATE INDEX idx_netex_stops_staging_grid_geom
+CREATE INDEX IF NOT EXISTS idx_netex_stops_staging_grid_geom
   ON netex_stops_staging USING gist (geom);
-CREATE INDEX idx_netex_stops_staging_grid_name
+CREATE INDEX IF NOT EXISTS idx_netex_stops_staging_grid_name
   ON netex_stops_staging (country, normalized_name);
-CREATE INDEX idx_netex_stops_staging_grid_lookup
+CREATE INDEX IF NOT EXISTS idx_netex_stops_staging_grid_lookup
   ON netex_stops_staging (source_id, snapshot_date DESC);
-CREATE INDEX idx_netex_stops_staging_grid_hard_id
+CREATE INDEX IF NOT EXISTS idx_netex_stops_staging_grid_hard_id
   ON netex_stops_staging (country, hard_id)
   WHERE hard_id IS NOT NULL;
 
-INSERT INTO netex_stops_staging (
-  staging_id,
-  import_run_id,
-  source_id,
-  country,
-  provider_slug,
-  snapshot_date,
-  manifest_sha256,
-  source_stop_id,
-  source_parent_stop_id,
-  stop_name,
-  latitude,
-  longitude,
-  grid_id,
-  public_code,
-  private_code,
-  hard_id,
-  source_file,
-  raw_payload,
-  inserted_at,
-  updated_at
-)
-SELECT
-  staging_id,
-  import_run_id,
-  source_id,
-  country,
-  provider_slug,
-  snapshot_date,
-  manifest_sha256,
-  source_stop_id,
-  source_parent_stop_id,
-  stop_name,
-  latitude,
-  longitude,
-  compute_geo_grid_id(country::text, latitude, longitude, NULL::geometry) AS grid_id,
-  public_code,
-  private_code,
-  hard_id,
-  source_file,
-  raw_payload,
-  inserted_at,
-  updated_at
-FROM netex_stops_staging_country_partitioned_legacy;
+DO $$
+BEGIN
+  IF to_regclass('netex_stops_staging_country_partitioned_legacy') IS NOT NULL THEN
+    INSERT INTO netex_stops_staging (
+      staging_id,
+      import_run_id,
+      source_id,
+      country,
+      provider_slug,
+      snapshot_date,
+      manifest_sha256,
+      source_stop_id,
+      source_parent_stop_id,
+      stop_name,
+      latitude,
+      longitude,
+      grid_id,
+      public_code,
+      private_code,
+      hard_id,
+      source_file,
+      raw_payload,
+      inserted_at,
+      updated_at
+    )
+    SELECT
+      staging_id,
+      import_run_id,
+      source_id,
+      country,
+      provider_slug,
+      snapshot_date,
+      manifest_sha256,
+      source_stop_id,
+      source_parent_stop_id,
+      stop_name,
+      latitude,
+      longitude,
+      compute_geo_grid_id(country::text, latitude, longitude, NULL::geometry) AS grid_id,
+      public_code,
+      private_code,
+      hard_id,
+      source_file,
+      raw_payload,
+      inserted_at,
+      updated_at
+    FROM netex_stops_staging_country_partitioned_legacy;
+  END IF;
+END $$;
 
 SELECT setval(
   'netex_stops_staging_grid_seq',
@@ -2362,8 +2390,8 @@ SELECT setval(
   true
 );
 
-DROP TABLE canonical_stations_country_partitioned_legacy;
-DROP TABLE netex_stops_staging_country_partitioned_legacy;
+DROP TABLE IF EXISTS canonical_stations_country_partitioned_legacy;
+DROP TABLE IF EXISTS netex_stops_staging_country_partitioned_legacy;
 
 -- Safety net in case any migration/user SQL recreated FKs to partitioned tables.
 DO $$

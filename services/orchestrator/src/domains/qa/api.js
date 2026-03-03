@@ -1238,7 +1238,11 @@ async function getReviewClusters(url) {
     },
   );
 
-  return rows;
+  return {
+    items: rows,
+    count: rows.length,
+    limit,
+  };
 }
 
 async function getReviewClusterDetail(clusterId) {

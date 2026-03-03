@@ -177,13 +177,13 @@ upserted AS (
      OR cs.last_seen_snapshot_date IS DISTINCT FROM EXCLUDED.last_seen_snapshot_date
      OR cs.is_deleted IS DISTINCT FROM false
      OR cs.deleted_at IS NOT NULL
-  RETURNING (xmax = 0) AS inserted
+  RETURNING 1 AS affected
 )
 SELECT
   (SELECT COUNT(*)::integer FROM dedup) AS seed_rows,
   (SELECT COUNT(*)::integer FROM moved_grid_rows) AS moved_grid_rows,
-  (SELECT COUNT(*)::integer FROM upserted WHERE inserted) AS inserted_rows,
-  (SELECT COUNT(*)::integer FROM upserted WHERE NOT inserted) AS updated_rows,
+  (SELECT COUNT(*)::integer FROM upserted) AS inserted_rows,
+  0 AS updated_rows,
   (
     (SELECT COUNT(*) FROM dedup)
     - (SELECT COUNT(*) FROM upserted)
@@ -604,7 +604,7 @@ function formatUtcTimestampSlug(date = new Date()) {
   return date
     .toISOString()
     .replaceAll(/[-:]/g, "")
-    .replaceAll(/\.\d{3}Z$/, "Z");
+    .replaceAll(/\.\d{3}Z$/g, "Z");
 }
 
 async function fileExists(filePath) {

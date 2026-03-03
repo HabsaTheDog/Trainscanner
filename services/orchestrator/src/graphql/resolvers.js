@@ -1,6 +1,7 @@
 const {
   getReviewClusters,
   getReviewClusterDetail,
+  postReviewClusterDecision,
 } = require("../domains/qa/api");
 const {
   getLowConfidenceQueue,
@@ -69,12 +70,42 @@ const rootValue = {
 
     // Leverage the existing API layer from Phase 1
     const result = await getReviewClusters(mockUrl);
-    return result.items || [];
+
+    // getReviewClusters now returns { items: rows, ... }
+    return (result.items || []).map((c) => ({
+      ...c,
+      member_nodes: (c.candidates || []).map((cand) => ({
+        canonical_station_id: cand.canonical_station_id,
+        name: cand.display_name,
+        lat: cand.latitude,
+        lon: cand.longitude,
+      })),
+      member_count: c.candidate_count,
+      display_name: c.display_name,
+      severity: c.severity,
+      candidate_count: c.candidate_count,
+      issue_count: c.issue_count,
+      scope_tag: c.scope_tag,
+    }));
   },
 
   cluster: async ({ id }) => {
     const detail = await getReviewClusterDetail(id);
-    return detail;
+    if (!detail) return null;
+
+    return {
+      ...detail,
+      candidates: (detail.candidates || []).map((cand) => ({
+        ...cand,
+        display_name: cand.display_name,
+        candidate_rank: cand.candidate_rank,
+        aliases: cand.aliases,
+        provider_labels: cand.provider_labels,
+        lat: cand.latitude,
+        lon: cand.longitude,
+        segment_context: cand.segment_context,
+      })),
+    };
   },
 
   requestAiScore: async ({ clusterId }) => {
@@ -165,6 +196,10 @@ const rootValue = {
       hub_id: result.hubId,
       walk_minutes: result.walkMinutes,
     };
+  },
+
+  submitClusterDecision: async ({ clusterId, input }) => {
+    return postReviewClusterDecision(clusterId, input);
   },
 };
 

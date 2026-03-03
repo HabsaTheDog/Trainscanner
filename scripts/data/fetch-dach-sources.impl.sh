@@ -697,35 +697,55 @@ main() {
       "Downloading '$file_name'"
 
     local progress_watcher_pid=""
-    if [[ -n "$FETCH_PROGRESS_FILE" ]]; then
-      (
-        while true; do
-          bytes=0
-          if [[ -f "$tmp_file" ]]; then
-            bytes="$(stat -c '%s' "$tmp_file" 2>/dev/null || printf '0')"
+    (
+      while true; do
+        bytes=0
+        if [[ -f "$tmp_file" ]]; then
+          bytes="$(stat -c '%s' "$tmp_file" 2>/dev/null || printf '0')"
+        fi
+        [[ "$bytes" =~ ^[0-9]+$ ]] || bytes=0
+        
+        # Update progress file for external tools
+        write_fetch_progress \
+          "downloading" \
+          "$source_id" \
+          "$source_index" \
+          "$FETCH_PROGRESS_TOTAL_SOURCES" \
+          "$file_name" \
+          "$bytes" \
+          "$expected_size" \
+          "Downloading '$file_name'"
+          
+        # Print terminal progress bar
+        if [[ "$expected_size" -gt 0 ]]; then
+          local percent=0
+          if [[ "$bytes" -ge "$expected_size" ]]; then
+            percent=100
+          else
+            percent=$((bytes * 100 / expected_size))
           fi
-          [[ "$bytes" =~ ^[0-9]+$ ]] || bytes=0
-          write_fetch_progress \
-            "downloading" \
-            "$source_id" \
-            "$source_index" \
-            "$FETCH_PROGRESS_TOTAL_SOURCES" \
-            "$file_name" \
-            "$bytes" \
-            "$expected_size" \
-            "Downloading '$file_name'"
-          sleep 1
-        done
-      ) &
-      progress_watcher_pid="$!"
-    fi
+          
+          local filled=$((percent / 5))
+          local empty=$((20 - filled))
+          local bar
+          bar="$(printf "%${filled}s" | tr ' ' '#')$(printf "%${empty}s" | tr ' ' '-')"
+          printf "\r[fetch-dach] [%-20s] %3d%% (%s/%s) " "$bar" "$percent" "$(numfmt --to=iec "$bytes")" "$(numfmt --to=iec "$expected_size")" >&2
+        else
+          printf "\r[fetch-dach] %s: %s downloaded " "$file_name" "$(numfmt --to=iec "$bytes")" >&2
+        fi
+        
+        sleep 1
+      done
+    ) &
+    progress_watcher_pid="$!"
 
     log "Downloading to $out_file"
-    if ! curl -fSL "${AUTH_ARGS[@]}" "$resolved_url" -o "$tmp_file"; then
+    if ! curl -fsSL "${AUTH_ARGS[@]}" "$resolved_url" -o "$tmp_file"; then
       if [[ -n "$progress_watcher_pid" ]]; then
         kill "$progress_watcher_pid" >/dev/null 2>&1 || true
         wait "$progress_watcher_pid" >/dev/null 2>&1 || true
       fi
+      printf "\n" >&2
       rm -f "$tmp_file"
       if [[ "$format" == "netex" ]]; then
         fail "NeTEx source '$source_id' download failed (hard failure): $resolved_url"
@@ -736,6 +756,7 @@ main() {
       kill "$progress_watcher_pid" >/dev/null 2>&1 || true
       wait "$progress_watcher_pid" >/dev/null 2>&1 || true
     fi
+    printf "\n" >&2
 
     if ! check_format_match "$tmp_file" "$format" "$resolved_url" "$source_id"; then
       rm -f "$tmp_file"

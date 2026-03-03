@@ -14,12 +14,61 @@ const schema = buildSchema(`
     rejectAiMatch(clusterId: ID!, evidenceId: ID!): AiMatchDecisionResult!
     overrideAiMatch(clusterId: ID!, evidenceId: ID!, targetClusterId: ID!): AiMatchDecisionResult!
     setMegaHubWalkTime(hubId: ID!, walkMinutes: Int!): WalkTimeOverrideResult!
+    submitClusterDecision(clusterId: ID!, input: ClusterDecisionInput!): ClusterDecisionResult!
+  }
+
+  input ClusterDecisionInput {
+    operation: String!
+    selected_station_ids: [String]
+    groups: [DecisionGroupInput]
+    note: String
+    requested_by: String
+    rename_to: String
+    rename_targets: [RenameTargetInput]
+  }
+
+  input DecisionGroupInput {
+    group_label: String
+    target_canonical_station_id: String
+    member_station_ids: [String]
+    rename_to: String
+    section_type: String
+    section_name: String
+    segment_action: SegmentActionInput
+  }
+
+  input SegmentActionInput {
+    walk_links: [WalkLinkInput]
+  }
+
+  input WalkLinkInput {
+    from_segment_id: String!
+    to_segment_id: String!
+    min_walk_minutes: Int
+    bidirectional: Boolean
+  }
+
+  input RenameTargetInput {
+    canonical_station_id: String!
+    rename_to: String!
+  }
+
+  type ClusterDecisionResult {
+    ok: Boolean!
+    cluster_id: ID!
+    decision_id: ID
+    operation: String!
   }
 
   type Cluster {
     cluster_id: ID!
     country: String
     status: String
+    display_name: String
+    severity: String
+    candidate_count: Int
+    issue_count: Int
+    scope_tag: String
     member_nodes: [ClusterNode]
     member_count: Int
   }
@@ -65,16 +114,26 @@ const schema = buildSchema(`
 
   type ClusterCandidate {
     canonical_station_id: String
-    name: String
+    display_name: String
+    candidate_rank: Int
+    aliases: [String]
+    provider_labels: [String]
     lat: Float
     lon: Float
     service_context: ServiceContext
+    segment_context: SegmentContext
   }
 
   type ServiceContext {
     lines: [String]
     incoming: [String]
     outgoing: [String]
+  }
+
+  type SegmentContext {
+    segment_id: String
+    segment_name: String
+    segment_type: String
   }
   
   type AiScoreResult {
