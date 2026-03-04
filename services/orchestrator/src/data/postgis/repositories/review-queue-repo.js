@@ -23,7 +23,7 @@ const REVIEW_QUEUE_SUMMARY_SCHEMA = {
   additionalProperties: true,
 };
 
-const BUILD_REVIEW_QUEUE_SQL = `
+const BUILD_REVIEW_QUEUE_ITEMS_SQL = `
 BEGIN;
 
 CREATE TEMP TABLE _scoped_sources AS
@@ -296,42 +296,62 @@ SELECT json_build_object(
     WHERE q.provenance_run_tag = (SELECT scope_tag FROM _scope)
       AND (NULLIF(:'country_filter', '') IS NULL OR q.country = NULLIF(:'country_filter', '')::char(2))
       AND q.status IN ('resolved', 'auto_resolved')
-  ),
-  'clusters', qa_rebuild_station_clusters(
-    NULLIF(:'country_filter', ''),
-    NULLIF(:'as_of', '')::date
   )
 )::text;
 `;
 
+const REBUILD_REVIEW_CLUSTERS_SQL = `
+SELECT qa_rebuild_station_clusters(
+  NULLIF(:'country_filter', ''),
+  NULLIF(:'as_of', '')::date
+)::text;
+`;
+
+function runQueueBuildScript(client, sql, scope) {
+  return client.runScript(sql, {
+    country_filter: scope.country || "",
+    as_of: scope.asOf || "",
+    geo_threshold_m: String(scope.geoThresholdMeters || 3000),
+    close_missing: scope.closeMissing === false ? "false" : "true",
+  });
+}
+
+function parseReviewQueueSummary(result, missingMessage, invalidMessage) {
+  const line = extractJsonLine(result.stdout);
+  if (!line) {
+    throw new AppError({
+      code: "REVIEW_QUEUE_BUILD_FAILED",
+      message: missingMessage,
+    });
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(line);
+  } catch (err) {
+    throw new AppError({
+      code: "REVIEW_QUEUE_BUILD_FAILED",
+      message: invalidMessage,
+      cause: err,
+    });
+  }
+
+  return parsed;
+}
+
 function createReviewQueueRepo(client) {
   return {
-    async buildReviewQueue(scope) {
-      const result = await client.runScript(BUILD_REVIEW_QUEUE_SQL, {
-        country_filter: scope.country || "",
-        as_of: scope.asOf || "",
-        geo_threshold_m: String(scope.geoThresholdMeters || 3000),
-        close_missing: scope.closeMissing === false ? "false" : "true",
-      });
-
-      const line = extractJsonLine(result.stdout);
-      if (!line) {
-        throw new AppError({
-          code: "REVIEW_QUEUE_BUILD_FAILED",
-          message: "Review queue build did not return summary JSON",
-        });
-      }
-
-      let parsed;
-      try {
-        parsed = JSON.parse(line);
-      } catch (err) {
-        throw new AppError({
-          code: "REVIEW_QUEUE_BUILD_FAILED",
-          message: "Review queue build returned invalid summary JSON",
-          cause: err,
-        });
-      }
+    async buildReviewQueueItems(scope) {
+      const result = await runQueueBuildScript(
+        client,
+        BUILD_REVIEW_QUEUE_ITEMS_SQL,
+        scope,
+      );
+      const parsed = parseReviewQueueSummary(
+        result,
+        "Review queue build did not return summary JSON",
+        "Review queue build returned invalid summary JSON",
+      );
 
       validateOrThrow(parsed, REVIEW_QUEUE_SUMMARY_SCHEMA, {
         code: "REVIEW_QUEUE_BUILD_FAILED",
@@ -339,6 +359,42 @@ function createReviewQueueRepo(client) {
       });
 
       return parsed;
+    },
+
+    async rebuildReviewClusters(scope) {
+      const result = await runQueueBuildScript(
+        client,
+        REBUILD_REVIEW_CLUSTERS_SQL,
+        scope,
+      );
+      const parsed = parseReviewQueueSummary(
+        result,
+        "Review cluster rebuild did not return summary JSON",
+        "Review cluster rebuild returned invalid summary JSON",
+      );
+
+      if (
+        !parsed ||
+        typeof parsed !== "object" ||
+        Array.isArray(parsed) ||
+        typeof parsed.clusters !== "number"
+      ) {
+        throw new AppError({
+          code: "REVIEW_QUEUE_BUILD_FAILED",
+          message: "Review cluster rebuild summary failed schema validation",
+        });
+      }
+
+      return parsed;
+    },
+
+    async buildReviewQueue(scope) {
+      const summary = await this.buildReviewQueueItems(scope);
+      const clusters = await this.rebuildReviewClusters(scope);
+      return {
+        ...summary,
+        clusters,
+      };
     },
 
     async fetchReportMetrics(scope) {
@@ -478,6 +534,7 @@ function createReviewQueueRepo(client) {
 }
 
 module.exports = {
-  BUILD_REVIEW_QUEUE_SQL,
+  BUILD_REVIEW_QUEUE_ITEMS_SQL,
+  REBUILD_REVIEW_CLUSTERS_SQL,
   createReviewQueueRepo,
 };

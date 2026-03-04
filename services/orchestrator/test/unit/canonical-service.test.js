@@ -93,7 +93,8 @@ test("buildCanonicalStations runs modern repository-backed implementation", asyn
 });
 
 test("buildReviewQueue runs modern repository-backed implementation", async () => {
-  const repoCalls = [];
+  const queueBuildCalls = [];
+  const clusterBuildCalls = [];
   const ensureReadyCalls = [];
   const stdoutWrites = [];
   const originalStdoutWrite = process.stdout.write;
@@ -115,8 +116,8 @@ test("buildReviewQueue runs modern repository-backed implementation", async () =
         },
       }),
       createReviewQueueRepo: () => ({
-        buildReviewQueue: async (scope) => {
-          repoCalls.push(scope);
+        buildReviewQueueItems: async (scope) => {
+          queueBuildCalls.push(scope);
           return {
             scopeCountry: scope.country,
             scopeAsOf: scope.asOf,
@@ -125,6 +126,16 @@ test("buildReviewQueue runs modern repository-backed implementation", async () =
             openItems: 2,
             confirmedItems: 1,
             resolvedItems: 0,
+          };
+        },
+        rebuildReviewClusters: async (scope) => {
+          clusterBuildCalls.push(scope);
+          return {
+            scopeTag: scope.asOf || "latest",
+            country: scope.country,
+            clusters: 2,
+            candidates: 5,
+            issues: 3,
           };
         },
       }),
@@ -148,14 +159,30 @@ test("buildReviewQueue runs modern repository-backed implementation", async () =
   }
 
   assert.equal(ensureReadyCalls.length, 1);
-  assert.equal(repoCalls.length, 1);
-  assert.deepEqual(repoCalls[0], {
+  assert.equal(queueBuildCalls.length, 1);
+  assert.equal(clusterBuildCalls.length, 1);
+  assert.deepEqual(queueBuildCalls[0], {
+    country: "CH",
+    asOf: "2026-02-19",
+    geoThresholdMeters: 4000,
+    closeMissing: true,
+  });
+  assert.deepEqual(clusterBuildCalls[0], {
     country: "CH",
     asOf: "2026-02-19",
     geoThresholdMeters: 4000,
     closeMissing: true,
   });
   assert.match(stdoutWrites.join(""), /"detectedIssues":3/);
+  assert.match(stdoutWrites.join(""), /"clusters":2/);
+  assert.match(
+    stdoutWrites.join(""),
+    /\[build-review-queue\] \[#####-----\] 1\/2 building review queue items started/,
+  );
+  assert.match(
+    stdoutWrites.join(""),
+    /\[build-review-queue\] \[##########\] 2\/2 materializing review clusters completed/,
+  );
 });
 
 test("buildCanonicalStations rejects invalid calendar dates for --as-of", async () => {

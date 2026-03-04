@@ -3,8 +3,8 @@ import { graphqlQuery } from "./graphql";
 // ─── GraphQL Queries ──────────────────────────────────────────────────────────
 
 const CLUSTERS_QUERY = `
-  query GetClusters($country: String) {
-    clusters(country: $country) {
+  query GetClusters($country: String, $status: String) {
+    clusters(country: $country, status: $status) {
       cluster_id
       country
       status
@@ -91,6 +91,7 @@ const AI_SCORE_MUTATION = `
 export async function fetchClusters(filters = {}) {
   const data = await graphqlQuery(CLUSTERS_QUERY, {
     country: filters.country || null,
+    status: filters.status || null,
   });
   return Array.isArray(data.clusters) ? data.clusters : [];
 }
@@ -454,7 +455,8 @@ export function buildResolvePayload({
   }
 
   // Default merge
-  const renameTo = resolveNameAssumption(selected);
+  const explicitMergeName = draftState.renameByRef.__merge_name?.trim();
+  const renameTo = explicitMergeName || resolveNameAssumption(selected);
   return {
     operation: "merge",
     selected_station_ids: selected,

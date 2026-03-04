@@ -30,6 +30,16 @@ test("resolveConnectionConfig resolves defaults and explicit fields", () => {
   assert.equal(cfg.password, credential);
 });
 
+test("resolveConnectionConfig defaults host-side direct access to the docker-mapped port", () => {
+  const cfg = resolveConnectionConfig({
+    rootDir: "/tmp/repo",
+    env: {},
+  });
+
+  assert.equal(cfg.host, "localhost");
+  assert.equal(cfg.port, "55432");
+});
+
 test("interpolateSqlParams replaces quoted placeholders and escapes string values", () => {
   const sql =
     "SELECT :'name' AS name, NULLIF(:'num', '')::integer AS parsed_num;";

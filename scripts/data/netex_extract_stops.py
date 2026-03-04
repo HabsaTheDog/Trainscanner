@@ -12,10 +12,12 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from lxml import etree
+import lxml.etree as etree
 
-MAX_XML_ENTRIES_TO_SCAN = 500
+MAX_XML_ENTRIES_TO_SCAN = 50_000
 MAX_XML_ENTRY_BYTES = 1_000_000_000  # 1GB uncompressed guardrail
+PEEK_BYTES = 8192  # bytes to read for content-based filtering
+CONTENT_PEEK_THRESHOLD = 500  # do content-based peek when entries exceed this
 
 
 def local_name(tag: str) -> str:
@@ -71,10 +73,14 @@ def _parse_coordinate_value(raw: str | None) -> float | None:
 
 
 def _valid_coordinates(lat: float | None, lon: float | None) -> bool:
-    return lat is not None and lon is not None and -90 <= lat <= 90 and -180 <= lon <= 180
+    return (
+        lat is not None and lon is not None and -90 <= lat <= 90 and -180 <= lon <= 180
+    )
 
 
-def _coords_from_location(location: etree._Element) -> tuple[float | None, float | None]:
+def _coords_from_location(
+    location: etree._Element,
+) -> tuple[float | None, float | None]:
     lat: float | None = None
     lon: float | None = None
     for child in location:
@@ -163,32 +169,104 @@ def _clear_element(elem: etree._Element) -> None:
         del elem.getparent()[0]
 
 
+def _entry_contains_stop_place(archive: zipfile.ZipFile, entry: str) -> bool:
+    """Quick peek into the first PEEK_BYTES of a zip entry using Python zipfile."""
+    try:
+        with archive.open(entry) as handle:
+            head = handle.read(PEEK_BYTES)
+            return b"StopPlace" in head or b"SiteFrame" in head
+    except Exception:
+        return False
+
+
 def _candidate_xml_entries(archive: zipfile.ZipFile, zip_path: Path) -> list[str]:
-    xml_entries = sorted(name for name in archive.namelist() if name.lower().endswith(".xml"))
+    """Determine which XML entries to scan."""
+    xml_entries = sorted(
+        name for name in archive.namelist() if name.lower().endswith(".xml")
+    )
     if not xml_entries:
         raise RuntimeError(f"No XML entries found in archive: {zip_path}")
 
+    print(
+        f"[netex-extract] INFO: Archive contains {len(xml_entries)} XML entries.",
+        file=sys.stderr,
+    )
+
+    # Step 1: Try filename-based filtering (fast)
     preferred_entries = [
         name
         for name in xml_entries
-        if any(token in Path(name).name.lower() for token in ("site", "stop", "station"))
-    ]
-    entries_to_scan = preferred_entries if preferred_entries else xml_entries
-    if len(entries_to_scan) > MAX_XML_ENTRIES_TO_SCAN:
-        raise RuntimeError(
-            f"Too many XML entries to scan ({len(entries_to_scan)}). "
-            f"Limit is {MAX_XML_ENTRIES_TO_SCAN}."
+        if any(
+            token in Path(name).name.lower() for token in ("site", "stop", "station")
         )
-    if not preferred_entries:
+    ]
+    if preferred_entries:
         print(
-            f"[netex-extract] WARN: No site-like XML entry name detected in {zip_path.name}; "
-            "falling back to all XML entries.",
+            f"[netex-extract] INFO: Found {len(preferred_entries)} entries with site/stop/station in name.",
             file=sys.stderr,
         )
-    return entries_to_scan
+        if len(preferred_entries) > MAX_XML_ENTRIES_TO_SCAN:
+            raise RuntimeError(
+                f"Too many XML entries to scan ({len(preferred_entries)}). "
+                f"Limit is {MAX_XML_ENTRIES_TO_SCAN}."
+            )
+        return preferred_entries
+
+    # Step 2: No filename matches — if manageable count, scan all
+    if len(xml_entries) <= CONTENT_PEEK_THRESHOLD:
+        print(
+            f"[netex-extract] WARN: No site-like XML entry name; "
+            f"falling back to all {len(xml_entries)} XML entries.",
+            file=sys.stderr,
+        )
+        return xml_entries
+
+    # Step 3: Too many entries — do content-based peek filtering
+    print(
+        f"[netex-extract] INFO: {len(xml_entries)} XML entries without site-like names; "
+        "peeking into each to find StopPlace/SiteFrame content...",
+        file=sys.stderr,
+    )
+    stop_entries = []
+    for i, name in enumerate(xml_entries):
+        if _entry_contains_stop_place(archive, name):
+            stop_entries.append(name)
+        if (i + 1) % 5000 == 0:
+            print(
+                f"[netex-extract] INFO: Peeked {i + 1}/{len(xml_entries)} entries, "
+                f"found {len(stop_entries)} with StopPlace data so far...",
+                file=sys.stderr,
+            )
+    if stop_entries:
+        print(
+            f"[netex-extract] INFO: Content peek found {len(stop_entries)} entries "
+            f"containing StopPlace/SiteFrame data (out of {len(xml_entries)} total).",
+            file=sys.stderr,
+        )
+        if len(stop_entries) > MAX_XML_ENTRIES_TO_SCAN:
+            raise RuntimeError(
+                f"Too many StopPlace entries after peek ({len(stop_entries)}). "
+                f"Limit is {MAX_XML_ENTRIES_TO_SCAN}."
+            )
+        return stop_entries
+
+    # Step 4: Content peek found nothing — fall back to all
+    print(
+        f"[netex-extract] WARN: Content peek found no StopPlace entries; "
+        f"falling back to all {len(xml_entries)} XML entries.",
+        file=sys.stderr,
+    )
+    if len(xml_entries) > MAX_XML_ENTRIES_TO_SCAN:
+        raise RuntimeError(
+            f"Too many XML entries to scan ({len(xml_entries)}). "
+            f"Limit is {MAX_XML_ENTRIES_TO_SCAN}."
+        )
+    return xml_entries
 
 
-def _pick_hard_id(public_code: str | None, private_code: str | None, kv: dict[str, str]) -> str | None:
+def _pick_hard_id(
+    public_code: str | None, private_code: str | None, kv: dict[str, str]
+) -> str | None:
     hard_id = public_code or private_code
     if hard_id:
         return hard_id
@@ -234,7 +312,9 @@ def _write_stop_row(
             "private_code": private_code or "",
             "hard_id": hard_id or "",
             "source_file": entry,
-            "raw_payload": json.dumps(payload, ensure_ascii=True, separators=(",", ":")),
+            "raw_payload": json.dumps(
+                payload, ensure_ascii=True, separators=(",", ":")
+            ),
         }
     )
 
@@ -295,15 +375,33 @@ def _scan_xml_entry(
     seen_stop_ids: set[str],
     summary: Summary,
 ) -> None:
+    """Stream a single zip entry and parse with lxml iterparse, avoiding memory leaks."""
+
+    # These bulky NeTEx objects are the ones that accumulate in RAM if not explicitly matched and cleared.
+    tags_to_clear_and_ignore = {
+        "{*}VehicleJourney",
+        "{*}ServiceJourney",
+        "{*}TimetableFrame",
+        "{*}ServiceFrame",
+        "{*}JourneyPattern",
+        "{*}Line",
+        "{*}Route",
+        "{*}SiteFrame",  # Clear this at the very end to free up its children
+    }
+
+    events_tags = ("{*}StopPlace",) + tuple(tags_to_clear_and_ignore)
+
     entry_info = archive.getinfo(entry)
     if entry_info.file_size > MAX_XML_ENTRY_BYTES:
-        raise RuntimeError(f"XML entry '{entry}' exceeds safety limit ({entry_info.file_size} bytes)")
+        raise RuntimeError(
+            f"XML entry '{entry}' exceeds safety limit ({entry_info.file_size} bytes)"
+        )
 
     with archive.open(entry) as handle:
         context = etree.iterparse(
             handle,
             events=("end",),
-            tag="{*}StopPlace",
+            tag=events_tags,
             recover=False,
             huge_tree=True,
             resolve_entities=False,
@@ -311,21 +409,35 @@ def _scan_xml_entry(
             no_network=True,
         )
         for _, elem in context:
-            _process_stop_place(elem, entry, writer, args, seen_stop_ids, summary)
+            if local_name(elem.tag) == "StopPlace":
+                _process_stop_place(elem, entry, writer, args, seen_stop_ids, summary)
+
+            # By calling _clear_element on both StopPlace and the massive non-StopPlace nodes,
+            # we ensure lxml can actually garbage collect them and we don't hit OOM.
             _clear_element(elem)
 
 
-def extract(zip_path: Path, writer: csv.DictWriter, args: argparse.Namespace) -> Summary:
+def extract(
+    zip_path: Path, writer: csv.DictWriter, args: argparse.Namespace
+) -> Summary:
     summary = Summary()
     seen_stop_ids: set[str] = set()
 
     with zipfile.ZipFile(zip_path) as archive:
-        for entry in _candidate_xml_entries(archive, zip_path):
+        entries = _candidate_xml_entries(archive, zip_path)
+        for i, entry in enumerate(entries):
             summary.xml_entries_scanned += 1
+            if (i + 1) % 100 == 0 or i == 0:
+                print(
+                    f"[netex-extract] INFO: Scanning entry {i + 1}/{len(entries)}: {Path(entry).name}",
+                    file=sys.stderr,
+                )
             try:
                 _scan_xml_entry(archive, entry, writer, args, seen_stop_ids, summary)
             except etree.XMLSyntaxError as exc:
-                raise RuntimeError(f"NeTEx XML parse error in entry '{entry}': {exc}") from exc
+                raise RuntimeError(
+                    f"NeTEx XML parse error in entry '{entry}': {exc}"
+                ) from exc
 
     return summary
 
@@ -370,7 +482,10 @@ def main() -> int:
         summary = extract(zip_path, writer, args)
 
     summary_payload = summary.as_dict()
-    summary_json.write_text(json.dumps(summary_payload, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+    summary_json.write_text(
+        json.dumps(summary_payload, indent=2, ensure_ascii=True) + "\n",
+        encoding="utf-8",
+    )
 
     if summary.stop_places_written == 0:
         raise RuntimeError(

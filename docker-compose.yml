@@ -8,7 +8,7 @@ services:
       POSTGRES_USER: ${CANONICAL_DB_USER:-trainscanner}
       POSTGRES_PASSWORD: ${CANONICAL_DB_PASSWORD:-trainscanner}
     ports:
-      - "5432:5432"
+      - "55432:5432"
     volumes:
       - postgis_data:/var/lib/postgresql/data
     healthcheck:

@@ -2267,9 +2267,9 @@ async function postReviewClusterDecision(clusterId, body) {
           l.to_segment_id,
           GREATEST(0, COALESCE(l.min_walk_minutes, 0)),
           COALESCE(l.metadata, '{}'::jsonb) || jsonb_build_object(
-            'cluster_id', :'cluster_id',
+            'cluster_id', :'cluster_id'::text,
             'decision_id', (SELECT decision_id FROM _decision_ctx LIMIT 1),
-            'requested_by', :'requested_by'
+            'requested_by', :'requested_by'::text
           ),
           :'requested_by'
         FROM jsonb_to_recordset(:'segment_walk_links'::jsonb) AS l(
@@ -2362,7 +2362,7 @@ async function postReviewClusterDecision(clusterId, body) {
         status = CASE WHEN :'dismiss' = 'true' THEN 'dismissed' ELSE 'resolved' END,
         resolved_at = now(),
         resolved_by = :'requested_by',
-        resolution_note = COALESCE(NULLIF(:'note', ''), format('Resolved by cluster decision on %s', :'cluster_id')),
+        resolution_note = COALESCE(NULLIF(:'note', ''), 'Resolved by cluster decision on ' || :'cluster_id'),
         updated_at = now()
       WHERE q.review_item_id IN (
         SELECT link.review_item_id

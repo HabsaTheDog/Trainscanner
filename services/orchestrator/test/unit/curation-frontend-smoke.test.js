@@ -37,6 +37,10 @@ test("curation frontend includes required component structure and runtime utilit
 
   // JSX has critical UI element IDs
   assert.match(pageJsx, /id="countryFilter"/);
+  assert.match(pageJsx, /<option value="">All<\/option>/);
+  assert.match(pageJsx, /<option value="DE">DE<\/option>/);
+  assert.match(pageJsx, /<option value="AT">AT<\/option>/);
+  assert.match(pageJsx, /<option value="CH">CH<\/option>/);
   assert.match(pageJsx, /id="statusFilter"/);
   assert.match(pageJsx, /id="toolMergeBtn"/);
   assert.match(pageJsx, /id="toolSplitBtn"/);
@@ -53,6 +57,7 @@ test("curation frontend includes required component structure and runtime utilit
   assert.match(runtimeJs, /import.*graphqlQuery.*from.*"\.\/graphql"/);
   assert.match(runtimeJs, /\/api\/qa\/curated-stations/);
   assert.match(runtimeJs, /fetchClusters/);
+  assert.match(runtimeJs, /country:\s*filters\.country\s*\|\|\s*null/);
   assert.match(runtimeJs, /fetchClusterDetail/);
   assert.match(runtimeJs, /buildResolvePayload/);
   assert.match(runtimeJs, /resolveDefaultMapStyle/);

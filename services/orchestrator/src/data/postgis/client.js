@@ -32,7 +32,7 @@ function resolveConnectionConfig(options = {}) {
     mode,
     url: env.CANONICAL_DB_URL || env.DATABASE_URL || "",
     host: env.CANONICAL_DB_HOST || env.PGHOST || "localhost",
-    port: env.CANONICAL_DB_PORT || env.PGPORT || "5432",
+    port: env.CANONICAL_DB_PORT || env.PGPORT || "55432",
     user: env.CANONICAL_DB_USER || env.PGUSER || "trainscanner",
     database: env.CANONICAL_DB_NAME || env.PGDATABASE || "trainscanner",
     password: env.CANONICAL_DB_PASSWORD || env.PGPASSWORD || "trainscanner",

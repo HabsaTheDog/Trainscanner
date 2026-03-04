@@ -63,10 +63,11 @@ async function requestAiScoreBridge(clusterId, candidates) {
 const rootValue = {
   health: () => "GraphQL is running!",
 
-  clusters: async ({ country }) => {
+  clusters: async ({ country, status }) => {
     // We map the REST query over args onto the GraphQL resolver
     const mockUrl = new URL("http://localhost/api");
     if (country) mockUrl.searchParams.set("country", country);
+    if (status) mockUrl.searchParams.set("status", status);
 
     // Leverage the existing API layer from Phase 1
     const result = await getReviewClusters(mockUrl);

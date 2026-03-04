@@ -20,7 +20,7 @@ const shouldRun = hasDocker && process.env.ENABLE_POSTGIS_TESTS === "1";
 test(
   "qa cluster generation is deterministic and decisions are atomic",
   { skip: !shouldRun },
-  async () => {
+  async (t) => {
     const servicesRoot = path.resolve(__dirname, "../../..");
     const repoRoot = path.resolve(servicesRoot, "..");
 
@@ -53,6 +53,9 @@ test(
       },
     });
     await client.ensureReady();
+    t.after(async () => {
+      await client.end();
+    });
 
     const runId = crypto.randomUUID();
     const suffix = crypto.randomUUID().slice(0, 8);
@@ -67,7 +70,7 @@ test(
     const segmentB = `seg_${suffix}_b`;
     const issueKey = `duplicate_hard_id|DE|hard_${suffix}|latest`;
 
-    await client.exec(
+    await client.runScript(
       `
     BEGIN;
 
@@ -214,12 +217,12 @@ test(
       },
     );
 
-    await client.exec(`SELECT qa_rebuild_station_clusters('DE', NULL);`);
+    await client.runScript(`SELECT qa_rebuild_station_clusters('DE', NULL);`);
     const firstRows = await client.queryRows(
       `SELECT cluster_id FROM qa_station_clusters WHERE country = 'DE' AND scope_tag = 'latest' ORDER BY cluster_id`,
     );
 
-    await client.exec(`SELECT qa_rebuild_station_clusters('DE', NULL);`);
+    await client.runScript(`SELECT qa_rebuild_station_clusters('DE', NULL);`);
     const secondRows = await client.queryRows(
       `SELECT cluster_id FROM qa_station_clusters WHERE country = 'DE' AND scope_tag = 'latest' ORDER BY cluster_id`,
     );
@@ -232,8 +235,8 @@ test(
     const listUrl = new URL(
       "http://localhost/api/qa/clusters?country=DE&scope_tag=latest&limit=20",
     );
-    const clusters = await getReviewClusters(listUrl);
-    const cluster = clusters.find(
+    const clustersResponse = await getReviewClusters(listUrl);
+    const cluster = clustersResponse.items.find(
       (row) =>
         Array.isArray(row.candidates) &&
         row.candidates.some(
@@ -242,6 +245,59 @@ test(
     );
     assert.ok(cluster, "expected seeded cluster in cluster list response");
     assert.equal(Object.hasOwn(cluster, "queue_items"), false);
+
+    const atClusterId = `qacl_at_${suffix}`;
+    const chClusterId = `qacl_ch_${suffix}`;
+    await client.runScript(
+      `
+    INSERT INTO qa_station_clusters (
+      cluster_id,
+      cluster_key,
+      country,
+      scope_tag,
+      severity,
+      status,
+      candidate_count,
+      issue_count,
+      display_name,
+      created_at,
+      updated_at
+    ) VALUES
+      (:'at_cluster_id', :'at_cluster_key', 'AT', 'latest', 'medium', 'open', 1, 1, 'Vienna Review Seed', now(), now()),
+      (:'ch_cluster_id', :'ch_cluster_key', 'CH', 'latest', 'low', 'open', 1, 1, 'Zurich Review Seed', now(), now())
+    ON CONFLICT (cluster_id) DO NOTHING;
+    `,
+      {
+        at_cluster_id: atClusterId,
+        at_cluster_key: `cluster-key-at-${suffix}`,
+        ch_cluster_id: chClusterId,
+        ch_cluster_key: `cluster-key-ch-${suffix}`,
+      },
+    );
+
+    const atClusters = await getReviewClusters(
+      new URL("http://localhost/api/qa/clusters?country=AT&limit=20"),
+    );
+    assert.ok(
+      atClusters.items.some((row) => row.cluster_id === atClusterId),
+      "expected AT cluster to be returned when country=AT",
+    );
+    assert.ok(
+      atClusters.items.every((row) => row.country === "AT"),
+      "AT filter should not leak other countries",
+    );
+
+    const chClusters = await getReviewClusters(
+      new URL("http://localhost/api/qa/clusters?country=CH&limit=20"),
+    );
+    assert.ok(
+      chClusters.items.some((row) => row.cluster_id === chClusterId),
+      "expected CH cluster to be returned when country=CH",
+    );
+    assert.ok(
+      chClusters.items.every((row) => row.country === "CH"),
+      "CH filter should not leak other countries",
+    );
 
     const detail = await getReviewClusterDetail(cluster.cluster_id);
     assert.ok(Array.isArray(detail.candidates));
@@ -519,5 +575,40 @@ test(
         (row) => Number.parseInt(String(row.min_walk_minutes || 0), 10) >= 0,
       ),
     );
+
+    execFileSync(
+      "bash",
+      [path.join(repoRoot, "scripts", "data", "db-bootstrap.sh"), "--quiet"],
+      {
+        cwd: repoRoot,
+        stdio: "inherit",
+        env: {
+          ...process.env,
+          CANONICAL_DB_MODE: "docker-compose",
+          CANONICAL_DB_DOCKER_PROFILE: "dach-data",
+          CANONICAL_DB_DOCKER_SERVICE: "postgis",
+        },
+      },
+    );
+
+    const preservedRows = await client.queryOne(
+      `
+    SELECT
+      (SELECT COUNT(*)::integer
+       FROM canonical_stations
+       WHERE canonical_station_id = :'station_a') AS canonical_rows,
+      (SELECT COUNT(*)::integer
+       FROM netex_stops_staging
+       WHERE source_id = :'source_a'
+         AND source_stop_id = :'stop_a') AS staging_rows
+    `,
+      {
+        station_a: stationA,
+        source_a: sourceA,
+        stop_a: stopA,
+      },
+    );
+    assert.equal(preservedRows.canonical_rows, 1);
+    assert.equal(preservedRows.staging_rows, 1);
   },
 );

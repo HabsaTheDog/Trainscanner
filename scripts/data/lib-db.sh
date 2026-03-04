@@ -94,7 +94,7 @@ db_resolve_connection() {
 
   DB_URL="${CANONICAL_DB_URL:-${DATABASE_URL:-}}"
   DB_HOST="${CANONICAL_DB_HOST:-${PGHOST:-localhost}}"
-  DB_PORT="${CANONICAL_DB_PORT:-${PGPORT:-5432}}"
+  DB_PORT="${CANONICAL_DB_PORT:-${PGPORT:-55432}}"
   DB_USER="${CANONICAL_DB_USER:-${PGUSER:-trainscanner}}"
   DB_NAME="${CANONICAL_DB_NAME:-${PGDATABASE:-trainscanner}}"
   DB_PASSWORD="${CANONICAL_DB_PASSWORD:-${PGPASSWORD:-trainscanner}}"

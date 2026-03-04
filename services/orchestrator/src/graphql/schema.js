@@ -3,7 +3,7 @@ const { buildSchema } = require("graphql");
 const schema = buildSchema(`
   type Query {
     health: String
-    clusters(country: String): [Cluster]
+    clusters(country: String, status: String): [Cluster]
     cluster(id: ID!): ClusterDetail
     lowConfidenceQueue(limit: Int, offset: Int): LowConfidenceQueueResult!
   }

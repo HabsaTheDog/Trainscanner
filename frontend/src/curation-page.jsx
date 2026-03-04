@@ -185,7 +185,13 @@ function ClusterSidebar({
 
 // ─── Candidate Card ───────────────────────────────────────────────────────────
 
-function CandidateCard({ candidate, selected, renameByRef, onToggle }) {
+function CandidateCard({
+  candidate,
+  selected,
+  renameByRef,
+  onToggle,
+  rawCandidates,
+}) {
   const id = candidate.canonical_station_id;
   const renamed = renameByRef?.[toCandidateRef(id)] || "";
   const displayName = renamed || candidate.display_name || id;
@@ -242,10 +248,47 @@ function CandidateCard({ candidate, selected, renameByRef, onToggle }) {
         )}
       </div>
       {isMerged && (
-        <p className="curation-muted curation-tiny">
-          Members:{" "}
-          {candidate.members.map((m) => m.canonical_station_id).join(", ")}
-        </p>
+        <details
+          className="curation-muted curation-tiny"
+          style={{ marginTop: 4 }}
+        >
+          <summary style={{ cursor: "pointer" }}>
+            Members ({candidate.members.length})
+          </summary>
+          <ul style={{ margin: "4px 0 0 16px", padding: 0 }}>
+            {candidate.members.map((m) => {
+              const orig = rawCandidates?.find(
+                (c) => c.canonical_station_id === m.canonical_station_id,
+              );
+              const providers = orig?.provider_labels?.filter(Boolean) || [];
+              const sourceText =
+                providers.length > 0
+                  ? providers.join(", ")
+                  : m.canonical_station_id.split(":")[0] || "unknown";
+              const name = orig?.display_name || m.canonical_station_id;
+
+              return (
+                <li key={m.canonical_station_id} style={{ marginBottom: 4 }}>
+                  <strong>{name}</strong>
+                  <span
+                    className="curation-muted curation-tiny"
+                    style={{ marginLeft: 4 }}
+                  >
+                    ({m.canonical_station_id})
+                  </span>
+                  <span className="curation-tag" style={{ marginLeft: 6 }}>
+                    feed: {sourceText}
+                  </span>
+                  {m.member_role && m.member_role !== "member" ? (
+                    <span className="curation-tag" style={{ marginLeft: 6 }}>
+                      role: {m.member_role}
+                    </span>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        </details>
       )}
       {aliases.length > 0 && (
         <p className="curation-muted curation-tiny">
@@ -388,7 +431,7 @@ function CurationTools({
           data-tool-panel="merge"
         >
           <label className="curation-tiny" htmlFor="editMergeRenameInput">
-            Merged Name
+            Merged Name <span style={{ color: "red" }}>*</span>
           </label>
           <input
             id="editMergeRenameInput"
@@ -775,6 +818,44 @@ export function CurationPage() {
     return [...curatedCandidates, ...unabsorbed];
   }, [clusterDetail?.candidates, combinedCuratedItems]);
 
+  // Auto-fill Merged Name with the first selection
+  useEffect(() => {
+    if (activeTool === "merge") {
+      if (selectedIds.size > 0) {
+        setDraftState((prev) => {
+          if (!prev.renameByRef.__merge_name) {
+            const firstId = Array.from(selectedIds)[0];
+            const firstSelected = candidates.find(
+              (c) => c.canonical_station_id === firstId,
+            );
+            if (firstSelected) {
+              return {
+                ...prev,
+                renameByRef: {
+                  ...prev.renameByRef,
+                  __merge_name:
+                    firstSelected.display_name ||
+                    firstSelected.canonical_station_id,
+                },
+              };
+            }
+          }
+          return prev;
+        });
+      } else {
+        setDraftState((prev) => {
+          if (prev.renameByRef.__merge_name) {
+            return {
+              ...prev,
+              renameByRef: { ...prev.renameByRef, __merge_name: "" },
+            };
+          }
+          return prev;
+        });
+      }
+    }
+  }, [selectedIds, activeTool, candidates]);
+
   const handleSelectAll = useCallback(() => {
     const all = candidates.map((c) => c.canonical_station_id);
     setSelectedIds(new Set(all));
@@ -788,6 +869,14 @@ export function CurationPage() {
     if (!clusterDetail) {
       showNotice("Select a cluster first.", "error");
       return;
+    }
+
+    if (activeTool === "merge") {
+      const mergedName = draftState.renameByRef.__merge_name?.trim();
+      if (!mergedName) {
+        showNotice("Merged Name is a mandatory field.", "error");
+        return;
+      }
     }
     try {
       const payload = buildResolvePayload({
@@ -967,42 +1056,6 @@ export function CurationPage() {
               : `Selected: ${selectedIds.size} candidate(s).`}
           </p>
 
-          {/* Curated projection items (already-applied decisions) */}
-          {combinedCuratedItems.length > 0 && (
-            <div style={{ padding: "0 12px", marginBottom: 8 }}>
-              <p className="curation-muted curation-tiny">
-                {combinedCuratedItems.length} merged/grouped candidate(s) from
-                applied decisions.
-              </p>
-              {combinedCuratedItems.map((item) => (
-                <details
-                  key={item.curated_station_id}
-                  className="curation-curated-card"
-                  open
-                >
-                  <summary>
-                    <strong>
-                      {item.display_name || item.curated_station_id}
-                    </strong>
-                    <span className="curation-tag curation-tag--merged">
-                      {item.derived_operation || "derived"}
-                    </span>
-                  </summary>
-                  {Array.isArray(item.members) && item.members.length > 0 && (
-                    <ul className="curation-curated-members">
-                      {item.members.map((m) => (
-                        <li key={m.canonical_station_id}>
-                          {m.canonical_station_id}{" "}
-                          <span className="curation-tag">{m.member_role}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </details>
-              ))}
-            </div>
-          )}
-
           {/* Standalone candidates */}
           <div className="curation-candidates-scroll">
             {candidates.length === 0 && (
@@ -1017,6 +1070,7 @@ export function CurationPage() {
                 selected={selectedIds.has(candidate.canonical_station_id)}
                 renameByRef={draftState.renameByRef}
                 onToggle={handleToggleCandidate}
+                rawCandidates={clusterDetail?.candidates || []}
               />
             ))}
           </div>

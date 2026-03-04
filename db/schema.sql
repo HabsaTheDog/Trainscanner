@@ -2131,11 +2131,35 @@ COMMIT;
 BEGIN;
 
 DO $$
+DECLARE
+  v_canonical regclass := to_regclass('canonical_stations');
+  v_staging regclass := to_regclass('netex_stops_staging');
+  v_canonical_partstrat text;
+  v_staging_partstrat text;
 BEGIN
-  IF to_regclass('canonical_stations') IS NOT NULL AND to_regclass('canonical_stations_country_partitioned_legacy') IS NULL THEN
+  IF v_canonical IS NOT NULL THEN
+    SELECT p.partstrat::text
+    INTO v_canonical_partstrat
+    FROM pg_partitioned_table p
+    WHERE p.partrelid = v_canonical;
+  END IF;
+
+  IF v_staging IS NOT NULL THEN
+    SELECT p.partstrat::text
+    INTO v_staging_partstrat
+    FROM pg_partitioned_table p
+    WHERE p.partrelid = v_staging;
+  END IF;
+
+  IF v_canonical IS NOT NULL
+     AND to_regclass('canonical_stations_country_partitioned_legacy') IS NULL
+     AND COALESCE(v_canonical_partstrat, '') <> 'h' THEN
     ALTER TABLE canonical_stations RENAME TO canonical_stations_country_partitioned_legacy;
   END IF;
-  IF to_regclass('netex_stops_staging') IS NOT NULL AND to_regclass('netex_stops_staging_country_partitioned_legacy') IS NULL THEN
+
+  IF v_staging IS NOT NULL
+     AND to_regclass('netex_stops_staging_country_partitioned_legacy') IS NULL
+     AND COALESCE(v_staging_partstrat, '') <> 'h' THEN
     ALTER TABLE netex_stops_staging RENAME TO netex_stops_staging_country_partitioned_legacy;
   END IF;
 END $$;
@@ -2169,14 +2193,16 @@ $$;
 DO $$
 DECLARE
   r record;
+  v_canonical_legacy regclass := to_regclass('canonical_stations_country_partitioned_legacy');
+  v_staging_legacy regclass := to_regclass('netex_stops_staging_country_partitioned_legacy');
 BEGIN
   FOR r IN
     SELECT conrelid::regclass AS table_name, conname
     FROM pg_constraint
     WHERE contype = 'f'
-      AND confrelid IN (
-        'canonical_stations_country_partitioned_legacy'::regclass,
-        'netex_stops_staging_country_partitioned_legacy'::regclass
+      AND (
+        (v_canonical_legacy IS NOT NULL AND confrelid = v_canonical_legacy)
+        OR (v_staging_legacy IS NOT NULL AND confrelid = v_staging_legacy)
       )
   LOOP
     EXECUTE format(
@@ -2258,21 +2284,22 @@ BEGIN
       latitude,
       longitude,
       geom,
-      compute_geo_grid_id(country::text, latitude, longitude, geom) AS grid_id,
+      compute_geo_grid_id(country::text, latitude, longitude, geom),
       match_method,
       member_count,
       first_seen_snapshot_date,
       last_seen_snapshot_date,
       last_built_run_id,
-      is_deleted,
+      COALESCE(is_deleted, false),
       deleted_at,
       created_at,
       updated_at
-    FROM canonical_stations_country_partitioned_legacy;
+    FROM canonical_stations_country_partitioned_legacy
+    ON CONFLICT (grid_id, canonical_station_id) DO NOTHING;
   END IF;
 END $$;
 
-CREATE SEQUENCE netex_stops_staging_grid_seq AS bigint;
+CREATE SEQUENCE IF NOT EXISTS netex_stops_staging_grid_seq AS bigint;
 
 CREATE TABLE IF NOT EXISTS netex_stops_staging (
   staging_id bigint NOT NULL DEFAULT nextval('netex_stops_staging_grid_seq'),
@@ -2372,15 +2399,16 @@ BEGIN
       stop_name,
       latitude,
       longitude,
-      compute_geo_grid_id(country::text, latitude, longitude, NULL::geometry) AS grid_id,
+      compute_geo_grid_id(country::text, latitude, longitude, geom),
       public_code,
       private_code,
       hard_id,
       source_file,
-      raw_payload,
+      COALESCE(raw_payload, '{}'::jsonb),
       inserted_at,
       updated_at
-    FROM netex_stops_staging_country_partitioned_legacy;
+    FROM netex_stops_staging_country_partitioned_legacy
+    ON CONFLICT (grid_id, source_id, snapshot_date, source_stop_id) DO NOTHING;
   END IF;
 END $$;
 

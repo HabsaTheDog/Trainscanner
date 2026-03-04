@@ -108,6 +108,88 @@ function parseGeoThreshold(value) {
   return parsedInt;
 }
 
+function formatProgressBar(current, total) {
+  const safeCurrent = Math.max(0, Number.parseInt(String(current || 0), 10));
+  const safeTotal = Math.max(1, Number.parseInt(String(total || 1), 10));
+  const width = 10;
+  const filled = Math.max(
+    0,
+    Math.min(width, Math.round((safeCurrent / safeTotal) * width)),
+  );
+  return `[${"#".repeat(filled)}${"-".repeat(width - filled)}]`;
+}
+
+function createPhaseProgressReporter(phaseNumber, totalPhases, phaseName) {
+  const phaseIndex = Math.max(
+    1,
+    Math.min(totalPhases, Number.parseInt(String(phaseNumber || 1), 10)),
+  );
+  const prefix = `[build-review-queue] ${formatProgressBar(phaseIndex, totalPhases)} ${phaseIndex}/${totalPhases}`;
+  const startedAt = Date.now();
+  let heartbeat = null;
+
+  process.stdout.write(`${prefix} ${phaseName} started\n`);
+
+  heartbeat = setInterval(() => {
+    const elapsedSeconds = Math.floor((Date.now() - startedAt) / 1000);
+    process.stdout.write(
+      `${prefix} ${phaseName} running elapsed=${elapsedSeconds}s\n`,
+    );
+  }, 10000);
+
+  if (typeof heartbeat.unref === "function") {
+    heartbeat.unref();
+  }
+
+  return {
+    complete(details = "") {
+      if (heartbeat) {
+        clearInterval(heartbeat);
+        heartbeat = null;
+      }
+      const elapsedSeconds = Math.floor((Date.now() - startedAt) / 1000);
+      const suffix = details ? ` ${details}` : "";
+      process.stdout.write(
+        `${prefix} ${phaseName} completed elapsed=${elapsedSeconds}s${suffix}\n`,
+      );
+    },
+    fail() {
+      if (heartbeat) {
+        clearInterval(heartbeat);
+        heartbeat = null;
+      }
+      const elapsedSeconds = Math.floor((Date.now() - startedAt) / 1000);
+      process.stdout.write(
+        `${prefix} ${phaseName} failed elapsed=${elapsedSeconds}s\n`,
+      );
+    },
+  };
+}
+
+async function runPhaseWithProgress({
+  phaseIndex,
+  totalPhases,
+  phaseName,
+  run,
+  detailFormatter,
+}) {
+  const reporter = createPhaseProgressReporter(
+    phaseIndex,
+    totalPhases,
+    phaseName,
+  );
+  try {
+    const result = await run();
+    const details =
+      typeof detailFormatter === "function" ? detailFormatter(result) : "";
+    reporter.complete(details);
+    return result;
+  } catch (err) {
+    reporter.fail();
+    throw err;
+  }
+}
+
 function parseBuildCanonicalArgs(args = []) {
   const parsed = {
     helpRequested: false,
@@ -401,11 +483,39 @@ function createCanonicalService(deps = {}) {
           const client = createClient({ rootDir });
           await client.ensureReady();
           const queueRepo = createQueueRepo(client);
-          const summary = await queueRepo.buildReviewQueue(parsed.scope);
-          process.stdout.write(`${JSON.stringify(summary)}\n`);
+          const totalPhases = 2;
+          const summary = await runPhaseWithProgress({
+            phaseIndex: 1,
+            totalPhases,
+            phaseName: "building review queue items",
+            run: async () => queueRepo.buildReviewQueueItems(parsed.scope),
+            detailFormatter: (result) => {
+              if (!result || typeof result !== "object") {
+                return "";
+              }
+              return `detected=${result.detectedIssues ?? 0} open=${result.openItems ?? 0}`;
+            },
+          });
+          const clusterSummary = await runPhaseWithProgress({
+            phaseIndex: 2,
+            totalPhases,
+            phaseName: "materializing review clusters",
+            run: async () => queueRepo.rebuildReviewClusters(parsed.scope),
+            detailFormatter: (result) => {
+              if (!result || typeof result !== "object") {
+                return "";
+              }
+              return `clusters=${result.clusters ?? 0} candidates=${result.candidates ?? 0}`;
+            },
+          });
+          const combinedSummary = {
+            ...summary,
+            clusters: clusterSummary,
+          };
+          process.stdout.write(`${JSON.stringify(combinedSummary)}\n`);
           return {
             ok: true,
-            summary,
+            summary: combinedSummary,
           };
         },
       });
