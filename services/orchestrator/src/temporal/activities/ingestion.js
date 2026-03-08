@@ -1,22 +1,44 @@
 const { execFile } = require("node:child_process");
+const fs = require("node:fs");
 const { promisify } = require("node:util");
 const path = require("node:path");
 
 const execFileAsync = promisify(execFile);
 
-function createIngestionActivities(_dbClient, config) {
-  // Use the root directory where the scripts live
-  const scriptsDir = path.resolve(
-    config.rootDir || process.cwd(),
-    "..",
-    "scripts",
-    "data",
+function resolveRepoRoot(config = {}) {
+  const base = path.resolve(config.rootDir || process.cwd());
+  const candidates = [
+    base,
+    path.resolve(base, ".."),
+    path.resolve(__dirname, "..", "..", "..", "..", ".."),
+  ];
+
+  for (const candidate of candidates) {
+    if (
+      fs.existsSync(path.join(candidate, "scripts", "data", "db-bootstrap.sh"))
+    ) {
+      return candidate;
+    }
+  }
+
+  throw new Error(
+    "Could not resolve repository root for ingestion scripts (scripts/data/db-bootstrap.sh)",
   );
+}
+
+async function runShellScript(execRunner, scriptPath, args = [], options = {}) {
+  return execRunner("bash", [scriptPath, ...(args || [])], options);
+}
+
+function createIngestionActivities(_dbClient, config = {}) {
+  const execRunner = config.execFileAsync || execFileAsync;
+  const repoRoot = resolveRepoRoot(config);
+  const scriptsDir = path.join(repoRoot, "scripts", "data");
 
   return {
     async runDbBootstrap() {
-      // Re-use the existing bash script for schema bootstrap
-      const { stdout, stderr } = await execFileAsync(
+      const { stdout, stderr } = await runShellScript(
+        execRunner,
         path.join(scriptsDir, "db-bootstrap.sh"),
         [],
         {
@@ -29,7 +51,8 @@ function createIngestionActivities(_dbClient, config) {
 
     async runFetchSources(args) {
       const safeArgs = args || [];
-      const { stdout, stderr } = await execFileAsync(
+      const { stdout, stderr } = await runShellScript(
+        execRunner,
         path.join(scriptsDir, "fetch-sources.sh"),
         safeArgs,
         {
@@ -42,7 +65,8 @@ function createIngestionActivities(_dbClient, config) {
 
     async buildGlobalModel(args) {
       const safeArgs = args || [];
-      const globalStationsResult = await execFileAsync(
+      const globalStationsResult = await runShellScript(
+        execRunner,
         path.join(scriptsDir, "build-global-stations.sh"),
         safeArgs,
         {
@@ -50,7 +74,8 @@ function createIngestionActivities(_dbClient, config) {
           env: process.env,
         },
       );
-      const mergeQueueResult = await execFileAsync(
+      const mergeQueueResult = await runShellScript(
+        execRunner,
         path.join(scriptsDir, "build-global-merge-queue.sh"),
         safeArgs,
         {
@@ -64,11 +89,12 @@ function createIngestionActivities(_dbClient, config) {
       };
     },
     async checkMotisReady() {
-      const { stdout, stderr } = await execFileAsync(
-        path.resolve(scriptsDir, "..", "check-motis-data.sh"),
+      const { stdout, stderr } = await runShellScript(
+        execRunner,
+        path.join(repoRoot, "scripts", "check-motis-data.sh"),
         [],
         {
-          cwd: path.resolve(scriptsDir, ".."),
+          cwd: path.join(repoRoot, "scripts"),
           env: process.env,
         },
       );
