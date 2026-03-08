@@ -25,8 +25,8 @@ Options:
   --country <ISO2>      Limit ingest to one country
   --source-id <id>      Limit ingest to one source id
   --as-of YYYY-MM-DD    Pick latest snapshot <= date
-  --skip-config-validate Skip `validate-config.sh --only sources` preflight
-  --skip-db-bootstrap   Skip `db-bootstrap.sh` preflight
+  --skip-config-validate Skip validate-config.sh --only sources preflight
+  --skip-db-bootstrap   Skip db-bootstrap.sh preflight
   -h, --help            Show this help
 USAGE
   return 0
