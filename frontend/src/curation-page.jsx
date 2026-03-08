@@ -13,14 +13,98 @@ import {
   parseRef,
   requestAiScore,
   resolveDefaultMapStyle,
+  resolveSatelliteMapStyle,
   submitDecision,
   toCandidateRef,
   toGroupRef,
 } from "./curation-page-runtime";
 
+function formatToneLabel(value) {
+  return String(value || "")
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function formatCountryLabel(countryTags, fallback) {
+  const tags = Array.isArray(countryTags)
+    ? countryTags.filter(Boolean).slice(0, 3)
+    : [];
+  if (tags.length > 0) return tags.join(" / ");
+  return fallback || "EU";
+}
+
 // ─── Map Component ────────────────────────────────────────────────────────────
 
-function CurationMap({ candidates, selectedIds, onToggleCandidate }) {
+const OVERLAP_COORDINATE_PRECISION = 7;
+
+function buildCoordinateKey(lat, lon) {
+  return `${Number(lat).toFixed(OVERLAP_COORDINATE_PRECISION)}:${Number(lon).toFixed(OVERLAP_COORDINATE_PRECISION)}`;
+}
+
+function buildMarkerOverlapLayout(candidates) {
+  const overlapGroups = new Map();
+
+  for (const candidate of candidates) {
+    const key = buildCoordinateKey(candidate.lat, candidate.lon);
+    const existing = overlapGroups.get(key);
+    if (existing) existing.push(candidate);
+    else overlapGroups.set(key, [candidate]);
+  }
+
+  const layout = new Map();
+  for (const group of overlapGroups.values()) {
+    const stackSize = group.length;
+    for (const [index, candidate] of group.entries()) {
+      const centeredIndex = index - (stackSize - 1) / 2;
+      layout.set(candidate.global_station_id, {
+        stackIndex: index,
+        stackSize,
+        offsetX: Math.round(centeredIndex * 10),
+        offsetY: Math.round(centeredIndex * -8),
+      });
+    }
+  }
+
+  return layout;
+}
+
+function createMarkerElement(candidate, isSelected, overlapMeta) {
+  const { stackIndex = 0, stackSize = 1 } = overlapMeta || {};
+  const shell = document.createElement("button");
+  shell.type = "button";
+  shell.className = `curation-marker-shell ${stackSize > 1 ? "curation-marker-shell--stacked" : ""} ${isSelected ? "curation-marker-shell--selected" : ""}`;
+  shell.setAttribute(
+    "aria-label",
+    `${candidate.display_name || candidate.global_station_id} (${stackSize} station${stackSize === 1 ? "" : "s"} at these coordinates)`,
+  );
+  shell.title = `${candidate.display_name || candidate.global_station_id} · ${stackSize} station${stackSize === 1 ? "" : "s"} at these coordinates`;
+  shell.style.zIndex = String(isSelected ? 1000 + stackIndex : 10 + stackIndex);
+
+  if (isSelected) {
+    const rings = document.createElement("span");
+    rings.className = "curation-marker__rings";
+    for (let ringIndex = 0; ringIndex < stackSize; ringIndex += 1) {
+      const ring = document.createElement("span");
+      ring.className = "curation-marker__ring";
+      ring.style.setProperty("--ring-index", String(ringIndex));
+      rings.appendChild(ring);
+    }
+    shell.appendChild(rings);
+  }
+
+  const dot = document.createElement("span");
+  dot.className = `curation-marker ${isSelected ? "curation-marker--selected" : ""}`;
+  shell.appendChild(dot);
+
+  return shell;
+}
+
+function CurationMap({
+  candidates,
+  selectedIds,
+  onToggleCandidate,
+  mapMode = "default",
+}) {
   const mapRef = useRef(null);
   const mapContainerRef = useRef(null);
   const markersRef = useRef([]);
@@ -44,6 +128,16 @@ function CurationMap({ candidates, selectedIds, onToggleCandidate }) {
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
+    const nextStyle =
+      mapMode === "satellite"
+        ? resolveSatelliteMapStyle()
+        : resolveDefaultMapStyle();
+    map.setStyle(nextStyle);
+  }, [mapMode]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
 
     // Clear old markers
     for (const m of markersRef.current) m.remove();
@@ -53,19 +147,23 @@ function CurationMap({ candidates, selectedIds, onToggleCandidate }) {
       (c) => Number.isFinite(c.lat) && Number.isFinite(c.lon),
     );
     if (valid.length === 0) return;
+    const overlapLayout = buildMarkerOverlapLayout(valid);
 
     const bounds = new maplibregl.LngLatBounds();
     for (const c of valid) {
-      const el = document.createElement("div");
       const isSelected = selectedIds.has(c.global_station_id);
-      el.className = `curation-marker ${isSelected ? "curation-marker--selected" : ""}`;
-      el.title = c.display_name || c.global_station_id;
+      const overlapMeta = overlapLayout.get(c.global_station_id);
+      const el = createMarkerElement(c, isSelected, overlapMeta);
       el.addEventListener("click", (e) => {
         e.stopPropagation();
         onToggleCandidate(c.global_station_id);
       });
 
-      const marker = new maplibregl.Marker({ element: el, anchor: "center" })
+      const marker = new maplibregl.Marker({
+        element: el,
+        anchor: "center",
+        offset: [overlapMeta?.offsetX || 0, overlapMeta?.offsetY || 0],
+      })
         .setLngLat([c.lon, c.lat])
         .addTo(map);
       markersRef.current.push(marker);
@@ -92,7 +190,10 @@ function ClusterSidebar({
   return (
     <aside className="curation-sidebar">
       <div className="curation-sidebar__header">
-        <h2 className="curation-sidebar__title">Station Curation</h2>
+        <div>
+          <p className="curation-sidebar__eyebrow">QA Workspace</p>
+          <h2 className="curation-sidebar__title">Station Curation</h2>
+        </div>
         <a href="/" className="curation-sidebar__home-link">
           Home
         </a>
@@ -165,16 +266,41 @@ function ClusterSidebar({
             className={`curation-cluster-item ${activeClusterId === cluster.cluster_id ? "curation-cluster-item--active" : ""}`}
             onClick={() => onSelectCluster(cluster.cluster_id)}
           >
-            <span className="curation-cluster-item__name">
-              {cluster.display_name || cluster.cluster_id}
-            </span>
-            <span className="curation-cluster-item__detail">
-              {cluster.country} · {cluster.severity} · {cluster.status}
-            </span>
-            <span className="curation-cluster-item__detail">
-              {cluster.candidate_count} candidates · {cluster.issue_count}{" "}
-              issues · {cluster.scope_tag}
-            </span>
+            <div className="curation-cluster-item__top">
+              <span className="curation-cluster-item__name">
+                {cluster.display_name || cluster.cluster_id}
+              </span>
+              <span
+                className={`curation-badge curation-badge--severity-${String(cluster.severity || "").toLowerCase() || "default"}`}
+              >
+                {formatToneLabel(cluster.severity || "Unknown")}
+              </span>
+            </div>
+
+            <div className="curation-cluster-item__badges">
+              <span
+                className={`curation-badge curation-badge--status-${String(cluster.status || "").toLowerCase() || "default"}`}
+              >
+                {formatToneLabel(cluster.status || "Unknown")}
+              </span>
+              <span className="curation-badge curation-badge--neutral">
+                {formatCountryLabel(cluster.country_tags, cluster.country)}
+              </span>
+              <span className="curation-badge curation-badge--neutral">
+                {formatToneLabel(cluster.scope_tag || "General")}
+              </span>
+            </div>
+
+            <div className="curation-cluster-item__stats">
+              <span className="curation-cluster-stat">
+                <strong>{cluster.candidate_count}</strong>
+                <span>candidates</span>
+              </span>
+              <span className="curation-cluster-stat">
+                <strong>{cluster.issue_count}</strong>
+                <span>issues</span>
+              </span>
+            </div>
           </button>
         ))}
       </div>
@@ -205,6 +331,9 @@ function CandidateCard({
     candidate.is_curated &&
     Array.isArray(candidate.members) &&
     candidate.members.length >= 2;
+  const handleToggle = () => onToggle(id);
+  const country = candidate.metadata?.country || candidate.country || "";
+  const providerCount = providers.length;
 
   return (
     <div
@@ -216,11 +345,11 @@ function CandidateCard({
             type="checkbox"
             checked={selected}
             data-station-id={id}
-            onChange={() => onToggle(id)}
+            onChange={handleToggle}
           />
-          <span>
+          <span className="curation-candidate__title-wrap">
             <strong>{displayName}</strong>
-            <span className="curation-muted curation-tiny"> {id}</span>
+            <span className="curation-candidate__id">{id}</span>
           </span>
         </label>
         <span className="curation-candidate__rank">
@@ -232,6 +361,21 @@ function CandidateCard({
             `#${candidate.candidate_rank}`
           )}
         </span>
+      </div>
+      <div className="curation-candidate__meta">
+        {country && (
+          <span className="curation-candidate__meta-item">
+            {formatCountryLabel([country])}
+          </span>
+        )}
+        <span className="curation-candidate__meta-item">
+          {providerCount} {providerCount === 1 ? "feed" : "feeds"}
+        </span>
+        {lines.length > 0 && (
+          <span className="curation-candidate__meta-item">
+            {lines.length} line contexts
+          </span>
+        )}
       </div>
       <div className="curation-candidate__tags">
         {providers.length > 0 && (
@@ -290,7 +434,7 @@ function CandidateCard({
         </details>
       )}
       {aliases.length > 0 && (
-        <p className="curation-muted curation-tiny">
+        <p className="curation-muted curation-tiny curation-candidate__aliases">
           Aliases: {aliases.join(", ")}
         </p>
       )}
@@ -663,6 +807,7 @@ export function CurationPage() {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [draftState, setDraftState] = useState(createEmptyDraftState());
   const [activeTool, setActiveTool] = useState("merge");
+  const [mapMode, setMapMode] = useState("default");
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState(null);
   const [aiResult, setAiResult] = useState(null);
@@ -1000,7 +1145,7 @@ export function CurationPage() {
               id="curationMapStatus"
             >
               {candidates.length > 0
-                ? `${candidates.length} candidates plotted.`
+                ? `${candidates.length} candidates plotted · ${mapMode === "satellite" ? "satellite" : "map"} view.`
                 : "Select a cluster."}
             </span>
             <div className="curation-map-mode-toggle">
@@ -1008,6 +1153,9 @@ export function CurationPage() {
                 id="mapModeDefaultBtn"
                 type="button"
                 className="curation-btn curation-btn--secondary curation-tiny"
+                aria-pressed={mapMode === "default"}
+                disabled={mapMode === "default"}
+                onClick={() => setMapMode("default")}
               >
                 Map
               </button>
@@ -1015,6 +1163,9 @@ export function CurationPage() {
                 id="mapModeSatelliteBtn"
                 type="button"
                 className="curation-btn curation-btn--secondary curation-tiny"
+                aria-pressed={mapMode === "satellite"}
+                disabled={mapMode === "satellite"}
+                onClick={() => setMapMode("satellite")}
               >
                 Sat
               </button>
@@ -1024,6 +1175,7 @@ export function CurationPage() {
             candidates={candidates}
             selectedIds={selectedIds}
             onToggleCandidate={handleToggleCandidate}
+            mapMode={mapMode}
           />
         </div>
 

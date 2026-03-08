@@ -58,6 +58,12 @@ test("curation frontend includes required component structure and runtime utilit
   assert.doesNotMatch(pageJsx, /TOTAL/);
   assert.doesNotMatch(pageJsx, /UNRESOLVED/);
   assert.doesNotMatch(pageJsx, /CLOSED/);
+  assert.match(pageJsx, /type="checkbox"/);
+  assert.match(pageJsx, /checked=\{selected\}/);
+  assert.match(pageJsx, /data-station-id=\{id\}/);
+  assert.match(pageJsx, /onChange=\{handleToggle\}/);
+  assert.match(pageJsx, /buildMarkerOverlapLayout/);
+  assert.match(pageJsx, /curation-marker__ring/);
 
   // Runtime uses shared graphql.js and global merge GraphQL API model
   assert.match(runtimeJs, /import.*graphqlQuery.*from.*"\.\/graphql\.js"/);
@@ -73,12 +79,20 @@ test("curation frontend includes required component structure and runtime utilit
   assert.match(runtimeJs, /fetchClusterDetail/);
   assert.match(runtimeJs, /buildResolvePayload/);
   assert.match(runtimeJs, /resolveDefaultMapStyle/);
+  assert.match(runtimeJs, /resolveSatelliteMapStyle/);
   assert.match(runtimeJs, /rename_targets/);
 
   // JSX uses React hooks (not imperative DOM manipulation)
   assert.match(pageJsx, /useState/);
   assert.match(pageJsx, /useEffect/);
   assert.match(pageJsx, /useCallback/);
+  assert.match(
+    pageJsx,
+    /const \[mapMode, setMapMode\] = useState\("default"\)/,
+  );
+  assert.match(pageJsx, /map\.setStyle\(nextStyle\)/);
+  assert.match(pageJsx, /onClick=\{\(\) => setMapMode\("default"\)\}/);
+  assert.match(pageJsx, /onClick=\{\(\) => setMapMode\("satellite"\)\}/);
 
   // Old patterns should NOT exist
   assert.doesNotMatch(runtimeJs, /document\.getElementById/);
