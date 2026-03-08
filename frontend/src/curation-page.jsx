@@ -12,6 +12,7 @@ import {
   parseRef,
   requestAiScore,
   resolveDefaultMapStyle,
+  resolveSatelliteMapStyle,
   submitDecision,
   toCandidateRef,
   toGroupRef,
@@ -19,7 +20,12 @@ import {
 
 // ─── Map Component ────────────────────────────────────────────────────────────
 
-function CurationMap({ candidates, selectedIds, onToggleCandidate }) {
+function CurationMap({
+  candidates,
+  selectedIds,
+  onToggleCandidate,
+  mapMode = "default",
+}) {
   const mapRef = useRef(null);
   const mapContainerRef = useRef(null);
   const markersRef = useRef([]);
@@ -39,6 +45,16 @@ function CurationMap({ candidates, selectedIds, onToggleCandidate }) {
       mapRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const nextStyle =
+      mapMode === "satellite"
+        ? resolveSatelliteMapStyle()
+        : resolveDefaultMapStyle();
+    map.setStyle(nextStyle);
+  }, [mapMode]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -212,6 +228,7 @@ function CandidateCard({
     candidate.is_curated &&
     Array.isArray(candidate.members) &&
     candidate.members.length >= 2;
+  const handleToggle = () => onToggle(id);
 
   return (
     <div
@@ -223,7 +240,7 @@ function CandidateCard({
             type="checkbox"
             checked={selected}
             data-station-id={id}
-            onChange={() => onToggle(id)}
+            onChange={handleToggle}
           />
           <span>
             <strong>{displayName}</strong>
@@ -669,6 +686,7 @@ export function CurationPage() {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [draftState, setDraftState] = useState(createEmptyDraftState());
   const [activeTool, setActiveTool] = useState("merge");
+  const [mapMode, setMapMode] = useState("default");
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState(null);
   const [aiResult, setAiResult] = useState(null);
@@ -1004,7 +1022,7 @@ export function CurationPage() {
               id="curationMapStatus"
             >
               {candidates.length > 0
-                ? `${candidates.length} candidates plotted.`
+                ? `${candidates.length} candidates plotted · ${mapMode === "satellite" ? "satellite" : "map"} view.`
                 : "Select a cluster."}
             </span>
             <div className="curation-map-mode-toggle">
@@ -1012,6 +1030,9 @@ export function CurationPage() {
                 id="mapModeDefaultBtn"
                 type="button"
                 className="curation-btn curation-btn--secondary curation-tiny"
+                aria-pressed={mapMode === "default"}
+                disabled={mapMode === "default"}
+                onClick={() => setMapMode("default")}
               >
                 Map
               </button>
@@ -1019,6 +1040,9 @@ export function CurationPage() {
                 id="mapModeSatelliteBtn"
                 type="button"
                 className="curation-btn curation-btn--secondary curation-tiny"
+                aria-pressed={mapMode === "satellite"}
+                disabled={mapMode === "satellite"}
+                onClick={() => setMapMode("satellite")}
               >
                 Sat
               </button>
@@ -1028,6 +1052,7 @@ export function CurationPage() {
             candidates={candidates}
             selectedIds={selectedIds}
             onToggleCandidate={handleToggleCandidate}
+            mapMode={mapMode}
           />
         </div>
 
