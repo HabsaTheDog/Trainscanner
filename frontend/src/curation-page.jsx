@@ -80,6 +80,8 @@ function CurationMap({ candidates, selectedIds, onToggleCandidate }) {
 
 function ClusterSidebar({
   clusters,
+  totalCount,
+  listLimit,
   activeClusterId,
   filters,
   onFilterChange,
@@ -87,12 +89,10 @@ function ClusterSidebar({
   onRefresh,
   loading,
 }) {
-  const statusCounts = { open: 0, in_review: 0, resolved: 0, dismissed: 0 };
-  for (const c of clusters) {
-    const key = String(c.status || "").toLowerCase();
-    if (key in statusCounts) statusCounts[key] += 1;
-  }
-  const unresolvedCount = statusCounts.open + statusCounts.in_review;
+  const showingSubset =
+    totalCount > clusters.length &&
+    Number.isFinite(listLimit) &&
+    clusters.length >= listLimit;
 
   return (
     <aside className="curation-sidebar">
@@ -158,7 +158,9 @@ function ClusterSidebar({
       <p className="curation-sidebar__meta">
         {loading
           ? "Loading..."
-          : `${clusters.length} clusters · ${unresolvedCount} unresolved`}
+          : showingSubset
+            ? `${totalCount} matching clusters · showing ${clusters.length}`
+            : `${totalCount} matching clusters`}
       </p>
 
       <div className="curation-sidebar__list">
@@ -660,6 +662,8 @@ function CurationTools({
 
 export function CurationPage() {
   const [clusters, setClusters] = useState([]);
+  const [clusterTotalCount, setClusterTotalCount] = useState(0);
+  const [clusterListLimit, setClusterListLimit] = useState(50);
   const [activeClusterId, setActiveClusterId] = useState(null);
   const [clusterDetail, setClusterDetail] = useState(null);
   const [curatedItems, setCuratedItems] = useState([]);
@@ -687,7 +691,9 @@ export function CurationPage() {
     setLoading(true);
     try {
       const data = await apiFetchClusters(filters);
-      setClusters(data);
+      setClusters(data.items || []);
+      setClusterTotalCount(data.totalCount || 0);
+      setClusterListLimit(data.limit || 50);
     } catch (err) {
       showNotice(`Failed to load clusters: ${err.message}`, "error", true);
     } finally {
@@ -988,6 +994,8 @@ export function CurationPage() {
     <div className="curation-container">
       <ClusterSidebar
         clusters={clusters}
+        totalCount={clusterTotalCount}
+        listLimit={clusterListLimit}
         activeClusterId={activeClusterId}
         filters={filters}
         onFilterChange={setFilters}

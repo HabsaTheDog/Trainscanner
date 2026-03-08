@@ -5,14 +5,18 @@ import { graphqlQuery } from "./graphql";
 const CLUSTERS_QUERY = `
   query GetGlobalClusters($country: String, $status: String) {
     globalClusters(country: $country, status: $status) {
-      cluster_id
-      country_tags
-      status
-      display_name
-      severity
-      candidate_count
-      issue_count
-      scope_tag
+      total_count
+      limit
+      items {
+        cluster_id
+        country_tags
+        status
+        display_name
+        severity
+        candidate_count
+        issue_count
+        scope_tag
+      }
     }
   }
 `;
@@ -91,14 +95,19 @@ export async function fetchClusters(filters = {}) {
     country: filters.country || null,
     status: filters.status || null,
   });
-  const rows = Array.isArray(data.globalClusters) ? data.globalClusters : [];
-  return rows.map((row) => ({
-    ...row,
-    country:
-      Array.isArray(row.country_tags) && row.country_tags.length > 0
-        ? row.country_tags[0]
-        : "EU",
-  }));
+  const payload = data.globalClusters || {};
+  const rows = Array.isArray(payload.items) ? payload.items : [];
+  return {
+    items: rows.map((row) => ({
+      ...row,
+      country:
+        Array.isArray(row.country_tags) && row.country_tags.length > 0
+          ? row.country_tags[0]
+          : "EU",
+    })),
+    totalCount: Number.isFinite(payload.total_count) ? payload.total_count : 0,
+    limit: Number.isFinite(payload.limit) ? payload.limit : rows.length,
+  };
 }
 
 export async function fetchClusterDetail(clusterId) {

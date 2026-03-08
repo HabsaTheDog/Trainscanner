@@ -56,6 +56,8 @@ test("curation frontend includes required component structure and runtime utilit
   // Runtime uses shared graphql.js and global merge GraphQL API model
   assert.match(runtimeJs, /import.*graphqlQuery.*from.*"\.\/graphql"/);
   assert.match(runtimeJs, /globalClusters/);
+  assert.match(runtimeJs, /total_count/);
+  assert.match(runtimeJs, /items\s*\{/);
   assert.match(runtimeJs, /globalCluster/);
   assert.match(runtimeJs, /submitGlobalMergeDecision/);
   assert.match(runtimeJs, /selected_global_station_ids/);
