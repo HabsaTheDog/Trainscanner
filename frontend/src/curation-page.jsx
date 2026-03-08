@@ -19,6 +19,70 @@ import {
 
 // ─── Map Component ────────────────────────────────────────────────────────────
 
+const OVERLAP_COORDINATE_PRECISION = 7;
+
+function buildCoordinateKey(lat, lon) {
+  return `${Number(lat).toFixed(OVERLAP_COORDINATE_PRECISION)}:${Number(lon).toFixed(OVERLAP_COORDINATE_PRECISION)}`;
+}
+
+function buildMarkerOverlapLayout(candidates) {
+  const overlapGroups = new Map();
+
+  for (const candidate of candidates) {
+    const key = buildCoordinateKey(candidate.lat, candidate.lon);
+    const existing = overlapGroups.get(key);
+    if (existing) existing.push(candidate);
+    else overlapGroups.set(key, [candidate]);
+  }
+
+  const layout = new Map();
+  for (const group of overlapGroups.values()) {
+    const stackSize = group.length;
+    for (const [index, candidate] of group.entries()) {
+      const centeredIndex = index - (stackSize - 1) / 2;
+      layout.set(candidate.global_station_id, {
+        stackIndex: index,
+        stackSize,
+        offsetX: Math.round(centeredIndex * 10),
+        offsetY: Math.round(centeredIndex * -8),
+      });
+    }
+  }
+
+  return layout;
+}
+
+function createMarkerElement(candidate, isSelected, overlapMeta) {
+  const { stackIndex = 0, stackSize = 1 } = overlapMeta || {};
+  const shell = document.createElement("button");
+  shell.type = "button";
+  shell.className = `curation-marker-shell ${stackSize > 1 ? "curation-marker-shell--stacked" : ""} ${isSelected ? "curation-marker-shell--selected" : ""}`;
+  shell.setAttribute(
+    "aria-label",
+    `${candidate.display_name || candidate.global_station_id} (${stackSize} station${stackSize === 1 ? "" : "s"} at these coordinates)`,
+  );
+  shell.title = `${candidate.display_name || candidate.global_station_id} · ${stackSize} station${stackSize === 1 ? "" : "s"} at these coordinates`;
+  shell.style.zIndex = String(isSelected ? 1000 + stackIndex : 10 + stackIndex);
+
+  if (isSelected) {
+    const rings = document.createElement("span");
+    rings.className = "curation-marker__rings";
+    for (let ringIndex = 0; ringIndex < stackSize; ringIndex += 1) {
+      const ring = document.createElement("span");
+      ring.className = "curation-marker__ring";
+      ring.style.setProperty("--ring-index", String(ringIndex));
+      rings.appendChild(ring);
+    }
+    shell.appendChild(rings);
+  }
+
+  const dot = document.createElement("span");
+  dot.className = `curation-marker ${isSelected ? "curation-marker--selected" : ""}`;
+  shell.appendChild(dot);
+
+  return shell;
+}
+
 function CurationMap({ candidates, selectedIds, onToggleCandidate }) {
   const mapRef = useRef(null);
   const mapContainerRef = useRef(null);
@@ -52,19 +116,23 @@ function CurationMap({ candidates, selectedIds, onToggleCandidate }) {
       (c) => Number.isFinite(c.lat) && Number.isFinite(c.lon),
     );
     if (valid.length === 0) return;
+    const overlapLayout = buildMarkerOverlapLayout(valid);
 
     const bounds = new maplibregl.LngLatBounds();
     for (const c of valid) {
-      const el = document.createElement("div");
       const isSelected = selectedIds.has(c.global_station_id);
-      el.className = `curation-marker ${isSelected ? "curation-marker--selected" : ""}`;
-      el.title = c.display_name || c.global_station_id;
+      const overlapMeta = overlapLayout.get(c.global_station_id);
+      const el = createMarkerElement(c, isSelected, overlapMeta);
       el.addEventListener("click", (e) => {
         e.stopPropagation();
         onToggleCandidate(c.global_station_id);
       });
 
-      const marker = new maplibregl.Marker({ element: el, anchor: "center" })
+      const marker = new maplibregl.Marker({
+        element: el,
+        anchor: "center",
+        offset: [overlapMeta?.offsetX || 0, overlapMeta?.offsetY || 0],
+      })
         .setLngLat([c.lon, c.lat])
         .addTo(map);
       markersRef.current.push(marker);
