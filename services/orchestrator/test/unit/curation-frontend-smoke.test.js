@@ -52,12 +52,19 @@ test("curation frontend includes required component structure and runtime utilit
   assert.match(pageJsx, /id="editMergeRenameInput"/);
   assert.match(pageJsx, /id="groupPairWalkList"/);
   assert.match(pageJsx, /id="selectedServiceIncoming"/);
+  assert.match(pageJsx, /formatResultsLabel\(totalCount\)/);
+  assert.doesNotMatch(pageJsx, /matching clusters/);
+  assert.doesNotMatch(pageJsx, /showing\s*\$\{clusters\.length\}/);
+  assert.doesNotMatch(pageJsx, /TOTAL/);
+  assert.doesNotMatch(pageJsx, /UNRESOLVED/);
+  assert.doesNotMatch(pageJsx, /CLOSED/);
 
   // Runtime uses shared graphql.js and global merge GraphQL API model
-  assert.match(runtimeJs, /import.*graphqlQuery.*from.*"\.\/graphql"/);
+  assert.match(runtimeJs, /import.*graphqlQuery.*from.*"\.\/graphql\.js"/);
   assert.match(runtimeJs, /globalClusters/);
   assert.match(runtimeJs, /total_count/);
   assert.match(runtimeJs, /items\s*\{/);
+  assert.match(runtimeJs, /formatResultsLabel/);
   assert.match(runtimeJs, /globalCluster/);
   assert.match(runtimeJs, /submitGlobalMergeDecision/);
   assert.match(runtimeJs, /selected_global_station_ids/);

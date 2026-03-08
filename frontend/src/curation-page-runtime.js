@@ -1,4 +1,4 @@
-import { graphqlQuery } from "./graphql";
+import { graphqlQuery } from "./graphql.js";
 
 // ─── GraphQL Queries ──────────────────────────────────────────────────────────
 
@@ -108,6 +108,11 @@ export async function fetchClusters(filters = {}) {
     totalCount: Number.isFinite(payload.total_count) ? payload.total_count : 0,
     limit: Number.isFinite(payload.limit) ? payload.limit : rows.length,
   };
+}
+
+export function formatResultsLabel(totalCount, locale) {
+  const safeCount = Number.isFinite(totalCount) ? totalCount : 0;
+  return `${safeCount.toLocaleString(locale)} results`;
 }
 
 export async function fetchClusterDetail(clusterId) {
