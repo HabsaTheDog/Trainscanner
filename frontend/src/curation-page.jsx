@@ -7,6 +7,7 @@ import {
   createDraftId,
   createEmptyDraftState,
   fetchCuratedProjection,
+  formatResultsLabel,
   inferCandidateCategory,
   pairKey,
   parseRef,
@@ -179,7 +180,6 @@ function CurationMap({
 function ClusterSidebar({
   clusters,
   totalCount,
-  listLimit,
   activeClusterId,
   filters,
   onFilterChange,
@@ -187,22 +187,6 @@ function ClusterSidebar({
   onRefresh,
   loading,
 }) {
-  const statusCounts = { open: 0, in_review: 0, resolved: 0, dismissed: 0 };
-  for (const c of clusters) {
-    const key = String(c.status || "").toLowerCase();
-    if (key in statusCounts) statusCounts[key] += 1;
-  }
-  const unresolvedCount = statusCounts.open + statusCounts.in_review;
-  const resolvedCount = statusCounts.resolved + statusCounts.dismissed;
-  const displayTotalCount =
-    Number.isFinite(totalCount) && totalCount > 0
-      ? totalCount
-      : clusters.length;
-  const showingSubset =
-    displayTotalCount > clusters.length &&
-    Number.isFinite(listLimit) &&
-    clusters.length >= listLimit;
-
   return (
     <aside className="curation-sidebar">
       <div className="curation-sidebar__header">
@@ -267,27 +251,8 @@ function ClusterSidebar({
         </button>
       </div>
 
-      <div className="curation-sidebar__summary">
-        <div className="curation-sidebar__summary-card">
-          <span className="curation-sidebar__summary-label">Total</span>
-          <strong>{loading ? "..." : displayTotalCount}</strong>
-        </div>
-        <div className="curation-sidebar__summary-card">
-          <span className="curation-sidebar__summary-label">Unresolved</span>
-          <strong>{loading ? "..." : unresolvedCount}</strong>
-        </div>
-        <div className="curation-sidebar__summary-card">
-          <span className="curation-sidebar__summary-label">Closed</span>
-          <strong>{loading ? "..." : resolvedCount}</strong>
-        </div>
-      </div>
-
       <p className="curation-sidebar__meta">
-        {loading
-          ? "Loading..."
-          : showingSubset
-            ? `${displayTotalCount} matching clusters · showing ${clusters.length}`
-            : `${displayTotalCount} matching clusters · prioritize dense clusters with cross-border overlap and unresolved evidence conflicts.`}
+        {loading ? "Loading..." : formatResultsLabel(totalCount)}
       </p>
 
       <div className="curation-sidebar__list">
@@ -833,7 +798,6 @@ function CurationTools({
 export function CurationPage() {
   const [clusters, setClusters] = useState([]);
   const [clusterTotalCount, setClusterTotalCount] = useState(0);
-  const [clusterListLimit, setClusterListLimit] = useState(50);
   const [activeClusterId, setActiveClusterId] = useState(null);
   const [clusterDetail, setClusterDetail] = useState(null);
   const [curatedItems, setCuratedItems] = useState([]);
@@ -864,7 +828,6 @@ export function CurationPage() {
       const data = await apiFetchClusters(filters);
       setClusters(data.items || []);
       setClusterTotalCount(data.totalCount || 0);
-      setClusterListLimit(data.limit || 50);
     } catch (err) {
       showNotice(`Failed to load clusters: ${err.message}`, "error", true);
     } finally {
@@ -1166,7 +1129,6 @@ export function CurationPage() {
       <ClusterSidebar
         clusters={clusters}
         totalCount={clusterTotalCount}
-        listLimit={clusterListLimit}
         activeClusterId={activeClusterId}
         filters={filters}
         onFilterChange={setFilters}
