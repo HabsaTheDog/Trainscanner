@@ -32,9 +32,13 @@ test("e2e profile activation and route smoke/regression", async (t) => {
   const stateDir = path.join(temp, "state");
   const dataDir = path.join(temp, "data");
   const frontendDir = path.join(temp, "frontend");
+  const regressionDir = path.join(temp, "route-regression");
+  const regressionCasesPath = path.join(regressionDir, "cases.json");
+  const regressionBaselinesDir = path.join(regressionDir, "baselines");
   const gtfsZipPath = path.join(dataDir, "gtfs", "test-profile.zip");
 
   await fs.mkdir(frontendDir, { recursive: true });
+  await fs.mkdir(regressionBaselinesDir, { recursive: true });
   await fs.writeFile(
     path.join(frontendDir, "index.html"),
     "<html><body>ok</body></html>\n",
@@ -51,6 +55,58 @@ test("e2e profile activation and route smoke/regression", async (t) => {
       },
     },
   });
+
+  await writeJson(regressionCasesPath, {
+    version: "1",
+    cases: [
+      {
+        id: "fixture_tagged_success",
+        label: "Tagged stop ids resolve against the fixture profile",
+        origin: "active-gtfs_gsp_de_berlin_hbf",
+        destination: "active-gtfs_gsp_at_wien_hbf",
+        datetime: "2026-03-04T08:00:00Z",
+      },
+      {
+        id: "fixture_station_lookup_success",
+        label: "Bracket station lookup resolves fixture stops",
+        origin: "Berlin Hbf [gsp_de_berlin_hbf]",
+        destination: "Wien Hbf [gsp_at_wien_hbf]",
+        datetime: "2026-03-04T08:00:00Z",
+      },
+    ],
+  });
+  await writeJson(
+    path.join(regressionBaselinesDir, "fixture_tagged_success.json"),
+    {
+      caseId: "fixture_tagged_success",
+      expected: {
+        caseId: "fixture_tagged_success",
+        status: 200,
+        errorCode: null,
+        itineraryCount: 1,
+        directCount: 0,
+        motisAttemptCount: 2,
+        originStrategy: "tagged_stop_id",
+        destinationStrategy: "tagged_stop_id",
+      },
+    },
+  );
+  await writeJson(
+    path.join(regressionBaselinesDir, "fixture_station_lookup_success.json"),
+    {
+      caseId: "fixture_station_lookup_success",
+      expected: {
+        caseId: "fixture_station_lookup_success",
+        status: 200,
+        errorCode: null,
+        itineraryCount: 1,
+        directCount: 0,
+        motisAttemptCount: 2,
+        originStrategy: "station_lookup",
+        destinationStrategy: "station_lookup",
+      },
+    },
+  );
 
   const motisServer = await startHttpServer((req, res) => {
     const url = new URL(req.url, "http://localhost");
@@ -243,15 +299,9 @@ test("e2e profile activation and route smoke/regression", async (t) => {
       "--api-url",
       apiUrl,
       "--cases",
-      path.join(
-        servicesRoot,
-        "orchestrator",
-        "test",
-        "routes",
-        "regression_cases.json",
-      ),
+      regressionCasesPath,
       "--baselines-dir",
-      path.join(servicesRoot, "orchestrator", "test", "routes", "baselines"),
+      regressionBaselinesDir,
       "--report-dir",
       path.join(repoRoot, "reports", "qa"),
     ],
