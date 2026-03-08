@@ -3,7 +3,7 @@ const { buildSchema } = require("graphql");
 const schema = buildSchema(`
   type Query {
     health: String
-    globalClusters(country: String, status: String): [GlobalMergeCluster!]!
+    globalClusters(country: String, status: String): GlobalMergeClusterConnection!
     globalCluster(id: ID!): GlobalMergeClusterDetail
   }
 
@@ -49,6 +49,12 @@ const schema = buildSchema(`
     issue_count: Int
     country_tags: [String!]
     candidates: [GlobalClusterCandidate!]
+  }
+
+  type GlobalMergeClusterConnection {
+    items: [GlobalMergeCluster!]!
+    total_count: Int!
+    limit: Int!
   }
 
   type GlobalMergeClusterDetail {

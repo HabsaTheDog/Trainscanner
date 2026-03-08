@@ -64,13 +64,17 @@ const rootValue = {
     }
 
     const result = await getGlobalClusters(mockUrl);
-    return (result.items || []).map((cluster) => ({
-      ...cluster,
-      country_tags: Array.isArray(cluster.country_tags)
-        ? cluster.country_tags
-        : [],
-      candidates: (cluster.candidates || []).map(mapClusterCandidate),
-    }));
+    return {
+      items: (result.items || []).map((cluster) => ({
+        ...cluster,
+        country_tags: Array.isArray(cluster.country_tags)
+          ? cluster.country_tags
+          : [],
+        candidates: (cluster.candidates || []).map(mapClusterCandidate),
+      })),
+      total_count: result.total_count || 0,
+      limit: result.limit || 0,
+    };
   },
 
   globalCluster: async ({ id }) => {

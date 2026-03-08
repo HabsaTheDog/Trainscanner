@@ -52,6 +52,25 @@ async function getGlobalClusters(url) {
   const status = normalizeClusterStatusFilter(url.searchParams.get("status"));
   const scopeTag = String(url.searchParams.get("scope_tag") || "").trim();
   const limit = parseListLimit(url.searchParams.get("limit"), 50, 300);
+  const filterParams = {
+    country,
+    status,
+    scope_tag: scopeTag,
+  };
+
+  const totalRow = await client.queryOne(
+    `
+    SELECT COUNT(*)::integer AS total_count
+    FROM qa_merge_clusters c
+    WHERE (NULLIF(:'status', '') IS NULL OR c.status = NULLIF(:'status', ''))
+      AND (NULLIF(:'scope_tag', '') IS NULL OR c.scope_tag = NULLIF(:'scope_tag', ''))
+      AND (
+        NULLIF(:'country', '') IS NULL
+        OR NULLIF(:'country', '') = ANY (COALESCE(c.country_tags, ARRAY[]::text[]))
+      )
+    `,
+    filterParams,
+  );
 
   const rows = await client.queryRows(
     `
@@ -93,9 +112,7 @@ async function getGlobalClusters(url) {
     LIMIT :'limit'::integer
     `,
     {
-      country,
-      status,
-      scope_tag: scopeTag,
+      ...filterParams,
       limit,
     },
   );
@@ -103,6 +120,7 @@ async function getGlobalClusters(url) {
   return {
     items: rows,
     count: rows.length,
+    total_count: totalRow?.total_count || 0,
     limit,
   };
 }

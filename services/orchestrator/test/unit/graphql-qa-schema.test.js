@@ -39,6 +39,15 @@ test("global merge cluster types expose global station identifiers", () => {
   assert.ok(fields.display_name, "candidate should expose display_name");
 });
 
+test("globalClusters query returns connection metadata", () => {
+  const connectionType = schema.getType("GlobalMergeClusterConnection");
+  assert.ok(connectionType, "GlobalMergeClusterConnection should exist");
+  const fields = connectionType.getFields();
+  assert.ok(fields.items, "connection should expose items");
+  assert.ok(fields.total_count, "connection should expose total_count");
+  assert.ok(fields.limit, "connection should expose limit");
+});
+
 test("health query resolves without DB connection", async () => {
   const result = await graphql({
     schema,

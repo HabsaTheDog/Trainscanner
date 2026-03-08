@@ -110,6 +110,8 @@ function CurationMap({
 
 function ClusterSidebar({
   clusters,
+  totalCount,
+  listLimit,
   activeClusterId,
   filters,
   onFilterChange,
@@ -124,6 +126,14 @@ function ClusterSidebar({
   }
   const unresolvedCount = statusCounts.open + statusCounts.in_review;
   const resolvedCount = statusCounts.resolved + statusCounts.dismissed;
+  const displayTotalCount =
+    Number.isFinite(totalCount) && totalCount > 0
+      ? totalCount
+      : clusters.length;
+  const showingSubset =
+    displayTotalCount > clusters.length &&
+    Number.isFinite(listLimit) &&
+    clusters.length >= listLimit;
 
   return (
     <aside className="curation-sidebar">
@@ -192,7 +202,7 @@ function ClusterSidebar({
       <div className="curation-sidebar__summary">
         <div className="curation-sidebar__summary-card">
           <span className="curation-sidebar__summary-label">Total</span>
-          <strong>{loading ? "..." : clusters.length}</strong>
+          <strong>{loading ? "..." : displayTotalCount}</strong>
         </div>
         <div className="curation-sidebar__summary-card">
           <span className="curation-sidebar__summary-label">Unresolved</span>
@@ -205,8 +215,11 @@ function ClusterSidebar({
       </div>
 
       <p className="curation-sidebar__meta">
-        Prioritize dense clusters with cross-border overlap and unresolved
-        evidence conflicts.
+        {loading
+          ? "Loading..."
+          : showingSubset
+            ? `${displayTotalCount} matching clusters · showing ${clusters.length}`
+            : `${displayTotalCount} matching clusters · prioritize dense clusters with cross-border overlap and unresolved evidence conflicts.`}
       </p>
 
       <div className="curation-sidebar__list">
@@ -751,6 +764,8 @@ function CurationTools({
 
 export function CurationPage() {
   const [clusters, setClusters] = useState([]);
+  const [clusterTotalCount, setClusterTotalCount] = useState(0);
+  const [clusterListLimit, setClusterListLimit] = useState(50);
   const [activeClusterId, setActiveClusterId] = useState(null);
   const [clusterDetail, setClusterDetail] = useState(null);
   const [curatedItems, setCuratedItems] = useState([]);
@@ -779,7 +794,9 @@ export function CurationPage() {
     setLoading(true);
     try {
       const data = await apiFetchClusters(filters);
-      setClusters(data);
+      setClusters(data.items || []);
+      setClusterTotalCount(data.totalCount || 0);
+      setClusterListLimit(data.limit || 50);
     } catch (err) {
       showNotice(`Failed to load clusters: ${err.message}`, "error", true);
     } finally {
@@ -1080,6 +1097,8 @@ export function CurationPage() {
     <div className="curation-container">
       <ClusterSidebar
         clusters={clusters}
+        totalCount={clusterTotalCount}
+        listLimit={clusterListLimit}
         activeClusterId={activeClusterId}
         filters={filters}
         onFilterChange={setFilters}
