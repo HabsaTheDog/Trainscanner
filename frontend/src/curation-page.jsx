@@ -18,6 +18,20 @@ import {
   toGroupRef,
 } from "./curation-page-runtime";
 
+function formatToneLabel(value) {
+  return String(value || "")
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function formatCountryLabel(countryTags, fallback) {
+  const tags = Array.isArray(countryTags)
+    ? countryTags.filter(Boolean).slice(0, 3)
+    : [];
+  if (tags.length > 0) return tags.join(" / ");
+  return fallback || "EU";
+}
+
 // ─── Map Component ────────────────────────────────────────────────────────────
 
 function CurationMap({
@@ -109,11 +123,15 @@ function ClusterSidebar({
     if (key in statusCounts) statusCounts[key] += 1;
   }
   const unresolvedCount = statusCounts.open + statusCounts.in_review;
+  const resolvedCount = statusCounts.resolved + statusCounts.dismissed;
 
   return (
     <aside className="curation-sidebar">
       <div className="curation-sidebar__header">
-        <h2 className="curation-sidebar__title">Station Curation</h2>
+        <div>
+          <p className="curation-sidebar__eyebrow">QA Workspace</p>
+          <h2 className="curation-sidebar__title">Station Curation</h2>
+        </div>
         <a href="/" className="curation-sidebar__home-link">
           Home
         </a>
@@ -171,10 +189,24 @@ function ClusterSidebar({
         </button>
       </div>
 
+      <div className="curation-sidebar__summary">
+        <div className="curation-sidebar__summary-card">
+          <span className="curation-sidebar__summary-label">Total</span>
+          <strong>{loading ? "..." : clusters.length}</strong>
+        </div>
+        <div className="curation-sidebar__summary-card">
+          <span className="curation-sidebar__summary-label">Unresolved</span>
+          <strong>{loading ? "..." : unresolvedCount}</strong>
+        </div>
+        <div className="curation-sidebar__summary-card">
+          <span className="curation-sidebar__summary-label">Closed</span>
+          <strong>{loading ? "..." : resolvedCount}</strong>
+        </div>
+      </div>
+
       <p className="curation-sidebar__meta">
-        {loading
-          ? "Loading..."
-          : `${clusters.length} clusters · ${unresolvedCount} unresolved`}
+        Prioritize dense clusters with cross-border overlap and unresolved
+        evidence conflicts.
       </p>
 
       <div className="curation-sidebar__list">
@@ -188,16 +220,41 @@ function ClusterSidebar({
             className={`curation-cluster-item ${activeClusterId === cluster.cluster_id ? "curation-cluster-item--active" : ""}`}
             onClick={() => onSelectCluster(cluster.cluster_id)}
           >
-            <span className="curation-cluster-item__name">
-              {cluster.display_name || cluster.cluster_id}
-            </span>
-            <span className="curation-cluster-item__detail">
-              {cluster.country} · {cluster.severity} · {cluster.status}
-            </span>
-            <span className="curation-cluster-item__detail">
-              {cluster.candidate_count} candidates · {cluster.issue_count}{" "}
-              issues · {cluster.scope_tag}
-            </span>
+            <div className="curation-cluster-item__top">
+              <span className="curation-cluster-item__name">
+                {cluster.display_name || cluster.cluster_id}
+              </span>
+              <span
+                className={`curation-badge curation-badge--severity-${String(cluster.severity || "").toLowerCase() || "default"}`}
+              >
+                {formatToneLabel(cluster.severity || "Unknown")}
+              </span>
+            </div>
+
+            <div className="curation-cluster-item__badges">
+              <span
+                className={`curation-badge curation-badge--status-${String(cluster.status || "").toLowerCase() || "default"}`}
+              >
+                {formatToneLabel(cluster.status || "Unknown")}
+              </span>
+              <span className="curation-badge curation-badge--neutral">
+                {formatCountryLabel(cluster.country_tags, cluster.country)}
+              </span>
+              <span className="curation-badge curation-badge--neutral">
+                {formatToneLabel(cluster.scope_tag || "General")}
+              </span>
+            </div>
+
+            <div className="curation-cluster-item__stats">
+              <span className="curation-cluster-stat">
+                <strong>{cluster.candidate_count}</strong>
+                <span>candidates</span>
+              </span>
+              <span className="curation-cluster-stat">
+                <strong>{cluster.issue_count}</strong>
+                <span>issues</span>
+              </span>
+            </div>
           </button>
         ))}
       </div>
@@ -229,6 +286,8 @@ function CandidateCard({
     Array.isArray(candidate.members) &&
     candidate.members.length >= 2;
   const handleToggle = () => onToggle(id);
+  const country = candidate.metadata?.country || candidate.country || "";
+  const providerCount = providers.length;
 
   return (
     <div
@@ -242,9 +301,9 @@ function CandidateCard({
             data-station-id={id}
             onChange={handleToggle}
           />
-          <span>
+          <span className="curation-candidate__title-wrap">
             <strong>{displayName}</strong>
-            <span className="curation-muted curation-tiny"> {id}</span>
+            <span className="curation-candidate__id">{id}</span>
           </span>
         </label>
         <span className="curation-candidate__rank">
@@ -256,6 +315,21 @@ function CandidateCard({
             `#${candidate.candidate_rank}`
           )}
         </span>
+      </div>
+      <div className="curation-candidate__meta">
+        {country && (
+          <span className="curation-candidate__meta-item">
+            {formatCountryLabel([country])}
+          </span>
+        )}
+        <span className="curation-candidate__meta-item">
+          {providerCount} {providerCount === 1 ? "feed" : "feeds"}
+        </span>
+        {lines.length > 0 && (
+          <span className="curation-candidate__meta-item">
+            {lines.length} line contexts
+          </span>
+        )}
       </div>
       <div className="curation-candidate__tags">
         {providers.length > 0 && (
@@ -314,7 +388,7 @@ function CandidateCard({
         </details>
       )}
       {aliases.length > 0 && (
-        <p className="curation-muted curation-tiny">
+        <p className="curation-muted curation-tiny curation-candidate__aliases">
           Aliases: {aliases.join(", ")}
         </p>
       )}
