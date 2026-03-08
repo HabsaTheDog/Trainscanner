@@ -1,7 +1,6 @@
 const { AppError } = require("../../core/errors");
 
 const VALID_TIERS = new Set(["high-speed", "regional", "local", "all"]);
-const VALID_COUNTRIES = new Set(["DE", "AT", "CH"]);
 
 function todayUtcIsoDate() {
   return new Date().toISOString().slice(0, 10);
@@ -60,7 +59,7 @@ function validateCompileGtfsRequest(body) {
 
   const profileRaw =
     body.profile === undefined
-      ? "canonical_runtime"
+      ? "pan_europe_runtime"
       : String(body.profile).trim();
   if (!profileRaw) {
     invalidRequest("Field 'profile' must be a non-empty string when provided");
@@ -84,8 +83,8 @@ function validateCompileGtfsRequest(body) {
   const countryRaw = String(body.country || "")
     .trim()
     .toUpperCase();
-  if (countryRaw && !VALID_COUNTRIES.has(countryRaw)) {
-    invalidRequest("Field 'country' must be one of: DE, AT, CH");
+  if (countryRaw && !/^[A-Z]{2}$/.test(countryRaw)) {
+    invalidRequest("Field 'country' must be an ISO-3166 alpha-2 code");
   }
 
   const outputDir = readRequiredNonEmptyOptional(body, "outputDir");

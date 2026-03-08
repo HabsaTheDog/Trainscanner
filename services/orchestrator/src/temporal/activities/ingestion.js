@@ -28,10 +28,9 @@ function createIngestionActivities(_dbClient, config) {
     },
 
     async runFetchSources(args) {
-      // Step 1: Just run the fetch logic from the bash script
       const safeArgs = args || [];
       const { stdout, stderr } = await execFileAsync(
-        path.join(scriptsDir, "fetch-dach-sources.sh"),
+        path.join(scriptsDir, "fetch-sources.sh"),
         safeArgs,
         {
           cwd: scriptsDir,
@@ -41,20 +40,28 @@ function createIngestionActivities(_dbClient, config) {
       return { stdout, stderr };
     },
 
-    // Step 2 (NeTEx ingest) is now handled natively by the Rust Worker (`extract_netex_stops`)!
-
-    async buildCanonicalAndReviewQueue(args) {
-      // Step 3 & 4: the rest of the pipeline
+    async buildGlobalModel(args) {
       const safeArgs = args || [];
-      const { stdout, stderr } = await execFileAsync(
-        path.join(scriptsDir, "check-canonical-pipeline.sh"),
+      const globalStationsResult = await execFileAsync(
+        path.join(scriptsDir, "build-global-stations.sh"),
         safeArgs,
         {
           cwd: scriptsDir,
           env: process.env,
         },
       );
-      return { stdout, stderr };
+      const mergeQueueResult = await execFileAsync(
+        path.join(scriptsDir, "build-global-merge-queue.sh"),
+        safeArgs,
+        {
+          cwd: scriptsDir,
+          env: process.env,
+        },
+      );
+      return {
+        stdout: `${globalStationsResult.stdout}\n${mergeQueueResult.stdout}`,
+        stderr: `${globalStationsResult.stderr}\n${mergeQueueResult.stderr}`,
+      };
     },
     async checkMotisReady() {
       const { stdout, stderr } = await execFileAsync(

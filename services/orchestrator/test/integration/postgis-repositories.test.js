@@ -32,7 +32,7 @@ test(
         env: {
           ...process.env,
           CANONICAL_DB_MODE: "docker-compose",
-          CANONICAL_DB_DOCKER_PROFILE: "dach-data",
+          CANONICAL_DB_DOCKER_PROFILE: "pan-europe-data",
           CANONICAL_DB_DOCKER_SERVICE: "postgis",
         },
       },
@@ -43,7 +43,7 @@ test(
       env: {
         ...process.env,
         CANONICAL_DB_MODE: "docker-compose",
-        CANONICAL_DB_DOCKER_PROFILE: "dach-data",
+        CANONICAL_DB_DOCKER_PROFILE: "pan-europe-data",
         CANONICAL_DB_DOCKER_SERVICE: "postgis",
       },
     });

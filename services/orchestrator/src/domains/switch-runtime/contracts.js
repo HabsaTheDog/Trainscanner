@@ -34,14 +34,14 @@ function validateRuntimeDescriptor(runtime, contextPath) {
   });
 
   const mode = String(
-    runtime.mode || runtime.source || "canonical-export",
+    runtime.mode || runtime.source || "pan-europe-export",
   ).trim();
-  if (mode !== "canonical-export") {
+  if (mode !== "pan-europe-export") {
     throw new AppError({
       code: "INVALID_CONFIG",
       message: `Unsupported runtime mode '${mode}' at ${contextPath}.runtime.mode`,
       details: {
-        expectedMode: "canonical-export",
+        expectedMode: "pan-europe-export",
         found: mode,
       },
     });
@@ -58,10 +58,10 @@ function validateRuntimeDescriptor(runtime, contextPath) {
     });
   }
 
-  if (runtime.country && !["DE", "AT", "CH"].includes(runtime.country)) {
+  if (runtime.country && !/^[A-Z]{2}$/.test(runtime.country)) {
     throw new AppError({
       code: "INVALID_CONFIG",
-      message: `runtime.country must be DE, AT, or CH at ${contextPath}`,
+      message: `runtime.country must be an ISO-3166 alpha-2 code at ${contextPath}`,
     });
   }
 }

@@ -3,9 +3,25 @@ function createNetexStopsRepo(client) {
     async deleteBySourceSnapshot(scope) {
       await client.exec(
         `
-          DELETE FROM netex_stops_staging
-          WHERE source_id = :'source_id'
-            AND snapshot_date = :'snapshot_date'::date;
+          DELETE FROM raw_provider_stop_points rsp
+          USING provider_datasets d
+          WHERE d.source_id = :'source_id'
+            AND d.snapshot_date = :'snapshot_date'::date
+            AND rsp.dataset_id = d.dataset_id;
+        `,
+        {
+          source_id: scope.sourceId,
+          snapshot_date: scope.snapshotDate,
+        },
+      );
+
+      await client.exec(
+        `
+          DELETE FROM raw_provider_stop_places rsp
+          USING provider_datasets d
+          WHERE d.source_id = :'source_id'
+            AND d.snapshot_date = :'snapshot_date'::date
+            AND rsp.dataset_id = d.dataset_id;
         `,
         {
           source_id: scope.sourceId,
@@ -14,14 +30,14 @@ function createNetexStopsRepo(client) {
       );
     },
 
-    async countByImportRun(runId) {
+    async countStopPlacesByDataset(datasetId) {
       const row = await client.queryOne(
         `
           SELECT COUNT(*)::integer AS row_count
-          FROM netex_stops_staging
-          WHERE import_run_id = :'run_id'::uuid;
+          FROM raw_provider_stop_places
+          WHERE dataset_id = :'dataset_id'::bigint;
         `,
-        { run_id: runId },
+        { dataset_id: String(datasetId) },
       );
 
       return row
@@ -29,26 +45,43 @@ function createNetexStopsRepo(client) {
         : 0;
     },
 
-    async copyCsv(csvPath) {
+    async copyStopPlacesCsv(csvPath) {
       await client.copyCsvFromFile(
         csvPath,
-        `netex_stops_staging (
-          import_run_id,
+        `raw_provider_stop_places (
+          stop_place_id,
+          dataset_id,
           source_id,
+          provider_stop_place_ref,
           country,
-          provider_slug,
-          snapshot_date,
-          manifest_sha256,
-          source_stop_id,
-          source_parent_stop_id,
           stop_name,
           latitude,
           longitude,
-          grid_id,
+          parent_stop_place_ref,
           public_code,
           private_code,
           hard_id,
-          source_file,
+          raw_payload
+        )`,
+      );
+    },
+
+    async copyStopPointsCsv(csvPath) {
+      await client.copyCsvFromFile(
+        csvPath,
+        `raw_provider_stop_points (
+          stop_point_id,
+          dataset_id,
+          source_id,
+          provider_stop_point_ref,
+          provider_stop_place_ref,
+          stop_place_id,
+          country,
+          stop_name,
+          latitude,
+          longitude,
+          platform_code,
+          track_code,
           raw_payload
         )`,
       );

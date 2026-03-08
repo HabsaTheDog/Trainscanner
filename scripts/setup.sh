@@ -31,10 +31,10 @@ Options:
   --help                   Show this help
 
 Examples:
-  scripts/setup.sh --profile sample_de
-  scripts/setup.sh --profile sample_de --detach
-  scripts/setup.sh --profile sample_de --osm-url https://download.geofabrik.de/europe/dach-latest.osm.pbf
-  scripts/setup.sh --profile sample_de --osm-file /tmp/my.osm.pbf
+  scripts/setup.sh --profile pan_europe_runtime
+  scripts/setup.sh --profile pan_europe_runtime --detach
+  scripts/setup.sh --profile pan_europe_runtime --osm-url https://download.geofabrik.de/europe/dach-latest.osm.pbf
+  scripts/setup.sh --profile pan_europe_runtime --osm-file /tmp/my.osm.pbf
 USAGE
   return 0
 }

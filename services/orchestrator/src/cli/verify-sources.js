@@ -1,18 +1,18 @@
 #!/usr/bin/env node
-const { fetchSources } = require("../domains/source-discovery/service");
+const { verifySources } = require("../domains/source-discovery/service");
 const { parsePipelineCliArgs, printCliError } = require("./pipeline-common");
 
 function run() {
   return (async () => {
     try {
       const parsed = parsePipelineCliArgs(process.argv.slice(2));
-      await fetchSources({
+      await verifySources({
         rootDir: parsed.rootDir,
         runId: parsed.runId,
         args: parsed.passthroughArgs,
       });
     } catch (err) {
-      printCliError("fetch-dach", err, "Fetch DACH sources failed");
+      printCliError("verify-sources", err, "Verify source datasets failed");
       process.exit(1);
     }
   })();

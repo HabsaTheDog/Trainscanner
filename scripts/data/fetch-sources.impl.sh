@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-CONFIG_FILE="config/dach-data-sources.json"
+CONFIG_FILE="config/europe-data-sources.json"
 AS_OF=""
 COUNTRY_FILTER=""
 SOURCE_ID_FILTER=""
@@ -80,13 +80,13 @@ write_fetch_progress() {
 
 usage() {
   cat <<USAGE
-Usage: scripts/data/fetch-dach-sources.sh [options]
+Usage: scripts/data/fetch-sources.sh [options]
 
-Fetch official DACH raw datasets into data/raw/.
+Fetch configured pan-European raw datasets into data/raw/.
 
 Options:
   --as-of YYYY-MM-DD   Deterministic replay date (select latest artifact <= date)
-  --country DE|AT|CH   Only fetch sources for one country
+  --country <ISO2>     Only fetch sources for one country
   --source-id ID       Only fetch one source id
   -h, --help           Show this help
 USAGE
@@ -94,7 +94,7 @@ USAGE
 }
 
 log() {
-  printf '[fetch-dach] %s\n' "$*"
+  printf '[fetch-sources] %s\n' "$*"
   return 0
 }
 
@@ -107,7 +107,7 @@ fail() {
     "$FETCH_PROGRESS_DOWNLOADED_BYTES" \
     "$FETCH_PROGRESS_TOTAL_BYTES" \
     "$*" || true
-  printf '[fetch-dach] ERROR: %s\n' "$*" >&2
+  printf '[fetch-sources] ERROR: %s\n' "$*" >&2
   return 1
 }
 
@@ -164,8 +164,8 @@ parse_args() {
     fail "Invalid --as-of value '$AS_OF' (expected YYYY-MM-DD)"
   fi
 
-  if [[ -n "$COUNTRY_FILTER" && "$COUNTRY_FILTER" != "DE" && "$COUNTRY_FILTER" != "AT" && "$COUNTRY_FILTER" != "CH" ]]; then
-    fail "Invalid --country '$COUNTRY_FILTER' (expected DE, AT, or CH)"
+  if [[ -n "$COUNTRY_FILTER" && ! "$COUNTRY_FILTER" =~ ^[A-Z]{2}$ ]]; then
+    fail "Invalid --country '$COUNTRY_FILTER' (expected ISO-3166 alpha-2 code)"
   fi
   return 0
 }
@@ -195,15 +195,15 @@ build_auth_args() {
     api_key)
       local var_name
       var_name="$(printf '%s' "$source_id" | tr '[:lower:]-' '[:upper:]_')_API_KEY"
-      local api_key="${!var_name:-${DACH_API_KEY:-}}"
-      [[ -n "$api_key" ]] || fail "Missing auth for '$source_id': set $var_name or DACH_API_KEY"
+      local api_key="${!var_name:-${SOURCE_API_KEY:-${EUROPE_API_KEY:-}}}"
+      [[ -n "$api_key" ]] || fail "Missing auth for '$source_id': set $var_name or SOURCE_API_KEY/EUROPE_API_KEY"
       AUTH_ARGS=(-H "X-API-Key: $api_key")
       ;;
     token)
       local token_var
       token_var="$(printf '%s' "$source_id" | tr '[:lower:]-' '[:upper:]_')_TOKEN"
-      local token="${!token_var:-${DACH_TOKEN:-}}"
-      [[ -n "$token" ]] || fail "Missing auth for '$source_id': set $token_var or DACH_TOKEN"
+      local token="${!token_var:-${SOURCE_TOKEN:-${EUROPE_TOKEN:-}}}"
+      [[ -n "$token" ]] || fail "Missing auth for '$source_id': set $token_var or SOURCE_TOKEN/EUROPE_TOKEN"
       AUTH_ARGS=(-H "Authorization: Bearer $token")
       ;;
     other)
@@ -217,11 +217,11 @@ build_auth_args() {
       login_url_var="${source_key}_LOGIN_URL"
 
       local cookie cookie_file header username password login_url
-      cookie="${!cookie_var:-${DACH_COOKIE:-}}"
-      cookie_file="${!cookie_file_var:-${DACH_COOKIE_FILE:-}}"
-      header="${!header_var:-${DACH_HEADER:-}}"
-      username="${!user_var:-${DACH_USERNAME:-}}"
-      password="${!pass_var:-${DACH_PASSWORD:-}}"
+      cookie="${!cookie_var:-${SOURCE_COOKIE:-${EUROPE_COOKIE:-}}}"
+      cookie_file="${!cookie_file_var:-${SOURCE_COOKIE_FILE:-${EUROPE_COOKIE_FILE:-}}}"
+      header="${!header_var:-${SOURCE_HEADER:-${EUROPE_HEADER:-}}}"
+      username="${!user_var:-${SOURCE_USERNAME:-${EUROPE_USERNAME:-}}}"
+      password="${!pass_var:-${SOURCE_PASSWORD:-${EUROPE_PASSWORD:-}}}"
       login_url="${!login_url_var:-https://www.opendata-oepnv.de/ht/de/willkommen}"
 
       [[ "$cookie" == *PASTE_* || "$cookie" == *YOUR_SESSION_COOKIE* ]] && cookie=""
@@ -471,6 +471,56 @@ resolve_ch_netex() {
   return 0
 }
 
+resolve_generic_manual_redirect() {
+  local endpoint="$1"
+  local as_of="$2"
+
+  local html
+  html="$(curl -fsSL "${AUTH_ARGS[@]}" "$endpoint")" || fail "Source unavailable: could not open endpoint $endpoint"
+
+  mapfile -t raw_urls < <(
+    {
+      printf '%s' "$html" | grep -oE 'href="[^"]+\.(zip|xml|xml\.gz|tgz|gz)(\?[^"]*)?"' | sed -E 's/^href="([^"]+)"$/\1/'
+      printf '%s' "$html" | grep -oE 'data-download="[^"]+\.(zip|xml|xml\.gz|tgz|gz)(\?[^"]*)?"' | sed -E 's/^data-download="([^"]+)"$/\1/'
+    } | sort -u
+  )
+  [[ ${#raw_urls[@]} -gt 0 ]] || fail "No downloadable archive links found at endpoint $endpoint"
+
+  local cutoff="999999999999"
+  if [[ -n "$as_of" ]]; then
+    cutoff="${as_of//-/}2359"
+  fi
+
+  local best_url="" best_ts="0" fallback_url="" u abs_u name ts
+  for u in "${raw_urls[@]}"; do
+    abs_u="$(normalize_url "$endpoint" "$u")"
+    [[ -n "$fallback_url" ]] || fallback_url="$abs_u"
+    name="${abs_u##*/}"
+    name="${name%%\?*}"
+
+    ts="$(printf '%s' "$name" | grep -oE '[0-9]{12}' | head -1 || true)"
+    if [[ -z "$ts" ]]; then
+      ts="$(printf '%s' "$name" | grep -oE '[0-9]{8}' | head -1 || true)"
+      [[ -n "$ts" ]] && ts="${ts}0000"
+    fi
+    [[ -n "$ts" ]] || continue
+
+    if [[ "$ts" -le "$cutoff" && "$ts" -ge "$best_ts" ]]; then
+      best_ts="$ts"
+      best_url="$abs_u"
+    fi
+  done
+
+  if [[ -n "$best_url" ]]; then
+    printf '%s\n' "$best_url"
+    return 0
+  fi
+
+  [[ -n "$fallback_url" ]] || fail "No downloadable URL could be resolved for endpoint $endpoint"
+  printf '%s\n' "$fallback_url"
+  return 0
+}
+
 resolve_download_url() {
   local source_json="$1"
   local source_id="$2"
@@ -480,7 +530,7 @@ resolve_download_url() {
   endpoint="$(jq -r '.downloadUrlOrEndpoint' <<<"$source_json")"
 
   case "$method" in
-    direct_url)
+    direct|direct_url)
       printf '%s\n' "$endpoint"
       ;;
     api)
@@ -498,7 +548,7 @@ resolve_download_url() {
           resolve_ch_netex "$endpoint" "$AS_OF"
           ;;
         *)
-          fail "No manual_redirect resolver implemented for source '$source_id'"
+          resolve_generic_manual_redirect "$endpoint" "$AS_OF"
           ;;
       esac
       ;;
@@ -587,7 +637,7 @@ probe_http_code() {
 
 main() {
   parse_args "$@"
-  "${ROOT_DIR}/scripts/validate-config.sh" --only dach >/dev/null
+  "${ROOT_DIR}/scripts/validate-config.sh" --only sources >/dev/null
 
   require_cmd jq
   require_cmd curl
@@ -729,9 +779,9 @@ main() {
           local empty=$((20 - filled))
           local bar
           bar="$(printf "%${filled}s" | tr ' ' '#')$(printf "%${empty}s" | tr ' ' '-')"
-          printf "\r[fetch-dach] [%-20s] %3d%% (%s/%s) " "$bar" "$percent" "$(numfmt --to=iec "$bytes")" "$(numfmt --to=iec "$expected_size")" >&2
+          printf "\r[fetch-sources] [%-20s] %3d%% (%s/%s) " "$bar" "$percent" "$(numfmt --to=iec "$bytes")" "$(numfmt --to=iec "$expected_size")" >&2
         else
-          printf "\r[fetch-dach] %s: %s downloaded " "$file_name" "$(numfmt --to=iec "$bytes")" >&2
+          printf "\r[fetch-sources] %s: %s downloaded " "$file_name" "$(numfmt --to=iec "$bytes")" >&2
         fi
         
         sleep 1

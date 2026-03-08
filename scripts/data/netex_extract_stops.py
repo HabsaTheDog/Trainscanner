@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extract StopPlace-level station rows from zipped NeTEx into CSV."""
+"""Extract StopPlace and StopPoint rows from zipped NeTEx into CSV."""
 
 from __future__ import annotations
 
@@ -59,6 +59,16 @@ def first_descriptor_name(elem: etree._Element) -> str | None:
                 text = clean_text(descriptor_child.text)
                 if text:
                     return text
+    return None
+
+
+def child_ref(elem: etree._Element, name: str) -> str | None:
+    for child in elem:
+        if local_name(child.tag) != name:
+            continue
+        ref = clean_text(child.attrib.get("ref"))
+        if ref:
+            return ref
     return None
 
 
@@ -130,6 +140,8 @@ class Summary:
     xml_entries_scanned: int = 0
     stop_places_found: int = 0
     stop_places_written: int = 0
+    stop_points_found: int = 0
+    stop_points_written: int = 0
     duplicates_skipped: int = 0
     missing_id_skipped: int = 0
     missing_name_skipped: int = 0
@@ -141,6 +153,8 @@ class Summary:
             "xmlEntriesScanned": self.xml_entries_scanned,
             "stopPlacesFound": self.stop_places_found,
             "stopPlacesWritten": self.stop_places_written,
+            "stopPointsFound": self.stop_points_found,
+            "stopPointsWritten": self.stop_points_written,
             "duplicatesSkipped": self.duplicates_skipped,
             "missingIdSkipped": self.missing_id_skipped,
             "missingNameSkipped": self.missing_name_skipped,
@@ -174,7 +188,12 @@ def _entry_contains_stop_place(archive: zipfile.ZipFile, entry: str) -> bool:
     try:
         with archive.open(entry) as handle:
             head = handle.read(PEEK_BYTES)
-            return b"StopPlace" in head or b"SiteFrame" in head
+            return (
+                b"StopPlace" in head
+                or b"SiteFrame" in head
+                or b"ScheduledStopPoint" in head
+                or b"PassengerStopAssignment" in head
+            )
     except Exception:
         return False
 
@@ -197,12 +216,14 @@ def _candidate_xml_entries(archive: zipfile.ZipFile, zip_path: Path) -> list[str
         name
         for name in xml_entries
         if any(
-            token in Path(name).name.lower() for token in ("site", "stop", "station")
+            token in Path(name).name.lower()
+            for token in ("site", "stop", "station", "service", "common")
         )
     ]
     if preferred_entries:
         print(
-            f"[netex-extract] INFO: Found {len(preferred_entries)} entries with site/stop/station in name.",
+            "[netex-extract] INFO: "
+            + f"Found {len(preferred_entries)} entries with site/stop/station/service/common in name.",
             file=sys.stderr,
         )
         if len(preferred_entries) > MAX_XML_ENTRIES_TO_SCAN:
@@ -224,7 +245,7 @@ def _candidate_xml_entries(archive: zipfile.ZipFile, zip_path: Path) -> list[str
     # Step 3: Too many entries — do content-based peek filtering
     print(
         f"[netex-extract] INFO: {len(xml_entries)} XML entries without site-like names; "
-        "peeking into each to find StopPlace/SiteFrame content...",
+        "peeking into each to find StopPlace/SiteFrame/ScheduledStopPoint content...",
         file=sys.stderr,
     )
     stop_entries = []
@@ -276,7 +297,65 @@ def _pick_hard_id(
     return None
 
 
-def _write_stop_row(
+def _extract_stop_place_meta(
+    elem: etree._Element,
+) -> tuple[str | None, str | None, float | None, float | None]:
+    source_stop_id = clean_text(elem.attrib.get("id"))
+    if not source_stop_id:
+        return None, None, None, None
+
+    stop_name = first_direct_child_text(elem, {"Name"}) or first_descriptor_name(elem)
+    lat, lon = first_location_coords(elem)
+    return source_stop_id, stop_name, lat, lon
+
+
+def _parse_passenger_stop_assignment(
+    elem: etree._Element,
+) -> tuple[str | None, str | None, str | None]:
+    scheduled_ref = child_ref(elem, "ScheduledStopPointRef")
+    if not scheduled_ref:
+        return None, None, None
+    return scheduled_ref, child_ref(elem, "QuayRef"), child_ref(elem, "StopPlaceRef")
+
+
+def _resolve_own_stop_place_ref(
+    elem: etree._Element, quay_to_stop_place: dict[str, str]
+) -> str:
+    element_id = clean_text(elem.attrib.get("id")) or ""
+    if element_id and element_id in quay_to_stop_place:
+        return quay_to_stop_place[element_id]
+
+    parent = parent_site_ref(elem)
+    if parent:
+        return parent
+
+    ancestor = elem.getparent()
+    while ancestor is not None:
+        if local_name(ancestor.tag) == "StopPlace":
+            stop_place_id = clean_text(ancestor.attrib.get("id"))
+            if stop_place_id:
+                return stop_place_id
+            break
+        ancestor = ancestor.getparent()
+
+    for key in ("stopplaceref", "parentstopplace", "parentsiteref"):
+        value = key_values(elem).get(key)
+        clean = clean_text(value)
+        if clean:
+            return clean
+
+    stop_place_ref = child_ref(elem, "StopPlaceRef")
+    if stop_place_ref:
+        return stop_place_ref
+
+    quay_ref = child_ref(elem, "QuayRef")
+    if quay_ref and quay_ref in quay_to_stop_place:
+        return quay_to_stop_place[quay_ref]
+
+    return ""
+
+
+def _write_stop_place_row(
     writer: csv.DictWriter,
     args: argparse.Namespace,
     entry: str,
@@ -291,6 +370,7 @@ def _write_stop_row(
 ) -> None:
     payload = {
         "xmlEntry": entry,
+        "entityType": "stop_place",
         "stopPlaceType": first_direct_child_text(elem, {"StopPlaceType"}),
         "transportMode": first_direct_child_text(elem, {"TransportMode"}),
     }
@@ -302,8 +382,103 @@ def _write_stop_row(
             "provider_slug": args.provider_slug,
             "snapshot_date": args.snapshot_date,
             "manifest_sha256": args.manifest_sha256,
+            "entity_type": "stop_place",
+            "provider_stop_place_ref": source_stop_id,
+            "provider_stop_point_ref": "",
             "source_stop_id": source_stop_id,
             "source_parent_stop_id": parent_site_ref(elem) or "",
+            "stop_name": stop_name,
+            "latitude": "" if lat is None else f"{lat:.8f}",
+            "longitude": "" if lon is None else f"{lon:.8f}",
+            "grid_id": compute_grid_id(args.country, lat, lon),
+            "public_code": public_code or "",
+            "private_code": private_code or "",
+            "hard_id": hard_id or "",
+            "source_file": entry,
+            "raw_payload": json.dumps(
+                payload, ensure_ascii=True, separators=(",", ":")
+            ),
+        }
+    )
+
+
+def _resolve_parent_stop_place_ref(
+    elem: etree._Element,
+    stop_place_lookup: dict[str, dict[str, float | str | None]],
+    quay_to_stop_place: dict[str, str],
+    scheduled_stop_point_to_stop_place: dict[str, str],
+    scheduled_stop_point_to_quay: dict[str, str],
+) -> str:
+    element_id = clean_text(elem.attrib.get("id")) or ""
+    if element_id and element_id in scheduled_stop_point_to_stop_place:
+        return scheduled_stop_point_to_stop_place[element_id]
+
+    quay_ref = scheduled_stop_point_to_quay.get(element_id)
+    if quay_ref and quay_ref in quay_to_stop_place:
+        return quay_to_stop_place[quay_ref]
+
+    own_stop_place_ref = _resolve_own_stop_place_ref(elem, quay_to_stop_place)
+    if own_stop_place_ref:
+        return own_stop_place_ref
+
+    parent = parent_site_ref(elem)
+    if parent:
+        return parent
+
+    ancestor = elem.getparent()
+    while ancestor is not None:
+        if local_name(ancestor.tag) == "StopPlace":
+            stop_place_id = clean_text(ancestor.attrib.get("id"))
+            if stop_place_id:
+                return stop_place_id
+            break
+        ancestor = ancestor.getparent()
+
+    for key in ("stopplaceref", "parentstopplace", "parentsiteref"):
+        value = key_values(elem).get(key)
+        clean = clean_text(value)
+        if clean:
+            return clean
+
+    fallback_parent = clean_text(elem.attrib.get("id")) or ""
+    if fallback_parent in stop_place_lookup:
+        return fallback_parent
+    return ""
+
+
+def _write_stop_point_row(
+    writer: csv.DictWriter,
+    args: argparse.Namespace,
+    entry: str,
+    elem: etree._Element,
+    source_stop_point_id: str,
+    source_stop_place_ref: str,
+    stop_name: str,
+    lat: float | None,
+    lon: float | None,
+    public_code: str | None,
+    private_code: str | None,
+    hard_id: str | None,
+) -> None:
+    payload = {
+        "xmlEntry": entry,
+        "entityType": "stop_point",
+        "quayType": first_direct_child_text(elem, {"QuayType"}),
+        "transportMode": first_direct_child_text(elem, {"TransportMode"}),
+    }
+    writer.writerow(
+        {
+            "import_run_id": args.import_run_id,
+            "source_id": args.source_id,
+            "country": args.country,
+            "provider_slug": args.provider_slug,
+            "snapshot_date": args.snapshot_date,
+            "manifest_sha256": args.manifest_sha256,
+            "entity_type": "stop_point",
+            "provider_stop_place_ref": source_stop_place_ref,
+            "provider_stop_point_ref": source_stop_point_id,
+            "source_stop_id": source_stop_point_id,
+            "source_parent_stop_id": source_stop_place_ref,
             "stop_name": stop_name,
             "latitude": "" if lat is None else f"{lat:.8f}",
             "longitude": "" if lon is None else f"{lon:.8f}",
@@ -325,10 +500,11 @@ def _process_stop_place(
     writer: csv.DictWriter,
     args: argparse.Namespace,
     seen_stop_ids: set[str],
+    stop_place_lookup: dict[str, dict[str, float | str | None]],
     summary: Summary,
 ) -> None:
     summary.stop_places_found += 1
-    source_stop_id = clean_text(elem.attrib.get("id"))
+    source_stop_id, stop_name, lat, lon = _extract_stop_place_meta(elem)
     if not source_stop_id:
         summary.missing_id_skipped += 1
         return
@@ -336,12 +512,10 @@ def _process_stop_place(
         summary.duplicates_skipped += 1
         return
 
-    stop_name = first_direct_child_text(elem, {"Name"}) or first_descriptor_name(elem)
     if not stop_name:
         summary.missing_name_skipped += 1
         return
 
-    lat, lon = first_location_coords(elem)
     if lat is None or lon is None:
         summary.without_coordinates += 1
     else:
@@ -350,7 +524,7 @@ def _process_stop_place(
     public_code = first_direct_child_text(elem, {"PublicCode"})
     private_code = first_direct_child_text(elem, {"PrivateCode"})
     hard_id = _pick_hard_id(public_code, private_code, key_values(elem))
-    _write_stop_row(
+    _write_stop_place_row(
         writer,
         args,
         entry,
@@ -363,8 +537,88 @@ def _process_stop_place(
         private_code,
         hard_id,
     )
+    stop_place_lookup[source_stop_id] = {
+        "stop_name": stop_name,
+        "lat": lat,
+        "lon": lon,
+    }
     seen_stop_ids.add(source_stop_id)
     summary.stop_places_written += 1
+
+
+def _process_stop_point(
+    elem: etree._Element,
+    entry: str,
+    writer: csv.DictWriter,
+    args: argparse.Namespace,
+    seen_stop_point_ids: set[str],
+    stop_place_lookup: dict[str, dict[str, float | str | None]],
+    quay_to_stop_place: dict[str, str],
+    scheduled_stop_point_to_stop_place: dict[str, str],
+    scheduled_stop_point_to_quay: dict[str, str],
+    summary: Summary,
+) -> None:
+    summary.stop_points_found += 1
+    source_stop_point_id = clean_text(elem.attrib.get("id"))
+    if not source_stop_point_id:
+        summary.missing_id_skipped += 1
+        return
+    if source_stop_point_id in seen_stop_point_ids:
+        summary.duplicates_skipped += 1
+        return
+
+    source_stop_place_ref = _resolve_parent_stop_place_ref(
+        elem,
+        stop_place_lookup,
+        quay_to_stop_place,
+        scheduled_stop_point_to_stop_place,
+        scheduled_stop_point_to_quay,
+    )
+    if not source_stop_place_ref:
+        source_stop_place_ref = source_stop_point_id
+
+    stop_name = first_direct_child_text(elem, {"Name"}) or first_descriptor_name(elem)
+    if not stop_name:
+        stop_name = str(
+            stop_place_lookup.get(source_stop_place_ref, {}).get("stop_name") or ""
+        ).strip()
+    if not stop_name:
+        summary.missing_name_skipped += 1
+        return
+
+    lat, lon = first_location_coords(elem)
+    if lat is None or lon is None:
+        parent = stop_place_lookup.get(source_stop_place_ref) or {}
+        parent_lat = parent.get("lat")
+        parent_lon = parent.get("lon")
+        lat = float(parent_lat) if isinstance(parent_lat, (int, float)) else None
+        lon = float(parent_lon) if isinstance(parent_lon, (int, float)) else None
+
+    if lat is None or lon is None:
+        summary.without_coordinates += 1
+    else:
+        summary.with_coordinates += 1
+
+    public_code = first_direct_child_text(elem, {"PublicCode", "PlatformCode"})
+    private_code = first_direct_child_text(elem, {"PrivateCode", "Track"})
+    hard_id = _pick_hard_id(public_code, private_code, key_values(elem))
+
+    _write_stop_point_row(
+        writer,
+        args,
+        entry,
+        elem,
+        source_stop_point_id,
+        source_stop_place_ref,
+        stop_name,
+        lat,
+        lon,
+        public_code,
+        private_code,
+        hard_id,
+    )
+    seen_stop_point_ids.add(source_stop_point_id)
+    summary.stop_points_written += 1
 
 
 def _scan_xml_entry(
@@ -372,7 +626,12 @@ def _scan_xml_entry(
     entry: str,
     writer: csv.DictWriter,
     args: argparse.Namespace,
-    seen_stop_ids: set[str],
+    seen_stop_place_ids: set[str],
+    seen_stop_point_ids: set[str],
+    stop_place_lookup: dict[str, dict[str, float | str | None]],
+    quay_to_stop_place: dict[str, str],
+    scheduled_stop_point_to_stop_place: dict[str, str],
+    scheduled_stop_point_to_quay: dict[str, str],
     summary: Summary,
 ) -> None:
     """Stream a single zip entry and parse with lxml iterparse, avoiding memory leaks."""
@@ -389,7 +648,9 @@ def _scan_xml_entry(
         "{*}SiteFrame",  # Clear this at the very end to free up its children
     }
 
-    events_tags = ("{*}StopPlace",) + tuple(tags_to_clear_and_ignore)
+    events_tags = ("{*}StopPlace", "{*}Quay", "{*}ScheduledStopPoint") + tuple(
+        tags_to_clear_and_ignore
+    )
 
     entry_info = archive.getinfo(entry)
     if entry_info.file_size > MAX_XML_ENTRY_BYTES:
@@ -409,11 +670,85 @@ def _scan_xml_entry(
             no_network=True,
         )
         for _, elem in context:
-            if local_name(elem.tag) == "StopPlace":
-                _process_stop_place(elem, entry, writer, args, seen_stop_ids, summary)
+            tag = local_name(elem.tag)
+            if tag == "StopPlace":
+                _process_stop_place(
+                    elem,
+                    entry,
+                    writer,
+                    args,
+                    seen_stop_place_ids,
+                    stop_place_lookup,
+                    summary,
+                )
+            elif tag in {"Quay", "ScheduledStopPoint"}:
+                _process_stop_point(
+                    elem,
+                    entry,
+                    writer,
+                    args,
+                    seen_stop_point_ids,
+                    stop_place_lookup,
+                    quay_to_stop_place,
+                    scheduled_stop_point_to_stop_place,
+                    scheduled_stop_point_to_quay,
+                    summary,
+                )
 
             # By calling _clear_element on both StopPlace and the massive non-StopPlace nodes,
             # we ensure lxml can actually garbage collect them and we don't hit OOM.
+            _clear_element(elem)
+
+
+def _collect_reference_maps(
+    archive: zipfile.ZipFile,
+    entry: str,
+    stop_place_lookup: dict[str, dict[str, float | str | None]],
+    quay_to_stop_place: dict[str, str],
+    scheduled_stop_point_to_stop_place: dict[str, str],
+    scheduled_stop_point_to_quay: dict[str, str],
+) -> None:
+    with archive.open(entry) as handle:
+        context = etree.iterparse(
+            handle,
+            events=("end",),
+            tag=("{*}StopPlace", "{*}Quay", "{*}PassengerStopAssignment"),
+            recover=False,
+            huge_tree=True,
+            resolve_entities=False,
+            load_dtd=False,
+            no_network=True,
+        )
+        for _, elem in context:
+            tag = local_name(elem.tag)
+            if tag == "StopPlace":
+                source_stop_id, stop_name, lat, lon = _extract_stop_place_meta(elem)
+                if source_stop_id:
+                    stop_place_lookup.setdefault(
+                        source_stop_id,
+                        {
+                            "stop_name": stop_name,
+                            "lat": lat,
+                            "lon": lon,
+                        },
+                    )
+            elif tag == "Quay":
+                quay_id = clean_text(elem.attrib.get("id"))
+                stop_place_ref = _resolve_own_stop_place_ref(elem, quay_to_stop_place)
+                if quay_id and stop_place_ref:
+                    quay_to_stop_place[quay_id] = stop_place_ref
+            elif tag == "PassengerStopAssignment":
+                scheduled_ref, quay_ref, stop_place_ref = (
+                    _parse_passenger_stop_assignment(elem)
+                )
+                if scheduled_ref and quay_ref:
+                    scheduled_stop_point_to_quay[scheduled_ref] = quay_ref
+                if scheduled_ref and stop_place_ref:
+                    scheduled_stop_point_to_stop_place[scheduled_ref] = stop_place_ref
+                elif scheduled_ref and quay_ref and quay_ref in quay_to_stop_place:
+                    scheduled_stop_point_to_stop_place[scheduled_ref] = (
+                        quay_to_stop_place[quay_ref]
+                    )
             _clear_element(elem)
 
 
@@ -421,7 +756,12 @@ def extract(
     zip_path: Path, writer: csv.DictWriter, args: argparse.Namespace
 ) -> Summary:
     summary = Summary()
-    seen_stop_ids: set[str] = set()
+    seen_stop_place_ids: set[str] = set()
+    seen_stop_point_ids: set[str] = set()
+    stop_place_lookup: dict[str, dict[str, float | str | None]] = {}
+    quay_to_stop_place: dict[str, str] = {}
+    scheduled_stop_point_to_stop_place: dict[str, str] = {}
+    scheduled_stop_point_to_quay: dict[str, str] = {}
 
     with zipfile.ZipFile(zip_path) as archive:
         entries = _candidate_xml_entries(archive, zip_path)
@@ -433,7 +773,27 @@ def extract(
                     file=sys.stderr,
                 )
             try:
-                _scan_xml_entry(archive, entry, writer, args, seen_stop_ids, summary)
+                _collect_reference_maps(
+                    archive,
+                    entry,
+                    stop_place_lookup,
+                    quay_to_stop_place,
+                    scheduled_stop_point_to_stop_place,
+                    scheduled_stop_point_to_quay,
+                )
+                _scan_xml_entry(
+                    archive,
+                    entry,
+                    writer,
+                    args,
+                    seen_stop_place_ids,
+                    seen_stop_point_ids,
+                    stop_place_lookup,
+                    quay_to_stop_place,
+                    scheduled_stop_point_to_stop_place,
+                    scheduled_stop_point_to_quay,
+                    summary,
+                )
             except etree.XMLSyntaxError as exc:
                 raise RuntimeError(
                     f"NeTEx XML parse error in entry '{entry}': {exc}"
@@ -465,6 +825,9 @@ def main() -> int:
                 "provider_slug",
                 "snapshot_date",
                 "manifest_sha256",
+                "entity_type",
+                "provider_stop_place_ref",
+                "provider_stop_point_ref",
                 "source_stop_id",
                 "source_parent_stop_id",
                 "stop_name",

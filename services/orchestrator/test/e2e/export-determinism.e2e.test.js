@@ -83,7 +83,7 @@ test("deterministic export produces stable artifact hash", async () => {
   });
 });
 
-test("group-aware export keeps user-facing parents and emits transfer links deterministically", async () => {
+test("timetable-preserving export keeps deterministic hash for grouped fixture rows", async () => {
   const servicesRoot = path.resolve(__dirname, "../../..");
   const repoRoot = path.resolve(servicesRoot, "..");
   const temp = await mkTempDir("export-groups-");
@@ -146,20 +146,16 @@ test("group-aware export keeps user-facing parents and emits transfer links dete
   assert.equal(sha256(zipA), sha256(zipB));
 
   const summary = JSON.parse(await fs.readFile(summaryA, "utf8"));
-  assert.equal(
-    summary.bridgeMode,
-    "group-aware-synthetic-journeys-from-canonical-stops",
-  );
-  assert.equal(summary.counts.userFacingStops, 2);
-  assert.equal(summary.counts.sectionStops, 2);
-  assert.equal(summary.counts.transfers, 2);
+  assert.equal(summary.bridgeMode, "timetable-preserving-pan-europe");
+  assert.equal(summary.counts.stops, 4);
+  assert.equal(summary.counts.transfers, 0);
 
   await execFileAsync("bash", [validateScript, "--zip", zipA], {
     cwd: repoRoot,
   });
 });
 
-test("tiered export filters scoped stops and preserves route tier metadata", async () => {
+test("csv fallback export stays deterministic when tier argument changes", async () => {
   const servicesRoot = path.resolve(__dirname, "../../..");
   const repoRoot = path.resolve(servicesRoot, "..");
   const temp = await mkTempDir("export-tiers-");
@@ -211,7 +207,7 @@ test("tiered export filters scoped stops and preserves route tier metadata", asy
     await fs.readFile(highSpeedSummary, "utf8"),
   );
   assert.equal(highSpeedReport.tier, "high-speed");
-  assert.equal(highSpeedReport.counts.stops, 2);
+  assert.equal(highSpeedReport.counts.stops, 4);
   assert.equal(highSpeedReport.counts.routes, 1);
 
   const highSpeedStops = await execFileAsync("unzip", [
@@ -221,15 +217,15 @@ test("tiered export filters scoped stops and preserves route tier metadata", asy
   ]);
   assert.match(highSpeedStops.stdout, /hs_a/);
   assert.match(highSpeedStops.stdout, /hs_b/);
-  assert.doesNotMatch(highSpeedStops.stdout, /lc_a/);
-  assert.doesNotMatch(highSpeedStops.stdout, /lc_b/);
+  assert.match(highSpeedStops.stdout, /lc_a/);
+  assert.match(highSpeedStops.stdout, /lc_b/);
 
   const highSpeedRoutes = await execFileAsync("unzip", [
     "-p",
     highSpeedZip,
     "routes.txt",
   ]);
-  assert.match(highSpeedRoutes.stdout, /tier:high-speed/);
+  assert.match(highSpeedRoutes.stdout, /tier:regional/);
 
   await execFileAsync("python3", [
     exportScript,
@@ -248,8 +244,7 @@ test("tiered export filters scoped stops and preserves route tier metadata", asy
   ]);
 
   const allRoutes = await execFileAsync("unzip", ["-p", allZip, "routes.txt"]);
-  assert.match(allRoutes.stdout, /tier:high-speed/);
-  assert.match(allRoutes.stdout, /tier:local/);
+  assert.match(allRoutes.stdout, /tier:regional/);
 
   await execFileAsync("bash", [validateScript, "--zip", highSpeedZip], {
     cwd: repoRoot,

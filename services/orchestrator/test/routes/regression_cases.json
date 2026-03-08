@@ -2,18 +2,18 @@
   "version": "1",
   "cases": [
     {
-      "id": "smoke_tagged_success",
-      "label": "Tagged stop IDs resolve directly",
-      "origin": "active-gtfs_1001",
-      "destination": "active-gtfs_1002",
-      "datetime": "2026-02-20T08:00:00Z"
+      "id": "cross_border_tagged_success",
+      "label": "Tagged stop IDs resolve directly for runtime-valid corridor",
+      "origin": "active-gtfs_gsp_a2acaf7ef34df1655b854782",
+      "destination": "active-gtfs_gsp_80d4f1c3dccfebe9aa4c6729",
+      "datetime": "2026-03-04T08:00:00Z"
     },
     {
-      "id": "reg_station_lookup_success",
-      "label": "Station lookup resolves name + bracket IDs",
-      "origin": "Alpha Station [1001]",
-      "destination": "Beta Station [1002]",
-      "datetime": "2026-02-20T08:00:00Z"
+      "id": "cross_border_station_lookup_success",
+      "label": "Station lookup resolves runtime-valid bracket IDs",
+      "origin": "Florstadt-Stammheim Hainbachstraße [gsp_a2acaf7ef34df1655b854782]",
+      "destination": "Friedberg (Hessen) Bahnhof [gsp_80d4f1c3dccfebe9aa4c6729]",
+      "datetime": "2026-03-04T08:00:00Z"
     }
   ]
 }

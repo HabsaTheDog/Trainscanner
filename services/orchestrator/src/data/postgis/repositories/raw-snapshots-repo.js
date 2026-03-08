@@ -12,7 +12,7 @@ const RAW_SNAPSHOT_SCHEMA = {
   ],
   properties: {
     sourceId: { type: "string", minLength: 1 },
-    country: { type: "string", enum: ["DE", "AT", "CH"] },
+    country: { type: "string", pattern: /^[A-Z]{2}$/ },
     providerSlug: { type: "string", minLength: 1 },
     format: { type: "string", minLength: 1 },
     snapshotDate: { type: "string", pattern: /^\d{4}-\d{2}-\d{2}$/ },

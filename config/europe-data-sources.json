@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "1.0.0",
+  "schemaVersion": "2.0.0",
   "sources": [
     {
       "id": "de_delfi_sollfahrplandaten_netex",
@@ -11,14 +11,14 @@
       "format": "netex",
       "accessType": "other",
       "authSetupUrl": "https://www.opendata-oepnv.de/ht/de/standards/registrierung",
-      "licenseName": "Creative Commons Attribution (CC BY, aktuellste Fassung)",
+      "licenseName": "Creative Commons Attribution (CC BY 4.0)",
       "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
       "attributionText": "Datenquelle: DELFI e.V. via OpenData OePNV Deutschland.",
-      "updateCadence": "weekly (typically Monday)",
+      "updateCadence": "weekly",
       "downloadMethod": "manual_redirect",
       "downloadUrlOrEndpoint": "https://www.opendata-oepnv.de/ht/de/organisation/delfi/startseite?tx_vrrkit_view%5Baction%5D=details&tx_vrrkit_view%5Bcontroller%5D=View&tx_vrrkit_view%5Bdataset_name%5D=deutschlandweite-sollfahrplandaten",
-      "notes": "This download is only available for registered users. Provide auth via <SOURCE_ID>_USERNAME/<SOURCE_ID>_PASSWORD (preferred), or <SOURCE_ID>_COOKIE/<SOURCE_ID>_COOKIE_FILE/<SOURCE_ID>_HEADER in .env. Resolver extracts downloadable NeTEx artifact links from the authenticated detail page.",
-      "lastVerifiedAt": "2026-02-19T14:42:41Z"
+      "notes": "Authenticated source.",
+      "lastVerifiedAt": "2026-03-04T00:00:00Z"
     },
     {
       "id": "at_oebb_mmtis_netex",
@@ -26,37 +26,56 @@
       "provider": "OeBB-Infrastruktur AG",
       "portalName": "OeBB Open Data",
       "portalUrl": "https://data.oebb.at/de/datensaetze~datenbereitstellung_delegierte_verordnung_eu_2024-490~",
-      "datasetName": "Datenbereitstellung gemaess Delegierter Verordnung (EU) 2024/490 (MMTIS)",
+      "datasetName": "MMTIS NeTEx",
       "format": "netex",
       "accessType": "public",
       "authSetupUrl": "https://data.oebb.at/de/datensaetze~datenbereitstellung_delegierte_verordnung_eu_2024-490~",
-      "licenseName": "Creative Commons Namensnennung 3.0 Oesterreich (CC BY 3.0 AT)",
+      "licenseName": "CC BY 3.0 AT",
       "licenseUrl": "https://creativecommons.org/licenses/by/3.0/at/deed.de",
-      "attributionText": "Datenquelle: OeBB-Infrastruktur AG (mit Verlinkung auf http://infrastruktur.oebb.at/de/).",
-      "updateCadence": "at least weekly",
+      "attributionText": "Datenquelle: OeBB-Infrastruktur AG.",
+      "updateCadence": "weekly",
       "downloadMethod": "manual_redirect",
       "downloadUrlOrEndpoint": "https://data.oebb.at/de/datensaetze~datenbereitstellung_delegierte_verordnung_eu_2024-490~",
-      "notes": "Latest mode resolves highest NETEX_<year>.zip entry from data-download attributes and normalizes relative /dam links.",
-      "lastVerifiedAt": "2026-02-19T14:42:41Z"
+      "notes": "Public source.",
+      "lastVerifiedAt": "2026-03-04T00:00:00Z"
     },
     {
       "id": "ch_opentransportdata_timetable_netex",
       "country": "CH",
-      "provider": "Open Data Mobility Switzerland (SBB/CFF/FFS)",
+      "provider": "Open Data Mobility Switzerland SBB CFF FFS",
       "portalName": "opentransportdata.swiss",
       "portalUrl": "https://data.opentransportdata.swiss/en/dataset/timetablenetex_2026",
       "datasetName": "Timetable 2026 (NeTEx)",
       "format": "netex",
       "accessType": "public",
       "authSetupUrl": "https://opentransportdata.swiss/en/terms-of-use/",
-      "licenseName": "Terms of use opentransportdata.swiss",
+      "licenseName": "opentransportdata terms",
       "licenseUrl": "https://opentransportdata.swiss/en/terms-of-use/",
-      "attributionText": "The URL opentransportdata.swiss must be cited as source for raw data.",
-      "updateCadence": "two times a week",
+      "attributionText": "Source: opentransportdata.swiss",
+      "updateCadence": "twice weekly",
       "downloadMethod": "manual_redirect",
       "downloadUrlOrEndpoint": "https://data.opentransportdata.swiss/en/dataset/timetablenetex_2026",
-      "notes": "Latest mode resolves the resource download URL with the newest YYYYMMDDhhmm timestamp in filename. --as-of picks latest timestamp <= requested date.",
-      "lastVerifiedAt": "2026-02-19T14:42:41Z"
+      "notes": "Public source.",
+      "lastVerifiedAt": "2026-03-04T00:00:00Z"
+    },
+    {
+      "id": "fr_sncf_reference_netex",
+      "country": "FR",
+      "provider": "SNCF Open Data",
+      "portalName": "SNCF Open Data",
+      "portalUrl": "https://ressources.data.sncf.com/",
+      "datasetName": "France reference NeTEx",
+      "format": "netex",
+      "accessType": "public",
+      "authSetupUrl": "https://ressources.data.sncf.com/",
+      "licenseName": "Open License",
+      "licenseUrl": "https://www.etalab.gouv.fr/licence-ouverte-open-licence/",
+      "attributionText": "Source: SNCF Open Data",
+      "updateCadence": "periodic",
+      "downloadMethod": "manual_redirect",
+      "downloadUrlOrEndpoint": "https://ressources.data.sncf.com/",
+      "notes": "Placeholder source entry for cross-border rollout.",
+      "lastVerifiedAt": "2026-03-04T00:00:00Z"
     }
   ]
 }

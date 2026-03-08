@@ -3,179 +3,118 @@ const { buildSchema } = require("graphql");
 const schema = buildSchema(`
   type Query {
     health: String
-    clusters(country: String, status: String): [Cluster]
-    cluster(id: ID!): ClusterDetail
-    lowConfidenceQueue(limit: Int, offset: Int): LowConfidenceQueueResult!
+    globalClusters(country: String, status: String): [GlobalMergeCluster!]!
+    globalCluster(id: ID!): GlobalMergeClusterDetail
   }
 
   type Mutation {
     requestAiScore(clusterId: ID!): AiScoreResult
-    approveAiMatch(clusterId: ID!, evidenceId: ID!): AiMatchDecisionResult!
-    rejectAiMatch(clusterId: ID!, evidenceId: ID!): AiMatchDecisionResult!
-    overrideAiMatch(clusterId: ID!, evidenceId: ID!, targetClusterId: ID!): AiMatchDecisionResult!
-    setMegaHubWalkTime(hubId: ID!, walkMinutes: Int!): WalkTimeOverrideResult!
-    submitClusterDecision(clusterId: ID!, input: ClusterDecisionInput!): ClusterDecisionResult!
+    submitGlobalMergeDecision(clusterId: ID!, input: GlobalMergeDecisionInput!): GlobalMergeDecisionResult!
   }
 
-  input ClusterDecisionInput {
+  input GlobalMergeDecisionInput {
     operation: String!
-    selected_station_ids: [String]
-    groups: [DecisionGroupInput]
+    selected_global_station_ids: [String!]
+    groups: [GlobalDecisionGroupInput!]
     note: String
     requested_by: String
-    rename_to: String
-    rename_targets: [RenameTargetInput]
+    rename_targets: [GlobalRenameTargetInput!]
   }
 
-  input DecisionGroupInput {
+  input GlobalDecisionGroupInput {
     group_label: String
-    target_canonical_station_id: String
-    member_station_ids: [String]
+    member_global_station_ids: [String!]
     rename_to: String
-    section_type: String
-    section_name: String
-    segment_action: SegmentActionInput
   }
 
-  input SegmentActionInput {
-    walk_links: [WalkLinkInput]
-  }
-
-  input WalkLinkInput {
-    from_segment_id: String!
-    to_segment_id: String!
-    min_walk_minutes: Int
-    bidirectional: Boolean
-  }
-
-  input RenameTargetInput {
-    canonical_station_id: String!
+  input GlobalRenameTargetInput {
+    global_station_id: String!
     rename_to: String!
   }
 
-  type ClusterDecisionResult {
+  type GlobalMergeDecisionResult {
     ok: Boolean!
     cluster_id: ID!
     decision_id: ID
     operation: String!
   }
 
-  type Cluster {
+  type GlobalMergeCluster {
     cluster_id: ID!
-    country: String
     status: String
-    display_name: String
     severity: String
+    scope_tag: String
+    display_name: String
     candidate_count: Int
     issue_count: Int
-    scope_tag: String
-    member_nodes: [ClusterNode]
-    member_count: Int
+    country_tags: [String!]
+    candidates: [GlobalClusterCandidate!]
   }
 
-  type ClusterNode {
-    canonical_station_id: String
-    name: String
+  type GlobalMergeClusterDetail {
+    cluster_id: ID!
+    status: String
+    severity: String
+    scope_tag: String
+    display_name: String
+    summary: JSON
+    candidate_count: Int
+    issue_count: Int
+    country_tags: [String!]
+    candidates: [GlobalClusterCandidate!]
+    evidence: [GlobalEvidence!]
+    decisions: [GlobalDecision!]
+    edit_history: [GlobalEditHistory!]
+  }
+
+  type GlobalClusterCandidate {
+    global_station_id: String
+    display_name: String
+    candidate_rank: Int
     lat: Float
     lon: Float
-  }
-
-  type ClusterDetail {
-    cluster_id: ID!
     country: String
-    status: String
-    scope_tag: String
-    severity: String
-    display_name: String
-    candidates: [ClusterCandidate]
-    evidence: [Evidence]
-    decisions: [Decision]
-    edit_history: [EditHistory]
+    provider_labels: [String!]
   }
 
-  type Evidence {
+  type GlobalEvidence {
     evidence_type: String
-    source_canonical_station_id: String
-    target_canonical_station_id: String
+    source_global_station_id: String
+    target_global_station_id: String
     score: Float
+    details: JSON
   }
 
-  type Decision {
+  type GlobalDecision {
+    decision_id: ID
     operation: String
+    note: String
     requested_by: String
     created_at: String
+    members: [GlobalDecisionMember!]
   }
 
-  type EditHistory {
+  type GlobalDecisionMember {
+    global_station_id: String
+    action: String
+    group_label: String
+    metadata: JSON
+  }
+
+  type GlobalEditHistory {
     event_type: String
     requested_by: String
     created_at: String
   }
 
-  type ClusterCandidate {
-    canonical_station_id: String
-    display_name: String
-    candidate_rank: Int
-    aliases: [String]
-    provider_labels: [String]
-    lat: Float
-    lon: Float
-    service_context: ServiceContext
-    segment_context: SegmentContext
-  }
-
-  type ServiceContext {
-    lines: [String]
-    incoming: [String]
-    outgoing: [String]
-  }
-
-  type SegmentContext {
-    segment_id: String
-    segment_name: String
-    segment_type: String
-  }
-  
   type AiScoreResult {
-     cluster_id: ID!
-     confidence_score: Float
-     suggested_action: String
-     reasoning: String
+    cluster_id: ID!
+    confidence_score: Float
+    suggested_action: String
+    reasoning: String
   }
 
-  type LowConfidenceQueueResult {
-    total: Int!
-    items: [LowConfidenceItem!]!
-  }
-
-  type LowConfidenceItem {
-    evidence_id: ID!
-    cluster_id: String!
-    source_canonical_station_id: String!
-    target_canonical_station_id: String!
-    evidence_type: String!
-    ai_confidence: Float
-    ai_suggested_action: String
-    cluster_display_name: String
-    source_lat: Float
-    source_lon: Float
-    target_lat: Float
-    target_lon: Float
-  }
-
-  type WalkTimeOverrideResult {
-    ok: Boolean!
-    rule_id: ID!
-    hub_id: String!
-    walk_minutes: Int!
-  }
-
-  type AiMatchDecisionResult {
-    ok: Boolean!
-    decision_id: ID!
-    cluster_id: String!
-    operation: String!
-  }
+  scalar JSON
 `);
 
 module.exports = { schema };

@@ -19,7 +19,6 @@ export default defineConfig({
       input: {
         home: path.resolve(__dirname, "index.html"),
         curation: path.resolve(__dirname, "curation.html"),
-        qa: path.resolve(__dirname, "qa.html"),
       },
       output: {
         manualChunks(id) {

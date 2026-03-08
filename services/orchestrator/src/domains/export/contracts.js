@@ -8,7 +8,7 @@ const EXPORT_OPTIONS_SCHEMA = {
   properties: {
     profile: { type: "string", minLength: 1 },
     asOf: { type: "string", pattern: /^\d{4}-\d{2}-\d{2}$/ },
-    country: { type: "string", enum: ["DE", "AT", "CH"] },
+    country: { type: "string", pattern: /^[A-Z]{2}$/ },
     outputZip: { type: "string", minLength: 1 },
   },
   additionalProperties: false,
@@ -26,7 +26,7 @@ const EXPORT_MANIFEST_SCHEMA = {
   properties: {
     profile: { type: "string", minLength: 1 },
     asOf: { type: "string", pattern: /^\d{4}-\d{2}-\d{2}$/ },
-    countryScope: { type: "string", enum: ["DE", "AT", "CH"] },
+    countryScope: { type: "string", pattern: /^[A-Z]{2}$/ },
     bridgeMode: { type: "string" },
     artifactPath: { type: "string", minLength: 1 },
     manifestPath: { type: "string" },

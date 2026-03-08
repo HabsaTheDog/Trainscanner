@@ -3,7 +3,7 @@ const { validateOrThrow } = require("../../core/schema");
 const INGEST_OPTIONS_SCHEMA = {
   type: "object",
   properties: {
-    country: { type: "string", enum: ["DE", "AT", "CH"] },
+    country: { type: "string", pattern: /^[A-Z]{2}$/ },
     sourceId: { type: "string", minLength: 1 },
     asOf: { type: "string", pattern: /^\d{4}-\d{2}-\d{2}$/ },
     runId: { type: "string", minLength: 1 },
@@ -19,7 +19,7 @@ const INGEST_RUN_SCHEMA = {
     pipeline: { type: "string", minLength: 1 },
     status: { type: "string", enum: ["running", "succeeded", "failed"] },
     sourceId: { type: "string" },
-    country: { type: "string", enum: ["DE", "AT", "CH"] },
+    country: { type: "string", pattern: /^[A-Z]{2}$/ },
     snapshotDate: { type: "string", pattern: /^\d{4}-\d{2}-\d{2}$/ },
     startedAt: { type: "string" },
     endedAt: { type: "string" },

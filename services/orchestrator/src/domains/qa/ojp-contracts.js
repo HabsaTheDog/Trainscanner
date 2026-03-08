@@ -16,7 +16,7 @@ const OJP_FEEDER_SCHEMA = {
   required: ["providerId", "country", "endpointUrl", "authMode", "requestMode"],
   properties: {
     providerId: { type: "string", minLength: 1 },
-    country: { type: "string", enum: ["DE", "AT", "CH"] },
+    country: { type: "string", pattern: /^[A-Z]{2}$/ },
     endpointUrl: { type: "string" },
     authMode: { type: "string", enum: ["bearer", "api_key", "none"] },
     envPrefix: { type: "string" },

@@ -16,7 +16,7 @@ const SOURCE_SCHEMA = {
   ],
   properties: {
     id: { type: "string", minLength: 1 },
-    country: { type: "string", enum: ["DE", "AT", "CH"] },
+    country: { type: "string", pattern: /^[A-Z]{2}$/ },
     provider: { type: "string", minLength: 1 },
     portalName: { type: "string" },
     portalUrl: { type: "string" },
@@ -33,7 +33,7 @@ const SOURCE_SCHEMA = {
     updateCadence: { type: "string" },
     downloadMethod: {
       type: "string",
-      enum: ["manual_redirect", "direct", "api"],
+      enum: ["manual_redirect", "direct_url", "direct", "api"],
     },
     downloadUrlOrEndpoint: { type: "string", minLength: 1 },
     fallbackReason: { type: "string" },

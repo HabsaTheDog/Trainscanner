@@ -25,7 +25,7 @@ test("validate-configs CLI validates all core config files", async () => {
   );
 
   assert.match(result.stdout, /ok profiles/);
-  assert.match(result.stdout, /ok dach/);
+  assert.match(result.stdout, /ok sources/);
   assert.match(result.stdout, /ok ojp/);
   assert.match(result.stdout, /ok ojp-mock/);
 });

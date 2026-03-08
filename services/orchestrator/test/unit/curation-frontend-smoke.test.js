@@ -53,9 +53,12 @@ test("curation frontend includes required component structure and runtime utilit
   assert.match(pageJsx, /id="groupPairWalkList"/);
   assert.match(pageJsx, /id="selectedServiceIncoming"/);
 
-  // Runtime uses shared graphql.js + REST endpoint
+  // Runtime uses shared graphql.js and global merge GraphQL API model
   assert.match(runtimeJs, /import.*graphqlQuery.*from.*"\.\/graphql"/);
-  assert.match(runtimeJs, /\/api\/qa\/curated-stations/);
+  assert.match(runtimeJs, /globalClusters/);
+  assert.match(runtimeJs, /globalCluster/);
+  assert.match(runtimeJs, /submitGlobalMergeDecision/);
+  assert.match(runtimeJs, /selected_global_station_ids/);
   assert.match(runtimeJs, /fetchClusters/);
   assert.match(runtimeJs, /country:\s*filters\.country\s*\|\|\s*null/);
   assert.match(runtimeJs, /fetchClusterDetail/);

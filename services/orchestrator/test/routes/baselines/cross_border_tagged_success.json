@@ -1,10 +1,10 @@
 {
-  "caseId": "smoke_tagged_success",
+  "caseId": "cross_border_tagged_success",
   "expected": {
-    "caseId": "smoke_tagged_success",
+    "caseId": "cross_border_tagged_success",
     "status": 200,
     "errorCode": null,
-    "itineraryCount": 1,
+    "itineraryCount": 5,
     "directCount": 0,
     "motisAttemptCount": 2,
     "originStrategy": "tagged_stop_id",

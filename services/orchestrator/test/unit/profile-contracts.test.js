@@ -11,7 +11,7 @@ test("accepts mixed static/runtime GTFS profile config", () => {
       static_profile: { zipPath: "data/gtfs/test.zip" },
       runtime_profile: {
         runtime: {
-          mode: "canonical-export",
+          mode: "pan-europe-export",
           profile: "runtime_profile",
           asOf: "latest",
           country: "DE",
@@ -31,7 +31,7 @@ test("rejects runtime profile with invalid asOf", () => {
     profiles: {
       broken: {
         runtime: {
-          mode: "canonical-export",
+          mode: "pan-europe-export",
           asOf: "2026/01/01",
         },
       },
@@ -46,7 +46,7 @@ test("rejects runtime profile with non-existent calendar date", () => {
     profiles: {
       broken: {
         runtime: {
-          mode: "canonical-export",
+          mode: "pan-europe-export",
           asOf: "2026-02-30",
         },
       },

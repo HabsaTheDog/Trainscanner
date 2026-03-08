@@ -127,8 +127,8 @@ def resolve_runtime_zip(entry_obj, default_profile):
     if not isinstance(runtime, dict):
         return None
 
-    mode = (runtime.get('mode') or runtime.get('source') or 'canonical-export').strip()
-    if mode != 'canonical-export':
+    mode = (runtime.get('mode') or runtime.get('source') or 'pan-europe-export').strip()
+    if mode != 'pan-europe-export':
         print(f"ERROR: unsupported runtime mode '{mode}' in profile '{default_profile}'", file=sys.stderr)
         sys.exit(2)
 

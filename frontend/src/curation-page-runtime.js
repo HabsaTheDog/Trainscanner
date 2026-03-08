@@ -3,10 +3,10 @@ import { graphqlQuery } from "./graphql";
 // ─── GraphQL Queries ──────────────────────────────────────────────────────────
 
 const CLUSTERS_QUERY = `
-  query GetClusters($country: String, $status: String) {
-    clusters(country: $country, status: $status) {
+  query GetGlobalClusters($country: String, $status: String) {
+    globalClusters(country: $country, status: $status) {
       cluster_id
-      country
+      country_tags
       status
       display_name
       severity
@@ -18,43 +18,41 @@ const CLUSTERS_QUERY = `
 `;
 
 const CLUSTER_DETAIL_QUERY = `
-  query GetClusterDetail($id: ID!) {
-    cluster(id: $id) {
+  query GetGlobalClusterDetail($id: ID!) {
+    globalCluster(id: $id) {
       cluster_id
-      country
+      country_tags
       status
       scope_tag
       severity
       display_name
       candidates {
-        canonical_station_id
+        global_station_id
         display_name
         candidate_rank
-        aliases
+        country
         provider_labels
         lat
         lon
-        service_context {
-          lines
-          incoming
-          outgoing
-        }
-        segment_context {
-          segment_id
-          segment_name
-          segment_type
-        }
       }
       evidence {
         evidence_type
-        source_canonical_station_id
-        target_canonical_station_id
+        source_global_station_id
+        target_global_station_id
         score
       }
       decisions {
+        decision_id
         operation
+        note
         requested_by
         created_at
+        members {
+          global_station_id
+          action
+          group_label
+          metadata
+        }
       }
       edit_history {
         event_type
@@ -66,8 +64,8 @@ const CLUSTER_DETAIL_QUERY = `
 `;
 
 const SUBMIT_DECISION_MUTATION = `
-  mutation SubmitDecision($clusterId: ID!, $input: ClusterDecisionInput!) {
-    submitClusterDecision(clusterId: $clusterId, input: $input) {
+  mutation SubmitGlobalMergeDecision($clusterId: ID!, $input: GlobalMergeDecisionInput!) {
+    submitGlobalMergeDecision(clusterId: $clusterId, input: $input) {
       ok
       decision_id
       operation
@@ -93,45 +91,98 @@ export async function fetchClusters(filters = {}) {
     country: filters.country || null,
     status: filters.status || null,
   });
-  return Array.isArray(data.clusters) ? data.clusters : [];
+  const rows = Array.isArray(data.globalClusters) ? data.globalClusters : [];
+  return rows.map((row) => ({
+    ...row,
+    country:
+      Array.isArray(row.country_tags) && row.country_tags.length > 0
+        ? row.country_tags[0]
+        : "EU",
+  }));
 }
 
 export async function fetchClusterDetail(clusterId) {
   const data = await graphqlQuery(CLUSTER_DETAIL_QUERY, { id: clusterId });
-  return data.cluster || null;
+  if (!data.globalCluster) return null;
+  const cluster = data.globalCluster;
+  return {
+    ...cluster,
+    country:
+      Array.isArray(cluster.country_tags) && cluster.country_tags.length > 0
+        ? cluster.country_tags[0]
+        : "EU",
+    candidates: (cluster.candidates || []).map((candidate) => ({
+      global_station_id: candidate.global_station_id,
+      display_name: candidate.display_name,
+      candidate_rank: candidate.candidate_rank,
+      provider_labels: candidate.provider_labels || [],
+      lat: candidate.lat,
+      lon: candidate.lon,
+      aliases: [],
+      service_context: { lines: [], incoming: [], outgoing: [] },
+      segment_context: {},
+      metadata: { country: candidate.country || "" },
+    })),
+    evidence: (cluster.evidence || []).map((row) => ({
+      evidence_type: row.evidence_type,
+      source_global_station_id: row.source_global_station_id,
+      target_global_station_id: row.target_global_station_id,
+      score: row.score,
+    })),
+    decisions: (cluster.decisions || []).map((row) => ({
+      ...row,
+      members: (row.members || []).map((member) => ({
+        global_station_id: member.global_station_id,
+        action: member.action,
+        group_label: member.group_label,
+        metadata: member.metadata || {},
+      })),
+    })),
+  };
 }
 
 export async function fetchCuratedProjection(clusterId) {
-  const cleanId = String(clusterId || "").trim();
-  if (!cleanId) return [];
-
-  const params = new URLSearchParams();
-  params.set("cluster_id", cleanId);
-  params.set("status", "active");
-  params.set("limit", "25");
-
-  const res = await fetch(`/api/qa/curated-stations?${params.toString()}`);
-  const payload = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(payload?.error || `HTTP ${res.status}`);
-  return Array.isArray(payload) ? payload : [];
+  void clusterId;
+  return [];
 }
 
 export async function submitDecision(clusterId, payload) {
+  const groups = (Array.isArray(payload.groups) ? payload.groups : []).map(
+    (group, index) => ({
+      group_label:
+        String(
+          group?.group_label || group?.groupLabel || `group-${index + 1}`,
+        ).trim() || `group-${index + 1}`,
+      member_global_station_ids: Array.isArray(group?.member_global_station_ids)
+        ? group.member_global_station_ids
+        : [],
+      rename_to: String(group?.rename_to || group?.renameTo || "").trim(),
+    }),
+  );
+
+  const renameTargets = (
+    Array.isArray(payload.rename_targets) ? payload.rename_targets : []
+  ).map((target) => ({
+    global_station_id: String(
+      target?.global_station_id || target?.globalStationId || "",
+    ).trim(),
+    rename_to: String(target?.rename_to || target?.renameTo || "").trim(),
+  }));
+
   const data = await graphqlQuery(SUBMIT_DECISION_MUTATION, {
     clusterId,
     input: {
       operation: payload.operation,
-      selected_station_ids: payload.selected_station_ids,
-      groups: payload.groups,
+      selected_global_station_ids: payload.selected_global_station_ids || [],
+      groups,
       note: payload.note,
-      rename_targets: payload.rename_targets,
-      rename_to: payload.rename_to,
+      rename_targets: renameTargets,
     },
   });
-  if (!data?.submitClusterDecision?.ok) {
+  if (!data?.submitGlobalMergeDecision?.ok) {
     throw new Error("Mutation returned false or missing OK status.");
   }
-  return data.submitClusterDecision;
+  return data.submitGlobalMergeDecision;
 }
 
 export async function requestAiScore(clusterId) {
@@ -226,25 +277,25 @@ export function compareCandidateRank(a, b) {
   const safeB =
     Number.isFinite(rankB) && rankB > 0 ? rankB : Number.MAX_SAFE_INTEGER;
   if (safeA !== safeB) return safeA - safeB;
-  return String(a?.canonical_station_id || "").localeCompare(
-    String(b?.canonical_station_id || ""),
+  return String(a?.global_station_id || "").localeCompare(
+    String(b?.global_station_id || ""),
   );
 }
 
 export function sortStationIdsByRank(stationIds, candidates) {
   const lookup = new Map(
     (Array.isArray(candidates) ? candidates : []).map((c) => [
-      c.canonical_station_id,
+      c.global_station_id,
       c,
     ]),
   );
   return (Array.isArray(stationIds) ? stationIds : []).slice().sort((a, b) => {
     const ca = lookup.get(a) || {
-      canonical_station_id: a,
+      global_station_id: a,
       candidate_rank: Number.MAX_SAFE_INTEGER,
     };
     const cb = lookup.get(b) || {
-      canonical_station_id: b,
+      global_station_id: b,
       candidate_rank: Number.MAX_SAFE_INTEGER,
     };
     return compareCandidateRank(ca, cb);
@@ -253,7 +304,7 @@ export function sortStationIdsByRank(stationIds, candidates) {
 
 export function resolveCandidateLabel(candidate, renameByRef) {
   if (!candidate) return "Unknown candidate";
-  const id = String(candidate.canonical_station_id || "").trim();
+  const id = String(candidate.global_station_id || "").trim();
   const base = String(candidate.display_name || "").trim();
   const renamed = renameByRef?.[toCandidateRef(id)] || "";
   const name = renamed || base;
@@ -282,7 +333,7 @@ export function buildResolvePayload({
     : [];
 
   const getCandidateByStationId = (id) => {
-    const raw = allCandidates.find((c) => c.canonical_station_id === id);
+    const raw = allCandidates.find((c) => c.global_station_id === id);
     if (raw) return raw;
     const curated = curatedItems.find((c) => c.curated_station_id === id);
     if (curated) return { display_name: curated.display_name };
@@ -294,7 +345,7 @@ export function buildResolvePayload({
     for (const id of ids) {
       const curated = curatedItems.find((c) => c.curated_station_id === id);
       if (curated && Array.isArray(curated.members)) {
-        for (const m of curated.members) rawIds.add(m.canonical_station_id);
+        for (const m of curated.members) rawIds.add(m.global_station_id);
       } else {
         rawIds.add(id);
       }
@@ -322,7 +373,7 @@ export function buildResolvePayload({
         getCandidateByStationId(parsed.id)?.display_name || "",
       ).trim();
       if (clean === orig) continue;
-      targets.push({ canonical_station_id: parsed.id, rename_to: clean });
+      targets.push({ global_station_id: parsed.id, rename_to: clean });
     }
     return targets;
   };
@@ -340,7 +391,7 @@ export function buildResolvePayload({
           if (p.type === "candidate") return p.id ? [p.id] : [];
           if (p.type === "merge") {
             const mi = draftState.mergeItems.find((m) => m.merge_id === p.id);
-            return uniqueStrings(mi?.member_station_ids || []);
+            return uniqueStrings(mi?.member_global_station_ids || []);
           }
           return [];
         }),
@@ -360,8 +411,11 @@ export function buildResolvePayload({
         section_type: String(dg.section_type || "other").trim() || "other",
         section_name: groupName,
         rename_to: groupName,
-        target_canonical_station_id: memberIds[0],
-        member_station_ids: sortStationIdsByRank(memberIds, allCandidates),
+        target_global_station_id: memberIds[0],
+        member_global_station_ids: sortStationIdsByRank(
+          memberIds,
+          allCandidates,
+        ),
       });
     }
 
@@ -373,10 +427,7 @@ export function buildResolvePayload({
     // Build walk links between groups
     const stationToSegment = new Map(
       allCandidates
-        .map((c) => [
-          c.canonical_station_id,
-          c.segment_context?.segment_id || "",
-        ])
+        .map((c) => [c.global_station_id, c.segment_context?.segment_id || ""])
         .filter(([, seg]) => Boolean(seg)),
     );
 
@@ -384,9 +435,9 @@ export function buildResolvePayload({
     for (let i = 0; i < groups.length; i++) {
       for (let j = i + 1; j < groups.length; j++) {
         const segA =
-          stationToSegment.get(groups[i].member_station_ids[0]) || "";
+          stationToSegment.get(groups[i].member_global_station_ids[0]) || "";
         const segB =
-          stationToSegment.get(groups[j].member_station_ids[0]) || "";
+          stationToSegment.get(groups[j].member_global_station_ids[0]) || "";
         if (!segA || !segB || segA === segB) continue;
         // Find matching draft group ids
         const dgI = draftState.groups[i];
@@ -409,10 +460,12 @@ export function buildResolvePayload({
       groups[0].segment_action = { walk_links: walkLinks };
     }
 
-    const allIds = uniqueStrings(groups.flatMap((g) => g.member_station_ids));
+    const allIds = uniqueStrings(
+      groups.flatMap((g) => g.member_global_station_ids),
+    );
     return {
       operation: "split",
-      selected_station_ids: sortStationIdsByRank(allIds, allCandidates),
+      selected_global_station_ids: sortStationIdsByRank(allIds, allCandidates),
       groups,
       rename_targets: renameTargets,
       note,
@@ -436,8 +489,8 @@ export function buildResolvePayload({
         group_label: label,
         section_type: inferCandidateCategory(c),
         section_name: label,
-        target_canonical_station_id: id,
-        member_station_ids: [id],
+        target_global_station_id: id,
+        member_global_station_ids: [id],
         rename_to: label,
       };
     });
@@ -447,7 +500,7 @@ export function buildResolvePayload({
       );
     return {
       operation: "split",
-      selected_station_ids: selected,
+      selected_global_station_ids: selected,
       groups,
       rename_targets: renameTargets,
       note,
@@ -459,11 +512,11 @@ export function buildResolvePayload({
   const renameTo = explicitMergeName || resolveNameAssumption(selected);
   return {
     operation: "merge",
-    selected_station_ids: selected,
+    selected_global_station_ids: selected,
     groups: [
       {
         group_label: "merge-selected",
-        member_station_ids: selected,
+        member_global_station_ids: selected,
         rename_to: renameTo,
       },
     ],

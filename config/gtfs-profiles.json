@@ -1,25 +1,12 @@
 {
   "profiles": {
-    "sample_de": {
-      "zipPath": "data/gtfs/de_fv.zip",
-      "description": "Sample GTFS profile for Germany testing"
-    },
-    "sample_dach": {
-      "zipPath": "data/gtfs/sample_dach.zip",
-      "description": "Sample GTFS profile for DACH mixed testing"
-    },
-    "sample_de_regional": {
-      "zipPath": "data/gtfs/de_rv.zip",
-      "description": "Sample GTFS profile for Germany testing"
-    },
-    "canonical_de_runtime": {
+    "pan_europe_runtime": {
       "runtime": {
-        "mode": "canonical-export",
-        "profile": "canonical_de_runtime",
-        "asOf": "latest",
-        "country": "DE"
+        "mode": "pan-europe-export",
+        "profile": "pan_europe_runtime",
+        "asOf": "latest"
       },
-      "description": "Runtime artifact profile generated via scripts/qa/build-profile.sh"
+      "description": "Pan-European runtime artifact generated via scripts/qa/build-profile.sh"
     }
   }
 }

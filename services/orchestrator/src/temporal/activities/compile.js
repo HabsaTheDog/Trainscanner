@@ -55,7 +55,7 @@ function toAbsolutePath(rootDir, value) {
 }
 
 function slugifyProfile(profile) {
-  return String(profile || "canonical_runtime")
+  return String(profile || "pan_europe_runtime")
     .trim()
     .replaceAll(/[^A-Za-z0-9._-]+/g, "-")
     .replaceAll(/-+/g, "-")
@@ -75,8 +75,8 @@ function createCompileActivities(_dbClient, config) {
     async compileGtfsArtifact(input = {}) {
       const tier = normalizeTier(input.tier);
       const profile =
-        String(input.profile || "canonical_runtime").trim() ||
-        "canonical_runtime";
+        String(input.profile || "pan_europe_runtime").trim() ||
+        "pan_europe_runtime";
       const asOf = String(input.asOf || "").trim();
       const country = String(input.country || "")
         .trim()
@@ -88,9 +88,9 @@ function createCompileActivities(_dbClient, config) {
         );
       }
 
-      if (country && !["DE", "AT", "CH"].includes(country)) {
+      if (country && !/^[A-Z]{2}$/.test(country)) {
         throw new Error(
-          `Invalid country '${input.country}'. Expected DE, AT, CH or empty.`,
+          `Invalid country '${input.country}'. Expected ISO-3166 alpha-2 code.`,
         );
       }
 

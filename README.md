@@ -9,7 +9,7 @@ GTFS profile switching and route debugging with MOTIS.
 npm ci
 
 # Start dev environment (Frontend: http://localhost:3000, MOTIS: http://localhost:8080)
-npm run dev -- --profile sample_de
+npm run dev -- --profile pan_europe_runtime
 
 # Stop environment
 npm run stop
@@ -21,15 +21,15 @@ npm run stop
 - **Frontend**: React + Vite (MapLibre GL JS mapping).
 - **Backend**: Node.js Orchestrator API.
 - **Routing Engine**: MOTIS in Docker.
-- **State**: PostgreSQL (PostGIS) for `system_state` and canonical GTFS data, with JSON file fallbacks in `services/orchestrator/state/`.
-- **Profiles**: Configured in `config/gtfs-profiles.json`. Includes static ZIPs or dynamic runtime exports.
+- **State**: PostgreSQL (PostGIS) for `system_state` and pan-European station/timetable/QA data, with JSON file fallbacks in `services/orchestrator/state/`.
+- **Profiles**: Configured in `config/gtfs-profiles.json`. Pan-European runtime export descriptor only.
 
 ## Core Features
 
 - Deterministic GTFS profile switching, validation, and concurrent switch locking.
 - Station autocomplete and route debugging endpoints.
 - QA Curation Dashboard (`/curation.html`) to merge/split duplicate or vague stations.
-- Deterministic data pipeline: DACH raw feeds -> NeTEx ingest -> Canonical PostGIS -> Runtime GTFS.
+- Deterministic data pipeline: provider raw feeds -> NeTEx ingest -> global PostGIS model -> runtime GTFS.
 
 ## API & Scripts Reference
 
@@ -39,7 +39,7 @@ npm run stop
 - `POST /api/gtfs/activate` (Switch profile)
 - `POST /api/gtfs/compile` (Trigger tiered GTFS artifact compilation workflow)
 - `GET /api/gtfs/stations`, `POST /api/routes`
-- `GET /api/qa/clusters`, `POST /api/qa/clusters/:id/decisions` (QA Curation)
+- `GET /api/qa/global-clusters`, `POST /api/qa/global-clusters/:id/decisions` (QA Curation)
 
 **Key Scripts (`scripts/`):**
 
@@ -47,13 +47,12 @@ npm run stop
 - `scripts/switch-gtfs.sh --profile <name>`: Switch active profile via API.
 - `scripts/data/db-bootstrap.sh`: Initialize the full PostGIS schema from scratch.
 - `scripts/data/run-station-review-pipeline.sh`: Run full QA ingestion/review pipeline.
-- `scripts/qa/build-profile.sh`: Build deterministic profile from Canonical PostGIS.
-- `scripts/data/fetch-dach-sources.sh`: Fetch raw DACH data snapshots.
-- `scripts/data/seed-base-spatial-data.sh`: Pre-seed `canonical_stations` from OSM/UIC base topology (cold-start mitigation).
+- `scripts/qa/build-profile.sh`: Build deterministic profile from pan-European timetable and transfer facts.
+- `scripts/data/fetch-sources.sh`: Fetch configured pan-European raw source snapshots.
 
 ## Tiered GTFS Artifact Compilation
 
-Compile tier-constrained GTFS artifacts directly from canonical PostGIS:
+Compile tier-constrained GTFS artifacts directly from pan-European timetable facts:
 
 ```bash
 # Tier 1
@@ -85,14 +84,14 @@ Run disposable Kubernetes jobs for post-compilation route validation:
 # Micro graph: bbox-scoped local/regional regression checks
 scripts/run-motis-k8s-test.sh \
   --mode micro \
-  --gtfs-path data/gtfs/runtime/de/2026-02-20/active-gtfs.zip \
+  --gtfs-path data/gtfs/runtime/pan_europe_runtime/2026-02-20/active-gtfs.zip \
   --tier regional \
   --bbox "48.05,11.35,48.30,11.75"
 
 # Macro graph: sparse high-speed cross-border checks
 scripts/run-motis-k8s-test.sh \
   --mode macro \
-  --gtfs-path data/artifacts/canonical-high-speed-2026-02-20.zip \
+  --gtfs-path data/artifacts/pan-europe-high-speed-2026-02-20.zip \
   --tier high-speed
 ```
 

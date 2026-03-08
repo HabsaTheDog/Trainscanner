@@ -535,49 +535,33 @@ async function handleGraphqlRequest(req, res, url) {
 }
 
 async function handleQaClusterRequest(req, res, url) {
-  if (req.method === "GET" && url.pathname === "/api/qa/clusters") {
-    const { getReviewClusters } = require("./domains/qa/api");
-    sendJson(res, 200, await getReviewClusters(url));
-    return true;
-  }
-
-  if (req.method === "GET" && url.pathname === "/api/qa/curated-stations") {
-    const { getCuratedStations } = require("./domains/qa/api");
-    sendJson(res, 200, await getCuratedStations(url));
+  if (req.method === "GET" && url.pathname === "/api/qa/global-clusters") {
+    const { getGlobalClusters } = require("./domains/qa/api");
+    sendJson(res, 200, await getGlobalClusters(url));
     return true;
   }
 
   if (req.method === "GET") {
     const clusterDetailMatch = url.pathname.match(
-      /^\/api\/qa\/clusters\/([^/]+)$/,
+      /^\/api\/qa\/global-clusters\/([^/]+)$/,
     );
     if (clusterDetailMatch) {
-      const { getReviewClusterDetail } = require("./domains/qa/api");
+      const { getGlobalClusterDetail } = require("./domains/qa/api");
       const clusterId = decodeURIComponent(clusterDetailMatch[1]);
-      sendJson(res, 200, await getReviewClusterDetail(clusterId));
-      return true;
-    }
-
-    const curatedDetailMatch = url.pathname.match(
-      /^\/api\/qa\/curated-stations\/([^/]+)$/,
-    );
-    if (curatedDetailMatch) {
-      const { getCuratedStationDetail } = require("./domains/qa/api");
-      const curatedStationId = decodeURIComponent(curatedDetailMatch[1]);
-      sendJson(res, 200, await getCuratedStationDetail(curatedStationId));
+      sendJson(res, 200, await getGlobalClusterDetail(clusterId));
       return true;
     }
   }
 
   if (req.method === "POST") {
     const clusterDecisionMatch = url.pathname.match(
-      /^\/api\/qa\/clusters\/([^/]+)\/decisions$/,
+      /^\/api\/qa\/global-clusters\/([^/]+)\/decisions$/,
     );
     if (clusterDecisionMatch) {
       const body = await parseJsonBody(req);
-      const { postReviewClusterDecision } = require("./domains/qa/api");
+      const { postGlobalClusterDecision } = require("./domains/qa/api");
       const clusterId = decodeURIComponent(clusterDecisionMatch[1]);
-      sendJson(res, 200, await postReviewClusterDecision(clusterId, body));
+      sendJson(res, 200, await postGlobalClusterDecision(clusterId, body));
       return true;
     }
   }

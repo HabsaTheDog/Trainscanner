@@ -22,7 +22,7 @@ function normalizeProfiles(raw) {
 
 function normalizeRuntimeDescriptor(runtime) {
   return {
-    mode: String(runtime.mode || runtime.source || "canonical-export").trim(),
+    mode: String(runtime.mode || runtime.source || "pan-europe-export").trim(),
     profile: typeof runtime.profile === "string" ? runtime.profile.trim() : "",
     asOf: typeof runtime.asOf === "string" ? runtime.asOf.trim() : "latest",
     country: typeof runtime.country === "string" ? runtime.country.trim() : "",
@@ -178,11 +178,11 @@ async function resolveStaticProfileArtifact(
 }
 
 function resolveRuntimeMode(profileName, runtime) {
-  const mode = runtime.mode || "canonical-export";
-  if (mode !== "canonical-export") {
+  const mode = runtime.mode || "pan-europe-export";
+  if (mode !== "pan-europe-export") {
     throw new AppError({
       code: "INVALID_CONFIG",
-      message: `Profile '${profileName}' runtime mode '${mode}' is unsupported (expected canonical-export)`,
+      message: `Profile '${profileName}' runtime mode '${mode}' is unsupported (expected pan-europe-export)`,
     });
   }
   return mode;

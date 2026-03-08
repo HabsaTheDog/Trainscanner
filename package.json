@@ -14,7 +14,6 @@
     "up": "./scripts/up.sh",
     "init": "./scripts/init-motis.sh",
     "switch": "./scripts/switch-gtfs.sh",
-    "data:seed:base-spatial": "./scripts/data/seed-base-spatial-data.sh",
     "check:data": "./scripts/check-motis-data.sh",
     "check:config": "./scripts/validate-config.sh",
     "check:docs": "bash -lc \"test -f README.md && test -f docs/agents/AGENTS.md && test -f docs/agents/tests.AGENTS.md && test -f docs/planning/Project\\ Scope.md && test -f docs/planning/Agent_Migration_Plan.md\"",

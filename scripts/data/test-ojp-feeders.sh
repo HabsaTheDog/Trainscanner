@@ -14,8 +14,8 @@ CASE_INDEX="0"
 FROM_REF=""
 TO_REF=""
 DEPARTURE_TIME=""
-FROM_CANONICAL_ID=""
-TO_CANONICAL_ID=""
+FROM_GLOBAL_ID=""
+TO_GLOBAL_ID=""
 OUTPUT_FILE=""
 TIMEOUT_OVERRIDE=""
 TMP_FILES=()
@@ -27,15 +27,15 @@ Usage: scripts/data/test-ojp-feeders.sh [options]
 Probe configured OJP feeder endpoint for one test journey.
 
 Options:
-  --country DE|AT|CH          Restrict to one country (required if provider-id omitted)
+  --country <ISO2>            Restrict to one country (required if provider-id omitted)
   --provider-id ID            Probe one provider from config/ojp-endpoints.json
   --config PATH               Override OJP endpoints config file path
   --case-index N              Index into provider testCases array (default: 0)
   --from-ref REF              Override origin stop ref
   --to-ref REF                Override destination stop ref
   --departure-time ISO_TS     Override departure timestamp (e.g. 2026-02-20T08:00:00Z)
-  --from-canonical-id ID      Resolve origin ref from ojp_stop_refs
-  --to-canonical-id ID        Resolve destination ref from ojp_stop_refs
+  --from-global-id ID         Resolve origin ref from ojp_stop_refs
+  --to-global-id ID           Resolve destination ref from ojp_stop_refs
   --timeout-sec N             Override request timeout
   --output PATH               Write JSON report to file
   -h, --help                  Show this help
@@ -134,14 +134,14 @@ parse_args() {
         DEPARTURE_TIME="$2"
         shift 2
         ;;
-      --from-canonical-id)
-        [[ $# -ge 2 ]] || fail "Missing value for --from-canonical-id"
-        FROM_CANONICAL_ID="$2"
+      --from-global-id)
+        [[ $# -ge 2 ]] || fail "Missing value for --from-global-id"
+        FROM_GLOBAL_ID="$2"
         shift 2
         ;;
-      --to-canonical-id)
-        [[ $# -ge 2 ]] || fail "Missing value for --to-canonical-id"
-        TO_CANONICAL_ID="$2"
+      --to-global-id)
+        [[ $# -ge 2 ]] || fail "Missing value for --to-global-id"
+        TO_GLOBAL_ID="$2"
         shift 2
         ;;
       --output)
@@ -164,8 +164,8 @@ parse_args() {
     esac
   done
 
-  if [[ -n "$COUNTRY_FILTER" && "$COUNTRY_FILTER" != "DE" && "$COUNTRY_FILTER" != "AT" && "$COUNTRY_FILTER" != "CH" ]]; then
-    fail "Invalid --country '$COUNTRY_FILTER' (expected DE, AT, or CH)"
+  if [[ -n "$COUNTRY_FILTER" && ! "$COUNTRY_FILTER" =~ ^[A-Z]{2}$ ]]; then
+    fail "Invalid --country '$COUNTRY_FILTER' (expected ISO-3166 alpha-2 code)"
   fi
 
   [[ "$CASE_INDEX" =~ ^[0-9]+$ ]] || fail "--case-index must be an integer"
@@ -203,19 +203,19 @@ resolve_provider_json() {
 }
 
 resolve_ojp_ref_from_db() {
-  local canonical_station_id="$1"
+  local global_station_id="$1"
   local provider_id="$2"
   local country="$3"
 
-  local canonical_esc provider_esc country_esc ref
-  canonical_esc="$(db_sql_escape "$canonical_station_id")"
+  local global_esc provider_esc country_esc ref
+  global_esc="$(db_sql_escape "$global_station_id")"
   provider_esc="$(db_sql_escape "$provider_id")"
   country_esc="$(db_sql_escape "$country")"
 
   ref="$(db_psql -At -c "
 SELECT ojp_stop_ref
 FROM ojp_stop_refs
-WHERE canonical_station_id = '${canonical_esc}'
+WHERE global_station_id = '${global_esc}'
   AND provider_id = '${provider_esc}'
   AND country = '${country_esc}'
 ORDER BY is_primary DESC, confidence_score DESC NULLS LAST, ojp_stop_ref ASC
@@ -315,7 +315,7 @@ main() {
   request_mode="$(jq -r '.requestMode // "ojp_xml_post"' <<<"$provider_json")"
   timeout_sec="$(jq -r '.timeoutSec // 25' <<<"$provider_json")"
 
-  [[ "$provider_country" == "DE" || "$provider_country" == "AT" || "$provider_country" == "CH" ]] || fail "Provider '$PROVIDER_ID' has unsupported country '$provider_country' (must be DE|AT|CH)"
+  [[ "$provider_country" =~ ^[A-Z]{2}$ ]] || fail "Provider '$PROVIDER_ID' has unsupported country '$provider_country' (expected ISO-3166 alpha-2 code)"
   [[ "$request_mode" == "ojp_xml_post" ]] || fail "Unsupported requestMode '$request_mode' for provider '$PROVIDER_ID'"
 
   if [[ -n "$COUNTRY_FILTER" && "$COUNTRY_FILTER" != "$provider_country" ]]; then
@@ -339,16 +339,16 @@ main() {
   to_ref="$TO_REF"
   departure_time="$DEPARTURE_TIME"
 
-  if [[ -n "$FROM_CANONICAL_ID" || -n "$TO_CANONICAL_ID" ]]; then
-    [[ -n "$FROM_CANONICAL_ID" && -n "$TO_CANONICAL_ID" ]] || fail "Provide both --from-canonical-id and --to-canonical-id"
+  if [[ -n "$FROM_GLOBAL_ID" || -n "$TO_GLOBAL_ID" ]]; then
+    [[ -n "$FROM_GLOBAL_ID" && -n "$TO_GLOBAL_ID" ]] || fail "Provide both --from-global-id and --to-global-id"
     db_load_env
     db_resolve_connection
     db_ensure_ready
     "${SCRIPT_DIR}/db-bootstrap.sh" --quiet
-    from_ref="$(resolve_ojp_ref_from_db "$FROM_CANONICAL_ID" "$PROVIDER_ID" "$provider_country")"
-    to_ref="$(resolve_ojp_ref_from_db "$TO_CANONICAL_ID" "$PROVIDER_ID" "$provider_country")"
-    [[ -n "$from_ref" ]] || fail "No ojp_stop_refs mapping for from canonical station '$FROM_CANONICAL_ID' (provider '$PROVIDER_ID')"
-    [[ -n "$to_ref" ]] || fail "No ojp_stop_refs mapping for to canonical station '$TO_CANONICAL_ID' (provider '$PROVIDER_ID')"
+    from_ref="$(resolve_ojp_ref_from_db "$FROM_GLOBAL_ID" "$PROVIDER_ID" "$provider_country")"
+    to_ref="$(resolve_ojp_ref_from_db "$TO_GLOBAL_ID" "$PROVIDER_ID" "$provider_country")"
+    [[ -n "$from_ref" ]] || fail "No ojp_stop_refs mapping for from global station '$FROM_GLOBAL_ID' (provider '$PROVIDER_ID')"
+    [[ -n "$to_ref" ]] || fail "No ojp_stop_refs mapping for to global station '$TO_GLOBAL_ID' (provider '$PROVIDER_ID')"
   fi
 
   if [[ -z "$from_ref" || -z "$to_ref" ]]; then

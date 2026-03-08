@@ -1,0 +1,13 @@
+{
+  "caseId": "runtime_coordinate_reverse",
+  "expected": {
+    "caseId": "runtime_coordinate_reverse",
+    "status": 200,
+    "errorCode": null,
+    "itineraryCount": 0,
+    "directCount": 0,
+    "motisAttemptCount": 2,
+    "originStrategy": "coordinates",
+    "destinationStrategy": "coordinates"
+  }
+}

@@ -174,9 +174,9 @@ test("e2e profile activation and route smoke/regression", async (t) => {
           "content-type": "application/json",
         },
         body: JSON.stringify({
-          origin: "active-gtfs_1001",
-          destination: "active-gtfs_1002",
-          datetime: "2026-02-20T08:00:00Z",
+          origin: "active-gtfs_gsp_de_berlin_hbf",
+          destination: "active-gtfs_gsp_at_wien_hbf",
+          datetime: "2026-03-04T08:00:00Z",
         }),
       });
 
@@ -191,11 +191,11 @@ test("e2e profile activation and route smoke/regression", async (t) => {
   assert.equal(taggedRoute.status, 200);
   assert.equal(
     taggedRoute.body.routeRequestResolved.origin.resolved,
-    "active-gtfs_1001",
+    "active-gtfs_gsp_de_berlin_hbf",
   );
   assert.equal(
     taggedRoute.body.routeRequestResolved.destination.resolved,
-    "active-gtfs_1002",
+    "active-gtfs_gsp_at_wien_hbf",
   );
   assert.ok(
     ["tagged_stop_id", "raw"].includes(
@@ -214,9 +214,9 @@ test("e2e profile activation and route smoke/regression", async (t) => {
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      origin: "Alpha Station [1001]",
-      destination: "Beta Station [1002]",
-      datetime: "2026-02-20T08:00:00Z",
+      origin: "Berlin Hbf [gsp_de_berlin_hbf]",
+      destination: "Wien Hbf [gsp_at_wien_hbf]",
+      datetime: "2026-03-04T08:00:00Z",
     }),
   });
 

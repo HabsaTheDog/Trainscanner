@@ -5,13 +5,13 @@ const { AppError } = require("../core/errors");
 const { fetchSources } = require("../domains/source-discovery/service");
 const { ingestNetex } = require("../domains/ingest/service");
 const {
-  buildCanonicalStations,
-  buildReviewQueue,
-} = require("../domains/canonical/service");
+  buildGlobalStations,
+  buildGlobalMergeQueue,
+} = require("../domains/global/service");
 const { parsePipelineCliArgs, printCliError } = require("./pipeline-common");
 const { isStrictIsoDate } = require("../core/date");
 
-const STEP_IDS = ["fetch", "ingest", "canonical", "review-queue"];
+const STEP_IDS = ["fetch", "ingest", "global-stations", "merge-queue"];
 
 function parseStepToken(raw) {
   const token = String(raw || "")
@@ -20,8 +20,17 @@ function parseStepToken(raw) {
   if (!token) {
     return "";
   }
-  if (token === "queue" || token === "review" || token === "review_queue") {
-    return "review-queue";
+  if (
+    token === "queue" ||
+    token === "merge" ||
+    token === "merge_queue" ||
+    token === "review" ||
+    token === "review_queue"
+  ) {
+    return "merge-queue";
+  }
+  if (token === "global" || token === "stations") {
+    return "global-stations";
   }
   return token;
 }
@@ -44,30 +53,30 @@ function printUsage() {
   process.stdout.write("\n");
   process.stdout.write("Options:\n");
   process.stdout.write(
-    "  --country DE|AT|CH          Restrict refresh scope to one country (default: all DACH)\n",
+    "  --country <ISO2>            Restrict refresh scope to one country\n",
   );
   process.stdout.write(
     "  --as-of YYYY-MM-DD          Snapshot date override for all stages\n",
   );
   process.stdout.write(
-    "  --source-id <id>            Restrict fetch/ingest/canonical to one source id\n",
+    "  --source-id <id>            Restrict fetch/ingest/global-stations to one source id\n",
   );
   process.stdout.write(
-    "  --only <list>               Comma-separated steps: fetch,ingest,canonical,review-queue\n",
+    "  --only <list>               Comma-separated steps: fetch,ingest,global-stations,merge-queue\n",
   );
   process.stdout.write(
-    "  --from-step <step>          Start from step: fetch|ingest|canonical|review-queue\n",
+    "  --from-step <step>          Start from step: fetch|ingest|global-stations|merge-queue\n",
   );
   process.stdout.write(
-    "  --to-step <step>            Stop after step: fetch|ingest|canonical|review-queue\n",
+    "  --to-step <step>            Stop after step: fetch|ingest|global-stations|merge-queue\n",
   );
   process.stdout.write("  --skip-fetch                Skip fetch step\n");
   process.stdout.write("  --skip-ingest               Skip ingest step\n");
   process.stdout.write(
-    "  --skip-canonical            Skip canonical build step\n",
+    "  --skip-global-stations      Skip global station build step\n",
   );
   process.stdout.write(
-    "  --skip-review-queue         Skip review queue build step\n",
+    "  --skip-merge-queue          Skip global merge queue build step\n",
   );
   process.stdout.write(
     "  --dry-run                   Print resolved plan without executing stages\n",
@@ -87,7 +96,7 @@ function assertStepId(stepId, flagName) {
   }
   throw new AppError({
     code: "INVALID_REQUEST",
-    message: `${flagName} must be one of fetch|ingest|canonical|review-queue`,
+    message: `${flagName} must be one of fetch|ingest|global-stations|merge-queue`,
   });
 }
 
@@ -113,8 +122,8 @@ function parseArgsToken(options, tokens, index) {
   const skipFlags = {
     "--skip-fetch": "fetch",
     "--skip-ingest": "ingest",
-    "--skip-canonical": "canonical",
-    "--skip-review-queue": "review-queue",
+    "--skip-global-stations": "global-stations",
+    "--skip-merge-queue": "merge-queue",
   };
 
   switch (arg) {
@@ -190,10 +199,10 @@ function parseArgs(argv = []) {
     return options;
   }
 
-  if (options.country && !["DE", "AT", "CH"].includes(options.country)) {
+  if (options.country && !/^[A-Z]{2}$/.test(options.country)) {
     throw new AppError({
       code: "INVALID_REQUEST",
-      message: "country must be one of 'DE', 'AT', 'CH'",
+      message: "country must be an ISO-3166 alpha-2 code",
     });
   }
 
@@ -262,7 +271,7 @@ function buildStepArgs(options, stepId) {
   appendArgIfSet(args, "--as-of", options.asOf);
   appendArgIfSet(args, "--country", options.country);
 
-  if (stepId !== "review-queue") {
+  if (stepId !== "merge-queue") {
     appendArgIfSet(args, "--source-id", options.sourceId);
   }
 
@@ -272,7 +281,7 @@ function buildStepArgs(options, stepId) {
 function toStepDefinitions(options) {
   return {
     fetch: {
-      label: "Fetch DACH sources",
+      label: "Fetch source datasets",
       args: buildStepArgs(options, "fetch"),
       run: (runOptions) =>
         fetchSources({
@@ -292,22 +301,22 @@ function toStepDefinitions(options) {
           jobOrchestrationEnabled: false,
         }),
     },
-    canonical: {
-      label: "Build canonical stations",
-      args: buildStepArgs(options, "canonical"),
+    "global-stations": {
+      label: "Build global stations",
+      args: buildStepArgs(options, "global-stations"),
       run: (runOptions) =>
-        buildCanonicalStations({
+        buildGlobalStations({
           rootDir: runOptions.rootDir,
           runId: runOptions.runId,
           args: runOptions.args,
           jobOrchestrationEnabled: false,
         }),
     },
-    "review-queue": {
-      label: "Build station review queue",
-      args: buildStepArgs(options, "review-queue"),
+    "merge-queue": {
+      label: "Build global merge queue",
+      args: buildStepArgs(options, "merge-queue"),
       run: (runOptions) =>
-        buildReviewQueue({
+        buildGlobalMergeQueue({
           rootDir: runOptions.rootDir,
           runId: runOptions.runId,
           args: runOptions.args,

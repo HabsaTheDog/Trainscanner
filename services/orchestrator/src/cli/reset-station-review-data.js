@@ -9,7 +9,7 @@ function printUsage() {
   );
   process.stdout.write("\n");
   process.stdout.write(
-    "Delete all station-review curation data, including legacy override rows.\n",
+    "Delete pan-European station build and QA merge data.\n",
   );
   process.stdout.write("\n");
   process.stdout.write("Options:\n");
@@ -70,12 +70,15 @@ function run() {
         const row = await client.queryOne(
           `
           SELECT
-            (SELECT COUNT(*)::integer FROM canonical_review_queue) AS review_queue_items,
-            (SELECT COUNT(*)::integer FROM canonical_station_overrides) AS legacy_override_items,
-            (SELECT COUNT(*)::integer FROM qa_station_clusters) AS clusters,
-            (SELECT COUNT(*)::integer FROM qa_station_cluster_decisions) AS decisions,
-            (SELECT COUNT(*)::integer FROM qa_station_groups) AS groups,
-            (SELECT COUNT(*)::integer FROM qa_curated_stations) AS curated_stations
+            (SELECT COUNT(*)::integer FROM provider_datasets) AS provider_datasets,
+            (SELECT COUNT(*)::integer FROM raw_provider_stop_places) AS raw_stop_places,
+            (SELECT COUNT(*)::integer FROM raw_provider_stop_points) AS raw_stop_points,
+            (SELECT COUNT(*)::integer FROM global_stations) AS global_stations,
+            (SELECT COUNT(*)::integer FROM global_stop_points) AS global_stop_points,
+            (SELECT COUNT(*)::integer FROM provider_global_station_mappings) AS station_mappings,
+            (SELECT COUNT(*)::integer FROM provider_global_stop_point_mappings) AS stop_point_mappings,
+            (SELECT COUNT(*)::integer FROM qa_merge_clusters) AS merge_clusters,
+            (SELECT COUNT(*)::integer FROM qa_merge_decisions) AS merge_decisions
           `,
         );
         return row || {};
@@ -87,29 +90,22 @@ function run() {
         `
         BEGIN;
         TRUNCATE TABLE
-          qa_curated_station_field_provenance,
-          qa_curated_station_lineage,
-          qa_curated_station_members,
-          qa_curated_stations,
-          qa_station_group_section_links,
-          qa_station_group_section_members,
-          qa_station_group_sections,
-          qa_station_groups,
-          qa_station_cluster_decision_members,
-          qa_station_cluster_decisions,
-          qa_station_cluster_queue_items,
-          qa_station_cluster_evidence,
-          qa_station_cluster_candidates,
-          qa_station_clusters,
-          qa_station_segment_links,
-          qa_station_segments,
-          qa_station_complexes,
-          station_segment_line_links,
-          canonical_line_identities,
-          qa_station_naming_overrides,
-          qa_station_display_names,
-          canonical_station_overrides,
-          canonical_review_queue
+          qa_merge_decision_members,
+          qa_merge_decisions,
+          qa_merge_cluster_evidence,
+          qa_merge_cluster_candidates,
+          qa_merge_clusters,
+          transfer_edges,
+          timetable_trip_stop_times,
+          timetable_trips,
+          provider_global_stop_point_mappings,
+          provider_global_station_mappings,
+          global_stop_points,
+          global_stations,
+          raw_provider_stop_points,
+          raw_provider_stop_places,
+          provider_datasets,
+          import_runs
         RESTART IDENTITY CASCADE;
         COMMIT;
         `,

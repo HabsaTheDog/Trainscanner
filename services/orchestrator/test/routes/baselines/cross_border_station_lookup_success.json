@@ -1,10 +1,10 @@
 {
-  "caseId": "reg_station_lookup_success",
+  "caseId": "cross_border_station_lookup_success",
   "expected": {
-    "caseId": "reg_station_lookup_success",
+    "caseId": "cross_border_station_lookup_success",
     "status": 200,
     "errorCode": null,
-    "itineraryCount": 1,
+    "itineraryCount": 5,
     "directCount": 0,
     "motisAttemptCount": 2,
     "originStrategy": "station_lookup",

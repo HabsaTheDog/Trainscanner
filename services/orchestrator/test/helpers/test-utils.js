@@ -127,8 +127,8 @@ files = {
   ],
   'stops.txt': [
     ['stop_id','stop_name','stop_lat','stop_lon','location_type','parent_station'],
-    ['1001','Alpha Station','48.100000','11.500000','0',''],
-    ['1002','Beta Station','48.200000','11.600000','0','']
+    ['gsp_de_berlin_hbf','Berlin Hbf','52.525000','13.369000','0',''],
+    ['gsp_at_wien_hbf','Wien Hbf','48.185000','16.374000','0','']
   ],
   'routes.txt': [
     ['route_id','agency_id','route_short_name','route_long_name','route_type'],
@@ -140,8 +140,8 @@ files = {
   ],
   'stop_times.txt': [
     ['trip_id','arrival_time','departure_time','stop_id','stop_sequence'],
-    ['trip1','08:00:00','08:00:00','1001','1'],
-    ['trip1','08:10:00','08:10:00','1002','2']
+    ['trip1','08:00:00','08:00:00','gsp_de_berlin_hbf','1'],
+    ['trip1','14:10:00','14:10:00','gsp_at_wien_hbf','2']
   ],
   'calendar.txt': [
     ['service_id','monday','tuesday','wednesday','thursday','friday','saturday','sunday','start_date','end_date'],

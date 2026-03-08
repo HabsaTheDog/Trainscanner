@@ -98,7 +98,7 @@ db_resolve_connection() {
   DB_USER="${CANONICAL_DB_USER:-${PGUSER:-trainscanner}}"
   DB_NAME="${CANONICAL_DB_NAME:-${PGDATABASE:-trainscanner}}"
   DB_PASSWORD="${CANONICAL_DB_PASSWORD:-${PGPASSWORD:-trainscanner}}"
-  DB_DOCKER_PROFILE="${CANONICAL_DB_DOCKER_PROFILE:-dach-data}"
+  DB_DOCKER_PROFILE="${CANONICAL_DB_DOCKER_PROFILE:-pan-europe-data}"
   DB_DOCKER_SERVICE="${CANONICAL_DB_DOCKER_SERVICE:-postgis}"
   if db_has_explicit_direct_target; then
     explicit_direct_target="true"

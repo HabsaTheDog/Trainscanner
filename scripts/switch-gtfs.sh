@@ -20,10 +20,10 @@ Usage:
   scripts/switch-gtfs.sh --profile <name> [--reimport] [--api-url <url>] [--timeout-sec <seconds>] [--smoke-gate]
 
 Examples:
-  scripts/switch-gtfs.sh --profile sample_de
-  scripts/switch-gtfs.sh --profile sample_de --reimport
-  scripts/switch-gtfs.sh --profile sample_dach --api-url http://localhost:3000
-  scripts/switch-gtfs.sh --profile sample_de --smoke-gate --smoke-max-attempts 180
+  scripts/switch-gtfs.sh --profile pan_europe_runtime
+  scripts/switch-gtfs.sh --profile pan_europe_runtime --reimport
+  scripts/switch-gtfs.sh --profile pan_europe_runtime --api-url http://localhost:3000
+  scripts/switch-gtfs.sh --profile pan_europe_runtime --smoke-gate --smoke-max-attempts 180
 USAGE
   return 0
 }

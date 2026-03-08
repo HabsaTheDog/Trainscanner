@@ -1,0 +1,19 @@
+{
+  "version": "1",
+  "cases": [
+    {
+      "id": "runtime_coordinate_forward",
+      "label": "Coordinate forward request resolves against live runtime profile",
+      "origin": "50.311529,8.91539",
+      "destination": "50.332747,8.76125",
+      "datetime": "2026-03-04T06:54:00Z"
+    },
+    {
+      "id": "runtime_coordinate_reverse",
+      "label": "Coordinate reverse request resolves against live runtime profile",
+      "origin": "50.332747,8.76125",
+      "destination": "50.311529,8.91539",
+      "datetime": "2026-03-04T13:51:00Z"
+    }
+  ]
+}

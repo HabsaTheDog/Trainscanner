@@ -7,35 +7,32 @@ const { createPostgisClient } = require("../../data/postgis/client");
 const {
   createPipelineJobsRepo,
 } = require("../../data/postgis/repositories/pipeline-jobs-repo");
-const {
-  createReviewQueueRepo,
-} = require("../../data/postgis/repositories/review-queue-repo");
 const { createJobOrchestrator } = require("../../core/job-orchestrator");
 const { isStrictIsoDate } = require("../../core/date");
 
-function printReportReviewQueueUsage() {
+function printReportMergeQueueUsage() {
   process.stdout.write(
     "Usage: scripts/data/report-review-queue.sh [options]\n",
   );
   process.stdout.write("\n");
   process.stdout.write(
-    "Report canonical review queue coverage and issue snapshots.\n",
+    "Report pan-European global merge queue coverage and cluster snapshots.\n",
   );
   process.stdout.write("\n");
   process.stdout.write("Options:\n");
   process.stdout.write(
-    "  --country DE|AT|CH   Restrict report to one country\n",
+    "  --country <ISO2>      Restrict report to one country\n",
   );
   process.stdout.write(
-    "  --as-of YYYY-MM-DD   Report queue entries generated for this as-of scope tag\n",
+    "  --as-of YYYY-MM-DD    Report clusters generated for this scope tag\n",
   );
   process.stdout.write(
-    "  --all-scopes         Report all scope tags (instead of latest/as-of tag)\n",
+    "  --all-scopes          Report all scope tags (instead of latest/as-of tag)\n",
   );
   process.stdout.write(
-    "  --limit N            Number of detailed rows to include (default: 20)\n",
+    "  --limit N             Number of detailed rows to include (default: 20)\n",
   );
-  process.stdout.write("  -h, --help           Show this help\n");
+  process.stdout.write("  -h, --help            Show this help\n");
 }
 
 function readRequiredTokenValue(tokens, index, flagName) {
@@ -53,10 +50,10 @@ function parseCountry(value) {
   const normalized = String(value || "")
     .trim()
     .toUpperCase();
-  if (!["DE", "AT", "CH"].includes(normalized)) {
+  if (!/^[A-Z]{2}$/.test(normalized)) {
     throw new AppError({
       code: "INVALID_REQUEST",
-      message: "Invalid --country value (expected 'DE', 'AT', or 'CH')",
+      message: "Invalid --country value (expected ISO-3166 alpha-2 code)",
     });
   }
   return normalized;
@@ -83,7 +80,7 @@ function parsePositiveInt(value, flagName) {
   return parsedValue;
 }
 
-function parseReportReviewQueueArgs(args = []) {
+function parseReportArgs(args = []) {
   const parsed = {
     helpRequested: false,
     country: "",
@@ -95,7 +92,6 @@ function parseReportReviewQueueArgs(args = []) {
 
   for (let i = 0; i < tokens.length; i += 1) {
     const token = String(tokens[i] || "");
-
     switch (token) {
       case "-h":
       case "--help":
@@ -137,7 +133,6 @@ function createQaService(deps = {}) {
   const createJobsRepo = deps.createPipelineJobsRepo || createPipelineJobsRepo;
   const createOrchestrator =
     deps.createJobOrchestrator || createJobOrchestrator;
-  const createQueueRepo = deps.createReviewQueueRepo || createReviewQueueRepo;
 
   return {
     async reportReviewQueue(options = {}) {
@@ -153,11 +148,11 @@ function createQaService(deps = {}) {
           ? defaultJobOrchestrationEnabled
           : Boolean(options.jobOrchestrationEnabled);
 
-      const parsed = parseReportReviewQueueArgs(args);
+      const parsed = parseReportArgs(args);
 
       const executeReport = async () => {
         if (parsed.helpRequested) {
-          printReportReviewQueueUsage();
+          printReportMergeQueueUsage();
           return {
             ok: true,
             help: true,
@@ -166,26 +161,116 @@ function createQaService(deps = {}) {
 
         const client = createClient({ rootDir });
         await client.ensureReady();
-        const queueRepo = createQueueRepo(client);
         const scopeTag = parsed.asOf || "latest";
-        const scope = {
-          country: parsed.country,
-          scopeTag,
-          allScopes: parsed.allScopes,
-          limitRows: parsed.limitRows,
-        };
 
-        const metrics = await queueRepo.fetchReportMetrics(scope);
-        if (metrics.totalItems === 0) {
+        const metrics = await client.queryOne(
+          `
+          SELECT
+            COUNT(*)::integer AS total_clusters,
+            COUNT(*) FILTER (WHERE status = 'open')::integer AS open_clusters,
+            COUNT(*) FILTER (WHERE status = 'in_review')::integer AS in_review_clusters,
+            COUNT(*) FILTER (WHERE status = 'resolved')::integer AS resolved_clusters,
+            COUNT(*) FILTER (WHERE status = 'dismissed')::integer AS dismissed_clusters
+          FROM qa_merge_clusters c
+          WHERE (NULLIF(:'country', '') IS NULL OR NULLIF(:'country', '') = ANY (COALESCE(c.country_tags, ARRAY[]::text[])))
+            AND (
+              :'all_scopes' = 'true'
+              OR c.scope_tag = :'scope_tag'
+            );
+          `,
+          {
+            country: parsed.country || "",
+            all_scopes: parsed.allScopes ? "true" : "false",
+            scope_tag: scopeTag,
+          },
+        );
+
+        const totalClusters =
+          Number.parseInt(String(metrics?.total_clusters || 0), 10) || 0;
+        if (totalClusters <= 0) {
           throw new AppError({
             code: "REVIEW_QUEUE_REPORT_FAILED",
-            message: "No review queue items found in selected scope",
+            message: "No global merge clusters found in selected scope",
           });
         }
 
-        const issueTypeRows = await queueRepo.listCountsByIssueType(scope);
-        const openOrConfirmedRows = await queueRepo.listOpenOrConfirmed(scope);
-        const resolvedRows = await queueRepo.listResolved(scope);
+        const countsBySeverity = await client.queryRows(
+          `
+          SELECT severity, status, COUNT(*)::integer AS clusters
+          FROM qa_merge_clusters c
+          WHERE (NULLIF(:'country', '') IS NULL OR NULLIF(:'country', '') = ANY (COALESCE(c.country_tags, ARRAY[]::text[])))
+            AND (
+              :'all_scopes' = 'true'
+              OR c.scope_tag = :'scope_tag'
+            )
+          GROUP BY severity, status
+          ORDER BY severity, status;
+          `,
+          {
+            country: parsed.country || "",
+            all_scopes: parsed.allScopes ? "true" : "false",
+            scope_tag: scopeTag,
+          },
+        );
+
+        const openRows = await client.queryRows(
+          `
+          SELECT
+            merge_cluster_id AS cluster_id,
+            severity,
+            status,
+            display_name,
+            candidate_count,
+            issue_count,
+            scope_tag,
+            to_char(updated_at, 'YYYY-MM-DD HH24:MI:SSOF') AS updated_at
+          FROM qa_merge_clusters c
+          WHERE (NULLIF(:'country', '') IS NULL OR NULLIF(:'country', '') = ANY (COALESCE(c.country_tags, ARRAY[]::text[])))
+            AND (
+              :'all_scopes' = 'true'
+              OR c.scope_tag = :'scope_tag'
+            )
+            AND c.status IN ('open', 'in_review')
+          ORDER BY
+            CASE c.severity WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+            c.updated_at DESC
+          LIMIT NULLIF(:'limit_rows', '')::integer;
+          `,
+          {
+            country: parsed.country || "",
+            all_scopes: parsed.allScopes ? "true" : "false",
+            scope_tag: scopeTag,
+            limit_rows: String(parsed.limitRows),
+          },
+        );
+
+        const resolvedRows = await client.queryRows(
+          `
+          SELECT
+            merge_cluster_id AS cluster_id,
+            severity,
+            status,
+            display_name,
+            scope_tag,
+            COALESCE(to_char(resolved_at, 'YYYY-MM-DD HH24:MI:SSOF'), '-') AS resolved_at,
+            COALESCE(resolved_by, '-') AS resolved_by
+          FROM qa_merge_clusters c
+          WHERE (NULLIF(:'country', '') IS NULL OR NULLIF(:'country', '') = ANY (COALESCE(c.country_tags, ARRAY[]::text[])))
+            AND (
+              :'all_scopes' = 'true'
+              OR c.scope_tag = :'scope_tag'
+            )
+            AND c.status IN ('resolved', 'dismissed')
+          ORDER BY c.resolved_at DESC NULLS LAST, c.updated_at DESC
+          LIMIT NULLIF(:'limit_rows', '')::integer;
+          `,
+          {
+            country: parsed.country || "",
+            all_scopes: parsed.allScopes ? "true" : "false",
+            scope_tag: scopeTag,
+            limit_rows: String(parsed.limitRows),
+          },
+        );
 
         const payload = {
           scope: {
@@ -194,19 +279,21 @@ function createQaService(deps = {}) {
             all_scopes: parsed.allScopes,
           },
           metrics: {
-            total_items: metrics.totalItems,
-            open_items: metrics.openItems,
-            confirmed_items: metrics.confirmedItems,
-            dismissed_items: metrics.dismissedItems,
-            resolved_items: metrics.resolvedItems,
-            auto_resolved_items: metrics.autoResolvedItems,
-            review_coverage_percent: Number(
-              metrics.reviewCoveragePercent.toFixed(2),
-            ),
+            total_clusters: totalClusters,
+            open_clusters:
+              Number.parseInt(String(metrics?.open_clusters || 0), 10) || 0,
+            in_review_clusters:
+              Number.parseInt(String(metrics?.in_review_clusters || 0), 10) ||
+              0,
+            resolved_clusters:
+              Number.parseInt(String(metrics?.resolved_clusters || 0), 10) || 0,
+            dismissed_clusters:
+              Number.parseInt(String(metrics?.dismissed_clusters || 0), 10) ||
+              0,
           },
-          counts_by_issue_type: issueTypeRows,
-          open_or_confirmed_items: openOrConfirmedRows,
-          recently_resolved_items: resolvedRows,
+          counts_by_severity: countsBySeverity,
+          open_or_in_review_clusters: openRows,
+          recently_resolved_clusters: resolvedRows,
         };
 
         process.stdout.write(`${JSON.stringify(payload)}\n`);

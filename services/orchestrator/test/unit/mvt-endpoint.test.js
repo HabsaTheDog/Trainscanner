@@ -21,7 +21,7 @@ const {
  * Build a mock client that records the SQL queries it was called with and
  * returns configurable results.
  */
-function makeMockClient({ canonicalTileHex = "", stagingTileHex = "" } = {}) {
+function makeMockClient({ globalTileHex = "", rawTileHex = "" } = {}) {
   const calls = [];
 
   let callIndex = 0;
@@ -29,9 +29,9 @@ function makeMockClient({ canonicalTileHex = "", stagingTileHex = "" } = {}) {
     calls,
     queryOne: async (sql, params) => {
       calls.push({ sql: sql.trim(), params });
-      // Alternate between canonical and staging tile responses
+      // Alternate between global-stations and raw-stop-places tile responses
       const i = callIndex++;
-      const hex = i === 0 ? canonicalTileHex : stagingTileHex;
+      const hex = i === 0 ? globalTileHex : rawTileHex;
       return { tile: hex || null };
     },
   };
@@ -71,13 +71,13 @@ test("serveMvtTile returns a Buffer", async () => {
   assert.ok(Buffer.isBuffer(result), "result should be a Buffer");
 });
 
-test("serveMvtTile calls queryOne twice (canonical + staging layers)", async () => {
+test("serveMvtTile calls queryOne twice (global + raw layers)", async () => {
   const client = makeMockClient();
   await serveMvtTile(client, { z: 10, x: 549, y: 335 });
   assert.equal(client.calls.length, 2, "should call queryOne exactly twice");
 });
 
-test("serveMvtTile SQL contains ST_AsMVT for canonical layer", async () => {
+test("serveMvtTile SQL contains ST_AsMVT for global station layer", async () => {
   const client = makeMockClient();
   await serveMvtTile(client, { z: 10, x: 549, y: 335 });
   const [firstCall] = client.calls;
@@ -86,8 +86,8 @@ test("serveMvtTile SQL contains ST_AsMVT for canonical layer", async () => {
     "first query should use ST_AsMVT",
   );
   assert.ok(
-    firstCall.sql.includes("'canonical'"),
-    "first query should specify canonical layer",
+    firstCall.sql.includes("'global_stations'"),
+    "first query should specify global_stations layer",
   );
 });
 
@@ -105,7 +105,7 @@ test("serveMvtTile SQL contains ST_TileEnvelope with correct z/x/y", async () =>
   }
 });
 
-test("serveMvtTile SQL contains ST_AsMVT for staging layer", async () => {
+test("serveMvtTile SQL contains ST_AsMVT for raw stop-place layer", async () => {
   const client = makeMockClient();
   await serveMvtTile(client, { z: 10, x: 549, y: 335 });
   const [, secondCall] = client.calls;
@@ -114,33 +114,33 @@ test("serveMvtTile SQL contains ST_AsMVT for staging layer", async () => {
     "second query should use ST_AsMVT",
   );
   assert.ok(
-    secondCall.sql.includes("'staging'"),
-    "second query should specify staging layer",
+    secondCall.sql.includes("'raw_stop_places'"),
+    "second query should specify raw_stop_places layer",
   );
 });
 
 test("serveMvtTile concatenates tile buffers from both layers", async () => {
   // Use two 4-byte hex sequences so we get concrete non-empty buffers
-  const canonicalHex = "deadbeef";
-  const stagingHex = "cafebabe";
+  const globalHex = "deadbeef";
+  const rawHex = "cafebabe";
   const client = makeMockClient({
-    canonicalTileHex: canonicalHex,
-    stagingTileHex: stagingHex,
+    globalTileHex: globalHex,
+    rawTileHex: rawHex,
   });
   const buf = await serveMvtTile(client, { z: 10, x: 549, y: 335 });
   const expected = Buffer.concat([
-    Buffer.from(canonicalHex, "hex"),
-    Buffer.from(stagingHex, "hex"),
+    Buffer.from(globalHex, "hex"),
+    Buffer.from(rawHex, "hex"),
   ]);
   assert.deepEqual(
     buf,
     expected,
-    "should concatenate canonical and staging tile bytes",
+    "should concatenate global and raw tile bytes",
   );
 });
 
 test("serveMvtTile returns empty Buffer when both layers are empty", async () => {
-  const client = makeMockClient({ canonicalTileHex: "", stagingTileHex: "" });
+  const client = makeMockClient({ globalTileHex: "", rawTileHex: "" });
   const buf = await serveMvtTile(client, { z: 10, x: 549, y: 335 });
   assert.equal(buf.length, 0, "empty tile should have length 0");
 });

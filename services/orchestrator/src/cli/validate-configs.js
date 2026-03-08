@@ -46,7 +46,7 @@ function printHelp() {
   process.stdout.write(`Options:\n`);
   process.stdout.write(`  --root <path>       Project root (default: cwd)\n`);
   process.stdout.write(
-    `  --only <name>       One of: profiles,dach,ojp,ojp-mock\n`,
+    `  --only <name>       One of: profiles,sources,ojp,ojp-mock\n`,
   );
 }
 
@@ -76,8 +76,8 @@ function run() {
           validator: validateGtfsProfilesConfig,
         },
         {
-          name: "dach",
-          filePath: path.join(configDir, "dach-data-sources.json"),
+          name: "sources",
+          filePath: path.join(configDir, "europe-data-sources.json"),
           validator: validateSourceDiscoveryConfig,
         },
         {

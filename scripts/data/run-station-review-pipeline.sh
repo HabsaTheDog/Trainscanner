@@ -37,20 +37,20 @@ Run a full station-review data pipeline in one command:
   1) bootstrap the current DB schema
   2) fetch latest sources
   3) ingest NeTEx snapshots
-  4) build canonical stations
-  5) build review queue clusters
+  4) build pan-European global stations
+  5) build global merge queue clusters
 
 Options:
-  --country DE|AT|CH          Restrict refresh scope to one country (default: all DACH)
+  --country <ISO2>            Restrict refresh scope to one country
   --as-of YYYY-MM-DD          Snapshot date override for refresh stages
-  --source-id <id>            Restrict fetch/ingest/canonical to one source id
-  --only <list>               Comma-separated steps: fetch,ingest,canonical,review-queue
-  --from-step <step>          Start from step: fetch|ingest|canonical|review-queue
-  --to-step <step>            Stop after step: fetch|ingest|canonical|review-queue
+  --source-id <id>            Restrict fetch/ingest/global-stations to one source id
+  --only <list>               Comma-separated steps: fetch,ingest,global-stations,merge-queue
+  --from-step <step>          Start from step: fetch|ingest|global-stations|merge-queue
+  --to-step <step>            Stop after step: fetch|ingest|global-stations|merge-queue
   --skip-fetch                Skip fetch step
   --skip-ingest               Skip ingest step
-  --skip-canonical            Skip canonical build step
-  --skip-review-queue         Skip review queue build step
+  --skip-global-stations      Skip global station build step
+  --skip-merge-queue          Skip global merge queue build step
   --skip-db-bootstrap         Skip DB schema bootstrap
   --run-id <id>               Optional run id prefix for refresh stage logs
   --dry-run                   Show execution plan without mutating data
@@ -60,7 +60,7 @@ Examples:
   scripts/data/run-station-review-pipeline.sh
   scripts/data/run-station-review-pipeline.sh --country CH
   scripts/data/run-station-review-pipeline.sh --country DE --as-of 2026-02-20
-  scripts/data/run-station-review-pipeline.sh --skip-db-bootstrap --from-step canonical
+  scripts/data/run-station-review-pipeline.sh --skip-db-bootstrap --from-step global-stations
 USAGE
   return 0
 }
@@ -150,7 +150,7 @@ while [[ $# -gt 0 ]]; do
       fi
       shift 2
       ;;
-    --skip-fetch|--skip-ingest|--skip-canonical|--skip-review-queue)
+    --skip-fetch|--skip-ingest|--skip-global-stations|--skip-merge-queue)
       REFRESH_ARGS+=("$1")
       shift
       ;;
@@ -206,4 +206,4 @@ run_step "refresh-station-review" "${ROOT_DIR}/scripts/data/refresh-station-revi
 
 print_summary
 log "Station review data pipeline completed successfully."
-log "Next: open http://localhost:3000/curation.html or query /api/qa/clusters."
+log "Next: open http://localhost:3000/curation.html or query /api/qa/global-clusters."

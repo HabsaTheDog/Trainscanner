@@ -1,36 +1,17 @@
 const {
-  getReviewClusters,
-  getReviewClusterDetail,
-  postReviewClusterDecision,
+  getGlobalClusters,
+  getGlobalClusterDetail,
+  postGlobalClusterDecision,
 } = require("../domains/qa/api");
-const {
-  getLowConfidenceQueue,
-  recordAiMatchDecision,
-  setMegaHubWalkTime,
-} = require("../domains/qa/ai-queue");
-const { createPostgisClient } = require("../data/postgis/client");
-const _crypto = require("node:crypto");
 
-// Lazily-initialised singleton DB client shared across resolver calls.
-let _dbClient = null;
-async function getDbClient() {
-  if (!_dbClient) {
-    _dbClient = createPostgisClient();
-    await _dbClient.ensureReady();
-  }
-  return _dbClient;
-}
-
-// Normally we would use fetch to hit the python service directly or via Temporal
-// We are mimicking the Temporal wrapper directly bridging the python FastAPI
 async function requestAiScoreBridge(clusterId, candidates) {
   const aiServiceUrl = process.env.AI_SCORING_URL || "http://localhost:8000";
   try {
     const payload = {
       cluster_id: clusterId,
-      candidates: candidates.map((c) => ({
-        canonical_station_id: c.canonical_station_id,
-        name: c.name || "Unknown",
+      candidates: (Array.isArray(candidates) ? candidates : []).map((c) => ({
+        global_station_id: c.global_station_id,
+        name: c.display_name || "Unknown",
       })),
     };
 
@@ -41,85 +22,90 @@ async function requestAiScoreBridge(clusterId, candidates) {
     });
 
     if (!response.ok) {
-      console.error("AI Service Error:", await response.text());
       return {
         confidence_score: 0,
         suggested_action: "error",
-        reasoning: "AI Service unreachable",
+        reasoning: "AI service unavailable",
       };
     }
 
     return await response.json();
-  } catch (e) {
-    console.error("AI Bridge Exception:", e);
+  } catch (err) {
     return {
       confidence_score: 0,
       suggested_action: "error",
-      reasoning: e.message,
+      reasoning: err.message,
     };
   }
+}
+
+function mapClusterCandidate(candidate) {
+  const labels = Array.isArray(candidate.provider_labels)
+    ? candidate.provider_labels
+    : [];
+  return {
+    ...candidate,
+    lat: candidate.latitude,
+    lon: candidate.longitude,
+    provider_labels: labels.map((item) => String(item)),
+  };
 }
 
 const rootValue = {
   health: () => "GraphQL is running!",
 
-  clusters: async ({ country, status }) => {
-    // We map the REST query over args onto the GraphQL resolver
+  globalClusters: async ({ country, status }) => {
     const mockUrl = new URL("http://localhost/api");
-    if (country) mockUrl.searchParams.set("country", country);
-    if (status) mockUrl.searchParams.set("status", status);
+    if (country) {
+      mockUrl.searchParams.set("country", country);
+    }
+    if (status) {
+      mockUrl.searchParams.set("status", status);
+    }
 
-    // Leverage the existing API layer from Phase 1
-    const result = await getReviewClusters(mockUrl);
-
-    // getReviewClusters now returns { items: rows, ... }
-    return (result.items || []).map((c) => ({
-      ...c,
-      member_nodes: (c.candidates || []).map((cand) => ({
-        canonical_station_id: cand.canonical_station_id,
-        name: cand.display_name,
-        lat: cand.latitude,
-        lon: cand.longitude,
-      })),
-      member_count: c.candidate_count,
-      display_name: c.display_name,
-      severity: c.severity,
-      candidate_count: c.candidate_count,
-      issue_count: c.issue_count,
-      scope_tag: c.scope_tag,
+    const result = await getGlobalClusters(mockUrl);
+    return (result.items || []).map((cluster) => ({
+      ...cluster,
+      country_tags: Array.isArray(cluster.country_tags)
+        ? cluster.country_tags
+        : [],
+      candidates: (cluster.candidates || []).map(mapClusterCandidate),
     }));
   },
 
-  cluster: async ({ id }) => {
-    const detail = await getReviewClusterDetail(id);
-    if (!detail) return null;
-
+  globalCluster: async ({ id }) => {
+    const detail = await getGlobalClusterDetail(id);
+    if (!detail) {
+      return null;
+    }
     return {
       ...detail,
-      candidates: (detail.candidates || []).map((cand) => ({
-        ...cand,
-        display_name: cand.display_name,
-        candidate_rank: cand.candidate_rank,
-        aliases: cand.aliases,
-        provider_labels: cand.provider_labels,
-        lat: cand.latitude,
-        lon: cand.longitude,
-        segment_context: cand.segment_context,
+      country_tags: Array.isArray(detail.country_tags)
+        ? detail.country_tags
+        : [],
+      candidates: (detail.candidates || []).map(mapClusterCandidate),
+      evidence: (detail.evidence || []).map((row) => ({
+        ...row,
+        evidence_type: row.evidence_type,
+        source_global_station_id: row.source_global_station_id,
+        target_global_station_id: row.target_global_station_id,
       })),
+      decisions: (detail.decisions || []).map((row) => ({
+        ...row,
+        members: Array.isArray(row.members) ? row.members : [],
+      })),
+      edit_history: Array.isArray(detail.edit_history)
+        ? detail.edit_history
+        : [],
     };
   },
 
   requestAiScore: async ({ clusterId }) => {
-    // 1. Fetch cluster details to get candidates
-    const detail = await getReviewClusterDetail(clusterId);
-    if (!detail?.candidates) {
-      throw new Error("Cluster not found to score");
+    const detail = await getGlobalClusterDetail(clusterId);
+    if (!detail) {
+      throw new Error("Cluster not found");
     }
-
-    // 2. Proxy request to Python AI Microservice
     const aiResult = await requestAiScoreBridge(clusterId, detail.candidates);
-
-    // 3. Return shaped response
     return {
       cluster_id: clusterId,
       confidence_score: aiResult.confidence_score,
@@ -128,80 +114,8 @@ const rootValue = {
     };
   },
 
-  // --- Task 5.1: Low-Confidence Queue -----------------------------------------
-
-  lowConfidenceQueue: async ({ limit, offset }) => {
-    const client = await getDbClient();
-    return getLowConfidenceQueue(client, { limit, offset });
-  },
-
-  approveAiMatch: async ({ clusterId, evidenceId }) => {
-    const client = await getDbClient();
-    const result = await recordAiMatchDecision(client, {
-      clusterId,
-      evidenceId,
-      operation: "approve",
-      requestedBy: "operator",
-    });
-    return {
-      ok: true,
-      decision_id: result.decisionId,
-      cluster_id: result.clusterId,
-      operation: result.operation,
-    };
-  },
-
-  rejectAiMatch: async ({ clusterId, evidenceId }) => {
-    const client = await getDbClient();
-    const result = await recordAiMatchDecision(client, {
-      clusterId,
-      evidenceId,
-      operation: "reject",
-      requestedBy: "operator",
-    });
-    return {
-      ok: true,
-      decision_id: result.decisionId,
-      cluster_id: result.clusterId,
-      operation: result.operation,
-    };
-  },
-
-  overrideAiMatch: async ({ clusterId, evidenceId, targetClusterId }) => {
-    const client = await getDbClient();
-    const result = await recordAiMatchDecision(client, {
-      clusterId,
-      evidenceId,
-      operation: "override",
-      targetClusterId,
-      requestedBy: "operator",
-    });
-    return {
-      ok: true,
-      decision_id: result.decisionId,
-      cluster_id: result.clusterId,
-      operation: result.operation,
-    };
-  },
-
-  setMegaHubWalkTime: async ({ hubId, walkMinutes }) => {
-    const client = await getDbClient();
-    const result = await setMegaHubWalkTime(client, {
-      hubId,
-      walkMinutes: Number(walkMinutes),
-      requestedBy: "operator",
-    });
-    return {
-      ok: true,
-      rule_id: result.ruleId,
-      hub_id: result.hubId,
-      walk_minutes: result.walkMinutes,
-    };
-  },
-
-  submitClusterDecision: async ({ clusterId, input }) => {
-    return postReviewClusterDecision(clusterId, input);
-  },
+  submitGlobalMergeDecision: async ({ clusterId, input }) =>
+    postGlobalClusterDecision(clusterId, input),
 };
 
 module.exports = { rootValue };

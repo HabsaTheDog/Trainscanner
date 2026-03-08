@@ -1,10 +1,10 @@
 /**
- * mvt.js  –  Task 5.1: Dynamic MapVector Tile (MVT) serving via PostGIS ST_AsMVT.
+ * mvt.js - Dynamic MapVector Tile (MVT) serving via PostGIS ST_AsMVT.
  *
  * Exposes serveMvtTile(client, { z, x, y }) which returns a Buffer containing
  * a Mapbox Vector Tile (.pbf) with two layers:
- *   - "canonical"  from canonical_stations
- *   - "staging"    from netex_stops_staging  (may be empty if table is vacant)
+ *   - "global_stations" from global_stations
+ *   - "raw_stop_places" from raw_provider_stop_places
  */
 
 const TILE_EXTENT = 4096;
@@ -37,85 +37,71 @@ function validateTileCoords(z, x, y) {
   }
 }
 
-/**
- * Fetch and concatenate MVT data for the requested tile.
- *
- * The SQL uses:
- *   ST_TileEnvelope(z, x, y)  – computes the Web Mercator bbox for the tile
- *   ST_AsMVTGeom(geom, envelope) – clips + scales geometry to tile coordinates
- *   ST_AsMVT(...)  – serialises to protobuf binary
- *
- * We execute two queries and concatenate the raw tile bytes.
- * Mapbox GL / MapLibre will de-multiplex the layers automatically.
- *
- * @param {object} client  PostGIS client (createPostgisClient())
- * @param {{ z: number, x: number, y: number }} coords
- * @returns {Promise<Buffer>}
- */
 async function serveMvtTile(client, { z, x, y }) {
   validateTileCoords(z, x, y);
 
-  // Layer 1: canonical stations
-  const canonicalResult = await client.queryOne(
+  const globalStationsResult = await client.queryOne(
     `
-    SELECT ST_AsMVT(q.*, 'canonical', ${TILE_EXTENT}, 'geom') AS tile
+    SELECT ST_AsMVT(q.*, 'global_stations', ${TILE_EXTENT}, 'geom') AS tile
     FROM (
       SELECT
-        cs.canonical_station_id,
-        cs.canonical_name,
-        cs.country,
-        cs.member_count,
+        gs.global_station_id,
+        gs.display_name,
+        gs.country,
+        gs.station_kind,
         ST_AsMVTGeom(
-          cs.geom,
+          gs.geom,
           ST_TileEnvelope(:z, :x, :y),
           ${TILE_EXTENT},
           256,
           true
         ) AS geom
-      FROM canonical_stations cs
-      WHERE cs.geom IS NOT NULL
-        AND cs.geom && ST_TileEnvelope(:z, :x, :y)
+      FROM global_stations gs
+      WHERE gs.is_active = true
+        AND gs.geom IS NOT NULL
+        AND gs.geom && ST_TileEnvelope(:z, :x, :y)
     ) q
     WHERE q.geom IS NOT NULL
     `,
     { z, x, y },
   );
 
-  // Layer 2: staging stops (NeTEx raw ingested stops)
-  const stagingResult = await client.queryOne(
+  const rawStopPlacesResult = await client.queryOne(
     `
-    SELECT ST_AsMVT(q.*, 'staging', ${TILE_EXTENT}, 'geom') AS tile
+    SELECT ST_AsMVT(q.*, 'raw_stop_places', ${TILE_EXTENT}, 'geom') AS tile
     FROM (
       SELECT
-        s.source_stop_id,
-        s.stop_name,
-        s.source_id,
+        rp.stop_place_id,
+        rp.provider_stop_place_ref,
+        rp.stop_name,
+        rp.source_id,
+        rp.country,
+        rp.dataset_id,
         ST_AsMVTGeom(
-          s.geom,
+          rp.geom,
           ST_TileEnvelope(:z, :x, :y),
           ${TILE_EXTENT},
           256,
           true
         ) AS geom
-      FROM netex_stops_staging s
-      WHERE s.geom IS NOT NULL
-        AND s.geom && ST_TileEnvelope(:z, :x, :y)
+      FROM raw_provider_stop_places rp
+      WHERE rp.geom IS NOT NULL
+        AND rp.geom && ST_TileEnvelope(:z, :x, :y)
     ) q
     WHERE q.geom IS NOT NULL
     `,
     { z, x, y },
   );
 
-  const canonicalBuf = canonicalResult?.tile
-    ? Buffer.from(canonicalResult.tile, "hex")
+  const globalStationsBuf = globalStationsResult?.tile
+    ? Buffer.from(globalStationsResult.tile, "hex")
     : Buffer.alloc(0);
 
-  const stagingBuf = stagingResult?.tile
-    ? Buffer.from(stagingResult.tile, "hex")
+  const rawStopPlacesBuf = rawStopPlacesResult?.tile
+    ? Buffer.from(rawStopPlacesResult.tile, "hex")
     : Buffer.alloc(0);
 
-  // Concatenate both layers into one .pbf blob
-  return Buffer.concat([canonicalBuf, stagingBuf]);
+  return Buffer.concat([globalStationsBuf, rawStopPlacesBuf]);
 }
 
 module.exports = { serveMvtTile, validateTileCoords };

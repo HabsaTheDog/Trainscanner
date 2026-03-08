@@ -91,6 +91,21 @@ def parse_csv_table(
         return rows, list(reader.fieldnames or [])
 
 
+def count_csv_rows(zf: zipfile.ZipFile, name: str) -> int:
+    if name not in zf.namelist():
+        return 0
+    with zf.open(name) as fp:
+        wrapper = io.TextIOWrapper(fp, encoding="utf-8-sig")
+        header_seen = False
+        count = 0
+        for _line in wrapper:
+            if not header_seen:
+                header_seen = True
+                continue
+            count += 1
+    return count
+
+
 def write_csv_bytes(fieldnames: list[str], rows: list[dict[str, str]]) -> bytes:
     buf = io.StringIO()
     writer = csv.DictWriter(
@@ -224,7 +239,12 @@ def _calendar_row_is_active(
 ) -> bool:
     start = _row_value(row, "start_date")
     end = _row_value(row, "end_date")
-    return bool(start and end and start <= date_str <= end and _row_value(row, weekday_key) == "1")
+    return bool(
+        start
+        and end
+        and start <= date_str <= end
+        and _row_value(row, weekday_key) == "1"
+    )
 
 
 def _apply_calendar_exception(
@@ -400,7 +420,9 @@ def _scope_tables_from_trips(
         _collect_ids(filtered_trips, "route_id"),
     )
     keep_service_ids = _collect_ids(filtered_trips, "service_id")
-    filtered_calendar = _filter_rows_by_ids(tables[CALENDAR_FILE], "service_id", keep_service_ids)
+    filtered_calendar = _filter_rows_by_ids(
+        tables[CALENDAR_FILE], "service_id", keep_service_ids
+    )
     filtered_calendar_dates = _filter_rows_by_ids(
         tables[CALENDAR_DATES_FILE],
         "service_id",
@@ -468,7 +490,9 @@ def _collect_bbox_stop_ids(
         stop_id = normalize_stop_id(row.get("stop_id"))
         if not stop_id:
             continue
-        if in_bbox(parse_float(row.get("stop_lat")), parse_float(row.get("stop_lon")), bbox):
+        if in_bbox(
+            parse_float(row.get("stop_lat")), parse_float(row.get("stop_lon")), bbox
+        ):
             in_scope.add(stop_id)
     return in_scope
 
@@ -563,7 +587,9 @@ def _trip_query_candidate(
     target_date: str,
     stops_by_id: dict[str, dict[str, str]],
 ) -> tuple[dict[str, object], tuple[str, str, str]] | None:
-    scoped_rows = [row for row in rows if normalize_stop_id(row.get("stop_id")) in bbox_stop_ids]
+    scoped_rows = [
+        row for row in rows if normalize_stop_id(row.get("stop_id")) in bbox_stop_ids
+    ]
     if len(scoped_rows) < 2:
         return None
 
@@ -571,7 +597,9 @@ def _trip_query_candidate(
     destination_row = scoped_rows[-1]
     origin_stop_id = normalize_stop_id(origin_row.get("stop_id"))
     destination_stop_id = normalize_stop_id(destination_row.get("stop_id"))
-    dep_time = (_row_value(origin_row, "departure_time") or _row_value(origin_row, "arrival_time"))
+    dep_time = _row_value(origin_row, "departure_time") or _row_value(
+        origin_row, "arrival_time"
+    )
     dt_iso = time_to_iso(target_date, dep_time)
     if not dt_iso:
         return None
@@ -619,7 +647,9 @@ def build_micro_queries(
         for row in trips_rows
         if _row_value(row, "trip_id")
     }
-    active_service_ids = active_services(calendar_rows, calendar_dates_rows, target_date)
+    active_service_ids = active_services(
+        calendar_rows, calendar_dates_rows, target_date
+    )
 
     stops_by_id = index_rows(stops_rows, "stop_id")
     stop_times_by_trip = _group_active_stop_times_by_trip(
@@ -655,28 +685,335 @@ def build_micro_queries(
 def build_macro_queries(
     tables: dict[str, list[dict[str, str]]],
 ) -> list[dict[str, object]]:
-    target_date = choose_active_date(
-        tables[CALENDAR_FILE], tables[CALENDAR_DATES_FILE]
+    target_date = choose_active_date(tables[CALENDAR_FILE], tables[CALENDAR_DATES_FILE])
+    service_by_trip = {
+        _row_value(row, "trip_id"): _row_value(row, "service_id")
+        for row in tables[TRIPS_FILE]
+        if _row_value(row, "trip_id")
+    }
+    active_service_ids = active_services(
+        tables[CALENDAR_FILE],
+        tables[CALENDAR_DATES_FILE],
+        target_date,
     )
-    date_obj = dt.datetime.strptime(target_date, "%Y%m%d")
-    q1 = (date_obj + dt.timedelta(hours=8)).isoformat() + "Z"
-    q2 = (date_obj + dt.timedelta(hours=10)).isoformat() + "Z"
-    return [
-        {
-            "name": "berlin-to-wien",
-            "required": True,
-            "origin": "Berlin Hbf",
-            "destination": "Wien Hbf",
-            "datetime": q1,
-        },
-        {
-            "name": "zurich-to-munich",
-            "required": True,
-            "origin": "Z\u00fcrich HB",
-            "destination": "M\u00fcnchen Hbf",
-            "datetime": q2,
-        },
-    ]
+    stop_times_by_trip = _group_active_stop_times_by_trip(
+        tables[STOP_TIMES_FILE],
+        service_by_trip,
+        active_service_ids,
+    )
+
+    queries: list[dict[str, object]] = []
+    seen_pairs: set[tuple[str, str]] = set()
+    for trip_id, rows in sorted(stop_times_by_trip.items()):
+        if len(rows) < 2:
+            continue
+        origin_stop_id = normalize_stop_id(rows[0].get("stop_id"))
+        destination_stop_id = normalize_stop_id(rows[-1].get("stop_id"))
+        if (
+            not origin_stop_id
+            or not destination_stop_id
+            or origin_stop_id == destination_stop_id
+        ):
+            continue
+        dep_time = _row_value(rows[0], "departure_time") or _row_value(
+            rows[0], "arrival_time"
+        )
+        dt_iso = time_to_iso(target_date, dep_time)
+        if not dt_iso:
+            continue
+        dedupe_key = (origin_stop_id, destination_stop_id)
+        if dedupe_key in seen_pairs:
+            continue
+        seen_pairs.add(dedupe_key)
+        queries.append(
+            {
+                "name": f"macro-{trip_id}",
+                "required": True,
+                "origin": f"{MOTIS_DATASET_TAG}_{origin_stop_id}",
+                "destination": f"{MOTIS_DATASET_TAG}_{destination_stop_id}",
+                "datetime": dt_iso,
+            }
+        )
+        if len(queries) >= 2:
+            break
+
+    if len(queries) < 2:
+        fail("macro mode produced fewer than 2 testable in-feed routes")
+    return queries
+
+
+def build_micro_queries_from_zip(
+    input_zip: str,
+    bbox: tuple[float, float, float, float],
+    padding_km: float,
+    max_queries: int,
+) -> tuple[list[dict[str, object]], dict[str, int]]:
+    expanded = expand_bbox(bbox, padding_km)
+
+    def build_micro_queries_streaming(
+        zf: zipfile.ZipFile,
+        calendar_rows: list[dict[str, str]],
+        calendar_dates_rows: list[dict[str, str]],
+    ) -> tuple[list[dict[str, object]], int]:
+        bbox_stop_ids: set[str] = set()
+        bbox_stop_rows: dict[str, dict[str, str]] = {}
+        with zf.open(STOPS_FILE) as fp:
+            reader = csv.DictReader(io.TextIOWrapper(fp, encoding="utf-8-sig"))
+            for row in reader:
+                stop_id = normalize_stop_id(row.get("stop_id"))
+                if not stop_id:
+                    continue
+                if in_bbox(
+                    parse_float(row.get("stop_lat")),
+                    parse_float(row.get("stop_lon")),
+                    expanded,
+                ):
+                    bbox_stop_ids.add(stop_id)
+                    bbox_stop_rows[stop_id] = row
+        if len(bbox_stop_ids) < 2:
+            fail("micro scope found fewer than 2 stops in bbox/padding window")
+
+        # Pass 1: find trips that cross at least two scoped stops and capture
+        # candidate origin/destination/dep-time data without materializing all stop_times.
+        trip_candidates: dict[str, tuple[str, str, str]] = {}
+        current_trip = ""
+        first_scoped_stop = ""
+        last_scoped_stop = ""
+        departure_time = ""
+        scoped_count = 0
+
+        def finalize_trip_candidate() -> None:
+            nonlocal first_scoped_stop, last_scoped_stop, departure_time, scoped_count
+            if (
+                current_trip
+                and scoped_count >= 2
+                and first_scoped_stop
+                and last_scoped_stop
+                and first_scoped_stop != last_scoped_stop
+            ):
+                trip_candidates[current_trip] = (
+                    first_scoped_stop,
+                    last_scoped_stop,
+                    departure_time,
+                )
+
+        with zf.open(STOP_TIMES_FILE) as fp:
+            reader = csv.DictReader(io.TextIOWrapper(fp, encoding="utf-8-sig"))
+            for row in reader:
+                trip_id = _row_value(row, "trip_id")
+                if not trip_id:
+                    continue
+                if trip_id != current_trip:
+                    finalize_trip_candidate()
+                    current_trip = trip_id
+                    first_scoped_stop = ""
+                    last_scoped_stop = ""
+                    departure_time = ""
+                    scoped_count = 0
+
+                stop_id = normalize_stop_id(row.get("stop_id"))
+                if stop_id not in bbox_stop_ids:
+                    continue
+                if scoped_count == 0:
+                    first_scoped_stop = stop_id
+                    departure_time = _row_value(row, "departure_time") or _row_value(
+                        row, "arrival_time"
+                    )
+                last_scoped_stop = stop_id
+                scoped_count += 1
+        finalize_trip_candidate()
+
+        if not trip_candidates:
+            fail("micro scope found no trips crossing at least 2 scoped stops")
+
+        target_date = choose_active_date(calendar_rows, calendar_dates_rows)
+        active_service_ids = active_services(
+            calendar_rows,
+            calendar_dates_rows,
+            target_date,
+        )
+
+        # Pass 2: join candidate trips to active services without loading all trips.
+        queries: list[dict[str, object]] = []
+        seen: set[tuple[str, str, str]] = set()
+        with zf.open(TRIPS_FILE) as fp:
+            reader = csv.DictReader(io.TextIOWrapper(fp, encoding="utf-8-sig"))
+            for row in reader:
+                trip_id = _row_value(row, "trip_id")
+                if not trip_id or trip_id not in trip_candidates:
+                    continue
+                if _row_value(row, "service_id") not in active_service_ids:
+                    continue
+
+                origin_stop_id, destination_stop_id, dep_time = trip_candidates[trip_id]
+                dt_iso = time_to_iso(target_date, dep_time)
+                if not dt_iso:
+                    continue
+
+                origin_stop = bbox_stop_rows.get(origin_stop_id, {})
+                destination_stop = bbox_stop_rows.get(destination_stop_id, {})
+                o_lat = parse_float(origin_stop.get("stop_lat"))
+                o_lon = parse_float(origin_stop.get("stop_lon"))
+                d_lat = parse_float(destination_stop.get("stop_lat"))
+                d_lon = parse_float(destination_stop.get("stop_lon"))
+                if None in (o_lat, o_lon, d_lat, d_lon):
+                    continue
+
+                origin = f"{MOTIS_DATASET_TAG}_{origin_stop_id}"
+                destination = f"{MOTIS_DATASET_TAG}_{destination_stop_id}"
+                dedupe_key = (origin, destination, dt_iso)
+                if dedupe_key in seen:
+                    continue
+                seen.add(dedupe_key)
+                queries.append(
+                    {
+                        "name": f"micro-{trip_id}",
+                        "required": True,
+                        "origin": origin,
+                        "destination": destination,
+                        "datetime": dt_iso,
+                    }
+                )
+                if len(queries) >= max_queries:
+                    break
+
+        if not queries:
+            fail("micro mode produced no testable scoped routes from filtered GTFS")
+        return queries, len(bbox_stop_ids)
+
+    with zipfile.ZipFile(input_zip) as zf:
+        calendar_rows, _ = parse_csv_table(zf, CALENDAR_FILE)
+        calendar_dates_rows, _ = parse_csv_table(zf, CALENDAR_DATES_FILE)
+        queries, bbox_stop_count = build_micro_queries_streaming(
+            zf,
+            calendar_rows,
+            calendar_dates_rows,
+        )
+        counts = {
+            "stops": bbox_stop_count,
+            "routes": count_csv_rows(zf, ROUTES_FILE),
+            "trips": count_csv_rows(zf, TRIPS_FILE),
+            "stop_times": count_csv_rows(zf, STOP_TIMES_FILE),
+            "queries": len(queries),
+        }
+    return queries, counts
+
+
+def build_macro_queries_from_zip(
+    input_zip: str,
+) -> tuple[list[dict[str, object]], dict[str, int]]:
+    def build_macro_queries_streaming(
+        zf: zipfile.ZipFile,
+        calendar_rows: list[dict[str, str]],
+        calendar_dates_rows: list[dict[str, str]],
+    ) -> list[dict[str, object]]:
+        target_date = choose_active_date(calendar_rows, calendar_dates_rows)
+        active_service_ids = active_services(
+            calendar_rows,
+            calendar_dates_rows,
+            target_date,
+        )
+        if not active_service_ids:
+            fail("macro mode found no active services in feed calendar")
+
+        active_trip_ids: set[str] = set()
+        with zf.open(TRIPS_FILE) as fp:
+            reader = csv.DictReader(io.TextIOWrapper(fp, encoding="utf-8-sig"))
+            for row in reader:
+                trip_id = _row_value(row, "trip_id")
+                if not trip_id:
+                    continue
+                if _row_value(row, "service_id") in active_service_ids:
+                    active_trip_ids.add(trip_id)
+        if not active_trip_ids:
+            fail("macro mode found no active trips for selected date")
+
+        queries: list[dict[str, object]] = []
+        seen_pairs: set[tuple[str, str]] = set()
+        current_trip = ""
+        current_is_active = False
+        first_stop_id = ""
+        last_stop_id = ""
+        departure_time = ""
+        stop_count = 0
+
+        def finalize_trip() -> None:
+            nonlocal first_stop_id, last_stop_id, departure_time, stop_count
+            if not current_is_active:
+                return
+            if stop_count < 2:
+                return
+            if not first_stop_id or not last_stop_id or first_stop_id == last_stop_id:
+                return
+            dt_iso = time_to_iso(target_date, departure_time)
+            if not dt_iso:
+                return
+            pair_key = (first_stop_id, last_stop_id)
+            if pair_key in seen_pairs:
+                return
+            seen_pairs.add(pair_key)
+            queries.append(
+                {
+                    "name": f"macro-{current_trip}",
+                    "required": True,
+                    "origin": f"{MOTIS_DATASET_TAG}_{first_stop_id}",
+                    "destination": f"{MOTIS_DATASET_TAG}_{last_stop_id}",
+                    "datetime": dt_iso,
+                }
+            )
+
+        with zf.open(STOP_TIMES_FILE) as fp:
+            reader = csv.DictReader(io.TextIOWrapper(fp, encoding="utf-8-sig"))
+            for row in reader:
+                trip_id = _row_value(row, "trip_id")
+                if not trip_id:
+                    continue
+                if trip_id != current_trip:
+                    if current_trip:
+                        finalize_trip()
+                        if len(queries) >= 2:
+                            break
+                    current_trip = trip_id
+                    current_is_active = trip_id in active_trip_ids
+                    first_stop_id = ""
+                    last_stop_id = ""
+                    departure_time = ""
+                    stop_count = 0
+                if not current_is_active:
+                    continue
+                stop_id = normalize_stop_id(row.get("stop_id"))
+                if not stop_id:
+                    continue
+                if stop_count == 0:
+                    first_stop_id = stop_id
+                    departure_time = _row_value(row, "departure_time") or _row_value(
+                        row, "arrival_time"
+                    )
+                last_stop_id = stop_id
+                stop_count += 1
+
+        if len(queries) < 2 and current_trip:
+            finalize_trip()
+        if len(queries) < 2:
+            fail("macro mode produced fewer than 2 active in-feed route queries")
+        return queries[:2]
+
+    with zipfile.ZipFile(input_zip) as zf:
+        calendar_rows, _ = parse_csv_table(zf, CALENDAR_FILE)
+        calendar_dates_rows, _ = parse_csv_table(zf, CALENDAR_DATES_FILE)
+        queries = build_macro_queries_streaming(
+            zf,
+            calendar_rows,
+            calendar_dates_rows,
+        )
+        counts = {
+            "stops": count_csv_rows(zf, STOPS_FILE),
+            "routes": count_csv_rows(zf, ROUTES_FILE),
+            "trips": count_csv_rows(zf, TRIPS_FILE),
+            "stop_times": count_csv_rows(zf, STOP_TIMES_FILE),
+            "queries": len(queries),
+        }
+    return queries, counts
 
 
 def write_filtered_zip(
@@ -746,29 +1083,57 @@ def main() -> None:
     if not os.path.isfile(input_zip):
         fail(f"input zip not found: {input_zip}")
 
-    tables, fieldnames = load_tables(input_zip)
-    scoped = filter_feed_by_routes(tables, args.tier)
-    if args.mode == "micro":
+    # All-tier jobs on large pan-EU artifacts cannot afford full-table materialization.
+    # Use streaming query derivation and copy the original ZIP unchanged.
+    if args.mode == "micro" and args.tier == "all":
         parsed_bbox = parse_bbox(args.bbox)
-        scoped, bbox_stop_ids = micro_scope_feed(scoped, parsed_bbox, args.padding_km)
-        queries = build_micro_queries(scoped, bbox_stop_ids, args.max_micro_queries)
+        queries, counts = build_micro_queries_from_zip(
+            input_zip,
+            parsed_bbox,
+            args.padding_km,
+            args.max_micro_queries,
+        )
+        os.makedirs(os.path.dirname(output_zip), exist_ok=True)
+        if os.path.normpath(input_zip) != os.path.normpath(output_zip):
+            shutil.copyfile(input_zip, output_zip)
+    elif args.mode == "macro" and args.tier == "all":
+        queries, counts = build_macro_queries_from_zip(input_zip)
+        os.makedirs(os.path.dirname(output_zip), exist_ok=True)
+        if os.path.normpath(input_zip) != os.path.normpath(output_zip):
+            shutil.copyfile(input_zip, output_zip)
     else:
-        queries = build_macro_queries(scoped)
+        tables, fieldnames = load_tables(input_zip)
+        scoped = filter_feed_by_routes(tables, args.tier)
+        if args.mode == "micro":
+            parsed_bbox = parse_bbox(args.bbox)
+            scoped, bbox_stop_ids = micro_scope_feed(
+                scoped, parsed_bbox, args.padding_km
+            )
+            queries = build_micro_queries(scoped, bbox_stop_ids, args.max_micro_queries)
+        else:
+            queries = build_macro_queries(scoped)
 
-    if len(scoped[STOPS_FILE]) < 2:
-        fail("scoped feed has fewer than 2 stops")
-    if len(scoped[TRIPS_FILE]) < 1:
-        fail("scoped feed has no trips")
-    if len(scoped[STOP_TIMES_FILE]) < 2:
-        fail("scoped feed has fewer than 2 stop_times rows")
+        if len(scoped[STOPS_FILE]) < 2:
+            fail("scoped feed has fewer than 2 stops")
+        if len(scoped[TRIPS_FILE]) < 1:
+            fail("scoped feed has no trips")
+        if len(scoped[STOP_TIMES_FILE]) < 2:
+            fail("scoped feed has fewer than 2 stop_times rows")
 
-    if os.path.normpath(input_zip) != os.path.normpath(output_zip):
-        write_filtered_zip(input_zip, output_zip, scoped, fieldnames)
-    else:
-        # Keep behavior deterministic when output path equals input path.
-        tmp_output = output_zip + ".tmp"
-        write_filtered_zip(input_zip, tmp_output, scoped, fieldnames)
-        shutil.move(tmp_output, output_zip)
+        if os.path.normpath(input_zip) != os.path.normpath(output_zip):
+            write_filtered_zip(input_zip, output_zip, scoped, fieldnames)
+        else:
+            # Keep behavior deterministic when output path equals input path.
+            tmp_output = output_zip + ".tmp"
+            write_filtered_zip(input_zip, tmp_output, scoped, fieldnames)
+            shutil.move(tmp_output, output_zip)
+        counts = {
+            "stops": len(scoped[STOPS_FILE]),
+            "routes": len(scoped[ROUTES_FILE]),
+            "trips": len(scoped[TRIPS_FILE]),
+            "stop_times": len(scoped[STOP_TIMES_FILE]),
+            "queries": len(queries),
+        }
 
     os.makedirs(os.path.dirname(queries_path), exist_ok=True)
     with open(queries_path, "w", encoding="utf-8") as fp:
@@ -781,13 +1146,7 @@ def main() -> None:
         "inputZip": input_zip,
         "outputZip": output_zip,
         "queriesJson": queries_path,
-        "counts": {
-            "stops": len(scoped[STOPS_FILE]),
-            "routes": len(scoped[ROUTES_FILE]),
-            "trips": len(scoped[TRIPS_FILE]),
-            "stop_times": len(scoped[STOP_TIMES_FILE]),
-            "queries": len(queries),
-        },
+        "counts": counts,
     }
     print(json.dumps(summary, ensure_ascii=True))
 

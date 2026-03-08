@@ -7,7 +7,7 @@ app = FastAPI(title="Trainscanner AI Scoring Service")
 
 
 class ClusterCandidate(BaseModel):
-    canonical_station_id: str
+    global_station_id: str
     name: str
 
 

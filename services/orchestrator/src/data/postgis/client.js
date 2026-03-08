@@ -36,7 +36,7 @@ function resolveConnectionConfig(options = {}) {
     user: env.CANONICAL_DB_USER || env.PGUSER || "trainscanner",
     database: env.CANONICAL_DB_NAME || env.PGDATABASE || "trainscanner",
     password: env.CANONICAL_DB_PASSWORD || env.PGPASSWORD || "trainscanner",
-    dockerProfile: env.CANONICAL_DB_DOCKER_PROFILE || "dach-data",
+    dockerProfile: env.CANONICAL_DB_DOCKER_PROFILE || "pan-europe-data",
     dockerService: env.CANONICAL_DB_DOCKER_SERVICE || "postgis",
     readyTimeoutSec: toInt(
       options.readyTimeoutSec || env.CANONICAL_DB_READY_TIMEOUT_SEC,

@@ -1,20 +1,16 @@
 const { proxyActivities } = require("@temporalio/workflow");
 
 // Setup Node.js (Orchestrator) activities
-const {
-  runDbBootstrap,
-  runFetchSources,
-  buildCanonicalAndReviewQueue,
-  checkMotisReady,
-} = proxyActivities({
-  startToCloseTimeout: "1 hour",
-  retry: {
-    initialInterval: "10s",
-    backoffCoefficient: 2,
-    maximumInterval: "5m",
-    maximumAttempts: 3,
-  },
-});
+const { runDbBootstrap, runFetchSources, buildGlobalModel, checkMotisReady } =
+  proxyActivities({
+    startToCloseTimeout: "1 hour",
+    retry: {
+      initialInterval: "10s",
+      backoffCoefficient: 2,
+      maximumInterval: "5m",
+      maximumAttempts: 3,
+    },
+  });
 
 // Setup Rust Ingestion Activities
 const { extract_netex_stops } = proxyActivities({
@@ -55,8 +51,8 @@ async function stationReviewPipeline(args = {}) {
     manifest_sha256: "",
   });
 
-  // 3. Build Canonical and QA Clusters (Node.js Bash Wrapper)
-  await buildCanonicalAndReviewQueue(refreshArgs);
+  // 3. Build Global Stations and QA Merge Clusters (Node.js Bash Wrapper)
+  await buildGlobalModel(refreshArgs);
 
   // 4. Post-pipeline health check
   await checkMotisReady();

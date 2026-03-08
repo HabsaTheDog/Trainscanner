@@ -5,7 +5,8 @@ const { createQaService } = require("../../src/domains/qa/service");
 
 test("reportReviewQueue runs repository-backed report generator", async () => {
   const ensureReadyCalls = [];
-  const fetchCalls = [];
+  const queryOneCalls = [];
+  const queryRowsCalls = [];
   const stdoutWrites = [];
   const originalStdoutWrite = process.stdout.write;
   process.stdout.write = (chunk, encoding, callback) => {
@@ -24,25 +25,20 @@ test("reportReviewQueue runs repository-backed report generator", async () => {
         ensureReady: async () => {
           ensureReadyCalls.push("ready");
         },
-      }),
-      createReviewQueueRepo: () => ({
-        fetchReportMetrics: async (scope) => {
-          fetchCalls.push(scope);
+        queryOne: async (_sql, params) => {
+          queryOneCalls.push(params);
           return {
-            totalItems: 5,
-            openItems: 2,
-            confirmedItems: 1,
-            dismissedItems: 1,
-            resolvedItems: 1,
-            autoResolvedItems: 0,
-            reviewCoveragePercent: 40,
+            total_clusters: 5,
+            open_clusters: 2,
+            in_review_clusters: 1,
+            resolved_clusters: 1,
+            dismissed_clusters: 1,
           };
         },
-        listCountsByIssueType: async () => [
-          { issue_type: "duplicate_hard_id", status: "open", items: 2 },
-        ],
-        listOpenOrConfirmed: async () => [{ review_item_id: 1 }],
-        listResolved: async () => [{ review_item_id: 2 }],
+        queryRows: async (_sql, params) => {
+          queryRowsCalls.push(params);
+          return [];
+        },
       }),
     });
 
@@ -57,14 +53,14 @@ test("reportReviewQueue runs repository-backed report generator", async () => {
   }
 
   assert.equal(ensureReadyCalls.length, 1);
-  assert.equal(fetchCalls.length, 1);
-  assert.deepEqual(fetchCalls[0], {
+  assert.equal(queryOneCalls.length, 1);
+  assert.deepEqual(queryOneCalls[0], {
     country: "DE",
-    scopeTag: "latest",
-    allScopes: false,
-    limitRows: 10,
+    all_scopes: "false",
+    scope_tag: "latest",
   });
-  assert.match(stdoutWrites.join(""), /"total_items":5/);
+  assert.equal(queryRowsCalls.length, 3);
+  assert.match(stdoutWrites.join(""), /"total_clusters":5/);
 });
 
 test("reportReviewQueue rejects invalid calendar dates for --as-of", async () => {

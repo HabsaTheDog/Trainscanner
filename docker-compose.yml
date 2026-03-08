@@ -3,6 +3,9 @@ services:
     image: postgis/postgis:16-3.4
     container_name: trainscanner-postgis
     restart: unless-stopped
+    mem_limit: 20g
+    memswap_limit: 20g
+    shm_size: 1g
     environment:
       POSTGRES_DB: ${CANONICAL_DB_NAME:-trainscanner}
       POSTGRES_USER: ${CANONICAL_DB_USER:-trainscanner}

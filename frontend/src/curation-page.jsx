@@ -56,12 +56,12 @@ function CurationMap({ candidates, selectedIds, onToggleCandidate }) {
     const bounds = new maplibregl.LngLatBounds();
     for (const c of valid) {
       const el = document.createElement("div");
-      const isSelected = selectedIds.has(c.canonical_station_id);
+      const isSelected = selectedIds.has(c.global_station_id);
       el.className = `curation-marker ${isSelected ? "curation-marker--selected" : ""}`;
-      el.title = c.display_name || c.canonical_station_id;
+      el.title = c.display_name || c.global_station_id;
       el.addEventListener("click", (e) => {
         e.stopPropagation();
-        onToggleCandidate(c.canonical_station_id);
+        onToggleCandidate(c.global_station_id);
       });
 
       const marker = new maplibregl.Marker({ element: el, anchor: "center" })
@@ -119,6 +119,12 @@ function ClusterSidebar({
             <option value="DE">DE</option>
             <option value="AT">AT</option>
             <option value="CH">CH</option>
+            <option value="FR">FR</option>
+            <option value="IT">IT</option>
+            <option value="NL">NL</option>
+            <option value="BE">BE</option>
+            <option value="CZ">CZ</option>
+            <option value="PL">PL</option>
           </select>
         </div>
         <div className="curation-filter-row">
@@ -192,7 +198,7 @@ function CandidateCard({
   onToggle,
   rawCandidates,
 }) {
-  const id = candidate.canonical_station_id;
+  const id = candidate.global_station_id;
   const renamed = renameByRef?.[toCandidateRef(id)] || "";
   const displayName = renamed || candidate.display_name || id;
   const aliases = Array.isArray(candidate.aliases)
@@ -258,23 +264,23 @@ function CandidateCard({
           <ul style={{ margin: "4px 0 0 16px", padding: 0 }}>
             {candidate.members.map((m) => {
               const orig = rawCandidates?.find(
-                (c) => c.canonical_station_id === m.canonical_station_id,
+                (c) => c.global_station_id === m.global_station_id,
               );
               const providers = orig?.provider_labels?.filter(Boolean) || [];
               const sourceText =
                 providers.length > 0
                   ? providers.join(", ")
-                  : m.canonical_station_id.split(":")[0] || "unknown";
-              const name = orig?.display_name || m.canonical_station_id;
+                  : m.global_station_id.split(":")[0] || "unknown";
+              const name = orig?.display_name || m.global_station_id;
 
               return (
-                <li key={m.canonical_station_id} style={{ marginBottom: 4 }}>
+                <li key={m.global_station_id} style={{ marginBottom: 4 }}>
                   <strong>{name}</strong>
                   <span
                     className="curation-muted curation-tiny"
                     style={{ marginLeft: 4 }}
                   >
-                    ({m.canonical_station_id})
+                    ({m.global_station_id})
                   </span>
                   <span className="curation-tag" style={{ marginLeft: 6 }}>
                     feed: {sourceText}
@@ -317,7 +323,7 @@ function CurationTools({
   const selectedCount = selectedIds.size;
   const mergeAvailable = selectedCount >= 2;
   const selectedCuratedItems = [...selectedIds].filter((id) => {
-    const c = (candidates || []).find((x) => x.canonical_station_id === id);
+    const c = (candidates || []).find((x) => x.global_station_id === id);
     return c?.is_curated && Array.isArray(c.members) && c.members.length >= 2;
   });
   const splitAvailable = selectedCuratedItems.length > 0;
@@ -329,7 +335,7 @@ function CurationTools({
     const groupId = createDraftId("grp");
     const firstRef = parseRef(refs[0]);
     const firstCandidate = (candidates || []).find(
-      (c) => c.canonical_station_id === firstRef.id,
+      (c) => c.global_station_id === firstRef.id,
     );
     const groupName =
       firstCandidate?.display_name || `Group ${draftState.groups.length + 1}`;
@@ -466,7 +472,7 @@ function CurationTools({
               </p>
               {selectedCuratedItems.map((id) => {
                 const c = (candidates || []).find(
-                  (x) => x.canonical_station_id === id,
+                  (x) => x.global_station_id === id,
                 );
                 if (!c) return null;
                 return (
@@ -744,11 +750,9 @@ export function CurationPage() {
     const combined = [...activeCurated];
 
     for (const opt of optimisticItems) {
-      const optMemberIds = opt.members.map((m) => m.canonical_station_id);
+      const optMemberIds = opt.members.map((m) => m.global_station_id);
       const isCovered = activeCurated.some((ci) =>
-        ci.members?.some((cm) =>
-          optMemberIds.includes(cm.canonical_station_id),
-        ),
+        ci.members?.some((cm) => optMemberIds.includes(cm.global_station_id)),
       );
       if (!isCovered) {
         combined.push(opt);
@@ -765,7 +769,7 @@ export function CurationPage() {
     for (const item of combinedCuratedItems) {
       if (Array.isArray(item.members)) {
         for (const m of item.members) {
-          absorbedIds.add(m.canonical_station_id);
+          absorbedIds.add(m.global_station_id);
         }
       }
 
@@ -775,7 +779,7 @@ export function CurationPage() {
       if (Array.isArray(item.members)) {
         for (const m of item.members) {
           const match = rawCandidates.find(
-            (c) => c.canonical_station_id === m.canonical_station_id,
+            (c) => c.global_station_id === m.global_station_id,
           );
           if (
             match &&
@@ -797,7 +801,7 @@ export function CurationPage() {
       }
 
       curatedCandidates.push({
-        canonical_station_id: item.curated_station_id,
+        global_station_id: item.curated_station_id,
         display_name: item.display_name || item.curated_station_id,
         candidate_rank: 0,
         aliases: [],
@@ -813,7 +817,7 @@ export function CurationPage() {
     }
 
     const unabsorbed = rawCandidates.filter(
-      (c) => !absorbedIds.has(c.canonical_station_id),
+      (c) => !absorbedIds.has(c.global_station_id),
     );
     return [...curatedCandidates, ...unabsorbed];
   }, [clusterDetail?.candidates, combinedCuratedItems]);
@@ -826,7 +830,7 @@ export function CurationPage() {
           if (!prev.renameByRef.__merge_name) {
             const firstId = Array.from(selectedIds)[0];
             const firstSelected = candidates.find(
-              (c) => c.canonical_station_id === firstId,
+              (c) => c.global_station_id === firstId,
             );
             if (firstSelected) {
               return {
@@ -835,7 +839,7 @@ export function CurationPage() {
                   ...prev.renameByRef,
                   __merge_name:
                     firstSelected.display_name ||
-                    firstSelected.canonical_station_id,
+                    firstSelected.global_station_id,
                 },
               };
             }
@@ -857,7 +861,7 @@ export function CurationPage() {
   }, [selectedIds, activeTool, candidates]);
 
   const handleSelectAll = useCallback(() => {
-    const all = candidates.map((c) => c.canonical_station_id);
+    const all = candidates.map((c) => c.global_station_id);
     setSelectedIds(new Set(all));
   }, [candidates]);
 
@@ -892,10 +896,10 @@ export function CurationPage() {
       const prevHidden = new Set(hiddenServerIds);
 
       // Optimistic state updates
-      const actedUponIds = new Set(payload.selected_station_ids);
+      const actedUponIds = new Set(payload.selected_global_station_ids);
       const newHidden = new Set(hiddenServerIds);
       for (const ci of curatedItems) {
-        if (ci.members?.some((m) => actedUponIds.has(m.canonical_station_id))) {
+        if (ci.members?.some((m) => actedUponIds.has(m.global_station_id))) {
           newHidden.add(ci.curated_station_id);
         }
       }
@@ -903,14 +907,17 @@ export function CurationPage() {
 
       const newOptimistic = [];
       for (const g of payload.groups || []) {
-        if (g.member_station_ids && g.member_station_ids.length > 1) {
+        if (
+          g.member_global_station_ids &&
+          g.member_global_station_ids.length > 1
+        ) {
           newOptimistic.push({
             curated_station_id: `opt_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
             display_name: g.rename_to || g.group_label || "Optimistic Action",
             derived_operation:
               payload.operation === "split" ? "group" : "merge",
-            members: g.member_station_ids.map((id) => ({
-              canonical_station_id: id,
+            members: g.member_global_station_ids.map((id) => ({
+              global_station_id: id,
               member_role: "member",
             })),
           });
@@ -921,7 +928,7 @@ export function CurationPage() {
         const next = [...prev];
         const filtered = next.filter(
           (opt) =>
-            !opt.members.some((m) => actedUponIds.has(m.canonical_station_id)),
+            !opt.members.some((m) => actedUponIds.has(m.global_station_id)),
         );
         return [...filtered, ...newOptimistic];
       });
@@ -1065,9 +1072,9 @@ export function CurationPage() {
             )}
             {candidates.map((candidate) => (
               <CandidateCard
-                key={candidate.canonical_station_id}
+                key={candidate.global_station_id}
                 candidate={candidate}
-                selected={selectedIds.has(candidate.canonical_station_id)}
+                selected={selectedIds.has(candidate.global_station_id)}
                 renameByRef={draftState.renameByRef}
                 onToggle={handleToggleCandidate}
                 rawCandidates={clusterDetail?.candidates || []}
@@ -1098,7 +1105,7 @@ export function CurationPage() {
                       const incoming = new Set();
                       for (const sid of selectedIds) {
                         const c = candidates.find(
-                          (x) => x.canonical_station_id === sid,
+                          (x) => x.global_station_id === sid,
                         );
                         for (const v of c?.service_context?.incoming || [])
                           incoming.add(v);
@@ -1127,7 +1134,7 @@ export function CurationPage() {
                       const outgoing = new Set();
                       for (const sid of selectedIds) {
                         const c = candidates.find(
-                          (x) => x.canonical_station_id === sid,
+                          (x) => x.global_station_id === sid,
                         );
                         for (const v of c?.service_context?.outgoing || [])
                           outgoing.add(v);
@@ -1152,12 +1159,12 @@ export function CurationPage() {
                 <div id="evidenceList" style={{ marginTop: 12 }}>
                   {clusterDetail.evidence.slice(0, 20).map((row) => (
                     <div
-                      key={`${row.evidence_type ?? "evidence"}-${row.source_canonical_station_id ?? "source"}-${row.target_canonical_station_id ?? "target"}-${row.score ?? "na"}`}
+                      key={`${row.evidence_type ?? "evidence"}-${row.source_global_station_id ?? "source"}-${row.target_global_station_id ?? "target"}-${row.score ?? "na"}`}
                       className="curation-evidence-row"
                     >
                       <strong>{row.evidence_type}</strong> ·{" "}
-                      {row.source_canonical_station_id} ↔{" "}
-                      {row.target_canonical_station_id} · score{" "}
+                      {row.source_global_station_id} ↔{" "}
+                      {row.target_global_station_id} · score{" "}
                       {row.score ?? "n/a"}
                     </div>
                   ))}
