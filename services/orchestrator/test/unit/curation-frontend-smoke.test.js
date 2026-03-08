@@ -56,6 +56,8 @@ test("curation frontend includes required component structure and runtime utilit
   assert.match(pageJsx, /checked=\{selected\}/);
   assert.match(pageJsx, /data-station-id=\{id\}/);
   assert.match(pageJsx, /onChange=\{handleToggle\}/);
+  assert.match(pageJsx, /buildMarkerOverlapLayout/);
+  assert.match(pageJsx, /curation-marker__ring/);
 
   // Runtime uses shared graphql.js and global merge GraphQL API model
   assert.match(runtimeJs, /import.*graphqlQuery.*from.*"\.\/graphql"/);

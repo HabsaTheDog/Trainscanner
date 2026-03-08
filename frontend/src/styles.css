@@ -1027,7 +1027,53 @@ button:disabled {
 }
 
 /* ── Map Marker ── */
+.curation-marker-shell {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  overflow: visible;
+}
+
+.curation-marker-shell:focus-visible {
+  outline: 2px solid rgba(14, 116, 144, 0.45);
+  outline-offset: 2px;
+  border-radius: 999px;
+}
+
+.curation-marker-shell--stacked .curation-marker {
+  box-shadow:
+    -4px 4px 0 rgba(15, 23, 42, 0.12),
+    0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
+.curation-marker__rings {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.curation-marker__ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: calc(22px + (var(--ring-index) * 8px));
+  height: calc(22px + (var(--ring-index) * 8px));
+  border-radius: 999px;
+  border: 2px solid rgba(185, 28, 28, 0.2);
+  transform: translate(-50%, -50%);
+}
+
 .curation-marker {
+  position: relative;
+  z-index: 1;
   width: 14px;
   height: 14px;
   border-radius: 50%;
@@ -1040,7 +1086,7 @@ button:disabled {
     background 0.12s;
 }
 
-.curation-marker:hover {
+.curation-marker-shell:hover .curation-marker {
   transform: scale(1.5);
 }
 
@@ -1048,7 +1094,7 @@ button:disabled {
   background: #b91c1c;
   border-color: #fff;
   box-shadow:
-    0 0 0 3px rgba(185, 28, 28, 0.3),
+    0 0 0 3px rgba(185, 28, 28, 0.22),
     0 1px 4px rgba(0, 0, 0, 0.35);
 }
 
