@@ -2,6 +2,11 @@ const {
   getGlobalClusters,
   getGlobalClusterDetail,
   postGlobalClusterDecision,
+  reopenGlobalCluster,
+  resetGlobalClusterWorkspace,
+  resolveGlobalCluster,
+  saveGlobalClusterWorkspace,
+  undoGlobalClusterWorkspace,
 } = require("../domains/qa/api");
 
 async function requestAiScoreBridge(clusterId, candidates) {
@@ -120,6 +125,21 @@ const rootValue = {
 
   submitGlobalMergeDecision: async ({ clusterId, input }) =>
     postGlobalClusterDecision(clusterId, input),
+
+  saveGlobalClusterWorkspace: async ({ clusterId, input }) =>
+    saveGlobalClusterWorkspace(clusterId, input),
+
+  undoGlobalClusterWorkspace: async ({ clusterId, input }) =>
+    undoGlobalClusterWorkspace(clusterId, input || {}),
+
+  resetGlobalClusterWorkspace: async ({ clusterId, input }) =>
+    resetGlobalClusterWorkspace(clusterId, input || {}),
+
+  reopenGlobalCluster: async ({ clusterId, input }) =>
+    reopenGlobalCluster(clusterId, input || {}),
+
+  resolveGlobalCluster: async ({ clusterId, input }) =>
+    resolveGlobalCluster(clusterId, input),
 };
 
 module.exports = { rootValue };

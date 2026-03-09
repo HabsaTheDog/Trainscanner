@@ -28,6 +28,21 @@ test("submitGlobalMergeDecision mutation is present", () => {
   assert.ok(args.input, "submitGlobalMergeDecision should have input");
 });
 
+test("workspace mutations are present", () => {
+  const mutationType = schema.getMutationType();
+  const fields = mutationType.getFields();
+
+  for (const fieldName of [
+    "saveGlobalClusterWorkspace",
+    "undoGlobalClusterWorkspace",
+    "resetGlobalClusterWorkspace",
+    "reopenGlobalCluster",
+    "resolveGlobalCluster",
+  ]) {
+    assert.ok(fields[fieldName], `${fieldName} should exist on Mutation`);
+  }
+});
+
 test("global merge cluster types expose global station identifiers", () => {
   const candidateType = schema.getType("GlobalClusterCandidate");
   assert.ok(candidateType, "GlobalClusterCandidate should exist");
@@ -46,6 +61,16 @@ test("globalClusters query returns connection metadata", () => {
   assert.ok(fields.items, "connection should expose items");
   assert.ok(fields.total_count, "connection should expose total_count");
   assert.ok(fields.limit, "connection should expose limit");
+});
+
+test("cluster detail exposes workspace metadata", () => {
+  const detailType = schema.getType("GlobalMergeClusterDetail");
+  assert.ok(detailType, "GlobalMergeClusterDetail should exist");
+  const fields = detailType.getFields();
+  assert.ok(fields.effective_status, "detail should expose effective_status");
+  assert.ok(fields.workspace_version, "detail should expose workspace_version");
+  assert.ok(fields.has_workspace, "detail should expose has_workspace");
+  assert.ok(fields.workspace, "detail should expose workspace JSON");
 });
 
 test("health query resolves without DB connection", async () => {

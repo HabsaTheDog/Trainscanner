@@ -10,6 +10,11 @@ const schema = buildSchema(`
   type Mutation {
     requestAiScore(clusterId: ID!): AiScoreResult
     submitGlobalMergeDecision(clusterId: ID!, input: GlobalMergeDecisionInput!): GlobalMergeDecisionResult!
+    saveGlobalClusterWorkspace(clusterId: ID!, input: GlobalClusterWorkspaceInput!): GlobalClusterWorkspaceResult!
+    undoGlobalClusterWorkspace(clusterId: ID!, input: GlobalClusterWorkspaceActorInput): GlobalClusterWorkspaceResult!
+    resetGlobalClusterWorkspace(clusterId: ID!, input: GlobalClusterWorkspaceActorInput): GlobalClusterWorkspaceResult!
+    reopenGlobalCluster(clusterId: ID!, input: GlobalClusterWorkspaceActorInput): GlobalClusterWorkspaceResult!
+    resolveGlobalCluster(clusterId: ID!, input: ResolveGlobalClusterInput!): GlobalClusterResolveResult!
   }
 
   input GlobalMergeDecisionInput {
@@ -32,6 +37,22 @@ const schema = buildSchema(`
     rename_to: String!
   }
 
+  input GlobalClusterWorkspaceInput {
+    workspace: JSON!
+    updated_by: String
+  }
+
+  input GlobalClusterWorkspaceActorInput {
+    updated_by: String
+  }
+
+  input ResolveGlobalClusterInput {
+    status: String!
+    note: String
+    requested_by: String
+    clear_workspace_on_dismiss: Boolean
+  }
+
   type GlobalMergeDecisionResult {
     ok: Boolean!
     cluster_id: ID!
@@ -39,9 +60,28 @@ const schema = buildSchema(`
     operation: String!
   }
 
+  type GlobalClusterWorkspaceResult {
+    ok: Boolean!
+    cluster_id: ID!
+    workspace_version: Int!
+    effective_status: String
+    workspace: JSON
+  }
+
+  type GlobalClusterResolveResult {
+    ok: Boolean!
+    cluster_id: ID!
+    decision_id: ID
+    status: String!
+    next_cluster_id: ID
+  }
+
   type GlobalMergeCluster {
     cluster_id: ID!
     status: String
+    effective_status: String
+    has_workspace: Boolean
+    workspace_version: Int
     severity: String
     scope_tag: String
     display_name: String
@@ -60,6 +100,10 @@ const schema = buildSchema(`
   type GlobalMergeClusterDetail {
     cluster_id: ID!
     status: String
+    effective_status: String
+    workspace_version: Int
+    has_workspace: Boolean
+    workspace: JSON
     severity: String
     scope_tag: String
     display_name: String

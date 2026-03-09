@@ -436,7 +436,18 @@ CREATE INDEX IF NOT EXISTS idx_qa_merge_cluster_evidence_cluster
 CREATE TABLE IF NOT EXISTS qa_merge_decisions (
   decision_id bigserial PRIMARY KEY,
   merge_cluster_id text NOT NULL REFERENCES qa_merge_clusters(merge_cluster_id) ON DELETE CASCADE,
-  operation text NOT NULL CHECK (operation IN ('merge', 'split', 'keep_separate', 'rename')),
+  operation text NOT NULL CHECK (
+    operation IN (
+      'merge',
+      'split',
+      'group',
+      'keep_separate',
+      'rename',
+      'reopen_workspace',
+      'resolve_workspace',
+      'dismiss_workspace'
+    )
+  ),
   decision_payload jsonb NOT NULL DEFAULT '{}'::jsonb,
   note text,
   requested_by text NOT NULL DEFAULT current_user,
@@ -446,11 +457,96 @@ CREATE TABLE IF NOT EXISTS qa_merge_decisions (
 CREATE INDEX IF NOT EXISTS idx_qa_merge_decisions_cluster
   ON qa_merge_decisions (merge_cluster_id, created_at DESC);
 
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'qa_merge_decisions'::regclass
+      AND conname = 'qa_merge_decisions_operation_check'
+  ) THEN
+    ALTER TABLE qa_merge_decisions
+      DROP CONSTRAINT qa_merge_decisions_operation_check;
+  END IF;
+END $$;
+
+ALTER TABLE qa_merge_decisions
+  ADD CONSTRAINT qa_merge_decisions_operation_check
+  CHECK (
+    operation IN (
+      'merge',
+      'split',
+      'group',
+      'keep_separate',
+      'rename',
+      'reopen_workspace',
+      'resolve_workspace',
+      'dismiss_workspace'
+    )
+  );
+
 CREATE TABLE IF NOT EXISTS qa_merge_decision_members (
   decision_id bigint NOT NULL REFERENCES qa_merge_decisions(decision_id) ON DELETE CASCADE,
   global_station_id text NOT NULL REFERENCES global_stations(global_station_id) ON DELETE CASCADE,
-  action text NOT NULL DEFAULT 'candidate' CHECK (action IN ('candidate', 'merge_member', 'separate', 'rename_target')),
+  action text NOT NULL DEFAULT 'candidate' CHECK (
+    action IN (
+      'candidate',
+      'merge_member',
+      'group_member',
+      'separate',
+      'rename_target'
+    )
+  ),
   group_label text NOT NULL DEFAULT '',
   metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
   PRIMARY KEY (decision_id, global_station_id, action, group_label)
 );
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'qa_merge_decision_members'::regclass
+      AND conname = 'qa_merge_decision_members_action_check'
+  ) THEN
+    ALTER TABLE qa_merge_decision_members
+      DROP CONSTRAINT qa_merge_decision_members_action_check;
+  END IF;
+END $$;
+
+ALTER TABLE qa_merge_decision_members
+  ADD CONSTRAINT qa_merge_decision_members_action_check
+  CHECK (
+    action IN (
+      'candidate',
+      'merge_member',
+      'group_member',
+      'separate',
+      'rename_target'
+    )
+  );
+
+CREATE TABLE IF NOT EXISTS qa_merge_cluster_workspaces (
+  merge_cluster_id text PRIMARY KEY REFERENCES qa_merge_clusters(merge_cluster_id) ON DELETE CASCADE,
+  version integer NOT NULL DEFAULT 1 CHECK (version > 0),
+  workspace_payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by text NOT NULL DEFAULT current_user
+);
+
+CREATE INDEX IF NOT EXISTS idx_qa_merge_cluster_workspaces_updated
+  ON qa_merge_cluster_workspaces (updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS qa_merge_cluster_workspace_versions (
+  merge_cluster_id text NOT NULL REFERENCES qa_merge_clusters(merge_cluster_id) ON DELETE CASCADE,
+  version integer NOT NULL CHECK (version > 0),
+  workspace_payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  action text NOT NULL DEFAULT 'save' CHECK (action IN ('save', 'undo', 'reset', 'resolve', 'dismiss')),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  updated_by text NOT NULL DEFAULT current_user,
+  PRIMARY KEY (merge_cluster_id, version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_qa_merge_cluster_workspace_versions_history
+  ON qa_merge_cluster_workspace_versions (merge_cluster_id, updated_at DESC, version DESC);
