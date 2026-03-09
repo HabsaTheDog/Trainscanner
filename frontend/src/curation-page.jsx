@@ -851,7 +851,7 @@ function WorkspacePanel({
     <section className="curation-workspace-panel">
       <div id="contextualActionBar" className="curation-action-bar">
         <div className="curation-action-bar__summary">
-          <strong>
+          <strong className="curation-action-bar__title">
             {clusterDetail
               ? clusterDetail.display_name || clusterDetail.cluster_id
               : "No cluster selected"}
@@ -864,49 +864,51 @@ function WorkspacePanel({
           </span>
         </div>
 
-        <div className="curation-action-bar__actions">
-          <button
-            id="undoWorkspaceBtn"
-            type="button"
-            className="curation-btn curation-btn--secondary"
-            onClick={onUndo}
-          >
-            Undo
-          </button>
-          <button
-            id="resetWorkspaceBtn"
-            type="button"
-            className="curation-btn curation-btn--secondary"
-            onClick={onReset}
-          >
-            Reset
-          </button>
-          <button
-            type="button"
-            className="curation-btn curation-btn--secondary"
-            onClick={onAiScore}
-          >
-            AI Suggest
-          </button>
-        </div>
+        <div className="curation-action-bar__controls">
+          <div className="curation-action-bar__actions">
+            <button
+              id="undoWorkspaceBtn"
+              type="button"
+              className="curation-btn curation-btn--secondary"
+              onClick={onUndo}
+            >
+              Undo
+            </button>
+            <button
+              id="resetWorkspaceBtn"
+              type="button"
+              className="curation-btn curation-btn--secondary"
+              onClick={onReset}
+            >
+              Reset
+            </button>
+            <button
+              type="button"
+              className="curation-btn curation-btn--secondary"
+              onClick={onAiScore}
+            >
+              AI Suggest
+            </button>
+          </div>
 
-        <div className="curation-action-bar__resolve">
-          <button
-            id="dismissClusterBtn"
-            type="button"
-            className="curation-btn curation-btn--danger"
-            onClick={onDismiss}
-          >
-            Dismiss
-          </button>
-          <button
-            id="resolveClusterBtn"
-            type="button"
-            className="curation-btn curation-btn--save"
-            onClick={canUnresolve ? onUnresolve : onResolve}
-          >
-            {canUnresolve ? "Unresolve" : "Resolve"}
-          </button>
+          <div className="curation-action-bar__resolve">
+            <button
+              id="dismissClusterBtn"
+              type="button"
+              className="curation-btn curation-btn--danger"
+              onClick={onDismiss}
+            >
+              Dismiss
+            </button>
+            <button
+              id="resolveClusterBtn"
+              type="button"
+              className="curation-btn curation-btn--save"
+              onClick={canUnresolve ? onUnresolve : onResolve}
+            >
+              {canUnresolve ? "Unresolve" : "Resolve"}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1441,17 +1443,7 @@ export function CurationPage() {
     () => railItems.find((item) => item.ref === uiState.focusedRef) || null,
     [railItems, uiState.focusedRef],
   );
-  const mapItems = useMemo(() => {
-    if (focusedItem?.kind !== "group") return railItems;
-    const nodeMarkers = (focusedItem.internal_nodes || []).map((node) => ({
-      ref: `node:${focusedItem.ref}:${node.node_id}`,
-      display_name: node.label,
-      lat: node.lat,
-      lon: node.lon,
-      map_kind: "group-node",
-    }));
-    return [...railItems, ...nodeMarkers];
-  }, [focusedItem, railItems]);
+  const mapItems = useMemo(() => railItems, [railItems]);
   const plottedMapItems = useMemo(
     () => buildMappableItems(mapItems),
     [mapItems],

@@ -1731,10 +1731,9 @@ textarea {
 
 .curation-action-bar {
   display: grid;
-  grid-template-columns: minmax(180px, 0.8fr) minmax(0, 1.8fr) auto;
-  grid-auto-rows: max-content;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
-  align-items: start;
+  align-items: center;
   padding: 0 0 2px;
   border: none;
   border-radius: 0;
@@ -1743,11 +1742,24 @@ textarea {
 }
 
 .curation-action-bar__summary,
+.curation-action-bar__controls,
 .curation-action-bar__resolve {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.curation-action-bar__summary {
+  min-width: 0;
+}
+
+.curation-action-bar__title {
+  line-height: 1.1;
+}
+
+.curation-action-bar__controls {
+  justify-content: flex-end;
 }
 
 .curation-action-bar__actions {
@@ -1782,30 +1794,47 @@ textarea {
   background: #fee2e2;
 }
 
+.curation-action-bar__resolve .curation-btn {
+  min-width: 110px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.curation-action-bar__resolve .curation-btn--danger {
+  padding: 9px 14px;
+}
+
 .curation-tool-tabs {
   display: flex;
   gap: 8px;
+  justify-content: flex-start;
 }
 
 .curation-tool-tab {
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  background: rgba(241, 245, 249, 0.8);
-  color: #475569;
-  padding: 8px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(248, 250, 252, 0.78);
+  color: #64748b;
+  padding: 7px 12px;
   border-radius: 999px;
   font: inherit;
   font-weight: 700;
   cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
+}
+
+.curation-tool-tab:hover {
+  color: #334155;
+  background: rgba(241, 245, 249, 0.9);
 }
 
 .curation-tool-tab--active {
-  background: linear-gradient(
-    135deg,
-    rgba(14, 116, 144, 0.16),
-    rgba(14, 116, 144, 0.08)
-  );
+  background: rgba(14, 116, 144, 0.08);
   color: #0f172a;
-  border-color: rgba(14, 116, 144, 0.32);
+  border-color: rgba(14, 116, 144, 0.2);
 }
 
 .curation-tool-panel {
@@ -2117,6 +2146,11 @@ textarea {
 
   .curation-action-bar {
     grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .curation-action-bar__controls {
+    justify-content: flex-start;
   }
 }
 
