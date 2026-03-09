@@ -49,6 +49,50 @@ fail() {
   return 1
 }
 
+motis_bootstrap_current() {
+  local profile="$1"
+  local active_state_path="${ROOT_DIR}/services/orchestrator/state/active-gtfs.json"
+  local active_zip_path="${ROOT_DIR}/data/motis/active-gtfs.zip"
+  local config_path="${ROOT_DIR}/data/motis/config.yml"
+  local artifact_json=""
+  local artifact_zip_relative=""
+  local artifact_zip_absolute=""
+  local state_profile=""
+  local state_zip_path=""
+  local source_mtime=""
+  local active_mtime=""
+  local source_size=""
+  local active_size=""
+
+  if [[ ! -f "$active_state_path" || ! -f "$active_zip_path" || ! -f "$config_path" ]]; then
+    return 1
+  fi
+
+  artifact_json="$(node "${ROOT_DIR}/services/orchestrator/src/cli/profile-runtime.js" resolve-artifact --root "$ROOT_DIR" --profile "$profile" 2>/dev/null)" || return 1
+  artifact_zip_relative="$(node -e "const obj = JSON.parse(process.argv[1]); process.stdout.write(obj.zipPath || '');" "$artifact_json")"
+  artifact_zip_absolute="$(node -e "const obj = JSON.parse(process.argv[1]); process.stdout.write(obj.absolutePath || '');" "$artifact_json")"
+
+  [[ -n "$artifact_zip_relative" && -f "$artifact_zip_absolute" ]] || return 1
+
+  state_profile="$(node -e "const fs = require('node:fs'); const obj = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); process.stdout.write(obj.activeProfile || '');" "$active_state_path" 2>/dev/null)" || return 1
+  state_zip_path="$(node -e "const fs = require('node:fs'); const obj = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); process.stdout.write(obj.zipPath || '');" "$active_state_path" 2>/dev/null)" || return 1
+
+  if [[ "$state_profile" != "$profile" || "$state_zip_path" != "$artifact_zip_relative" ]]; then
+    return 1
+  fi
+
+  source_mtime="$(stat -c %Y "$artifact_zip_absolute" 2>/dev/null)" || return 1
+  active_mtime="$(stat -c %Y "$active_zip_path" 2>/dev/null)" || return 1
+  source_size="$(stat -c %s "$artifact_zip_absolute" 2>/dev/null)" || return 1
+  active_size="$(stat -c %s "$active_zip_path" 2>/dev/null)" || return 1
+
+  if [[ "$source_size" != "$active_size" ]]; then
+    return 1
+  fi
+
+  [[ "$active_mtime" -ge "$source_mtime" ]]
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --profile)
@@ -123,12 +167,18 @@ if [[ "$SKIP_IMPORT" == "true" ]]; then
 fi
 
 log "Bootstrapping MOTIS data for profile '$PROFILE'"
-"${ROOT_DIR}/scripts/init-motis.sh" "${INIT_ARGS[@]}"
+if motis_bootstrap_current "$PROFILE"; then
+  log "Reusing existing MOTIS bootstrap for profile '$PROFILE'"
+else
+  "${ROOT_DIR}/scripts/init-motis.sh" "${INIT_ARGS[@]}"
+fi
 
 if [[ "$NO_START" == "true" ]]; then
   log "Bootstrap complete. Skipping docker compose start due to --no-start."
   exit 0
 fi
+
+"${ROOT_DIR}/scripts/ensure-frontend-build.sh"
 
 COMPOSE_ARGS=(up)
 if [[ "$NO_BUILD" != "true" ]]; then

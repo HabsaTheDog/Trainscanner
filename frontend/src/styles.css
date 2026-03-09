@@ -220,6 +220,7 @@ button:disabled {
 
 /* ── Left Sidebar ── */
 .curation-sidebar {
+  grid-area: sidebar;
   background: rgba(255, 255, 255, 0.82);
   border-right: 1px solid rgba(148, 163, 184, 0.2);
   backdrop-filter: blur(18px);
@@ -1668,7 +1669,8 @@ textarea {
 .curation-layout {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr) 430px;
+  grid-template-columns: 320px 430px minmax(0, 1fr);
+  grid-template-areas: "sidebar rail workspace";
   background:
     radial-gradient(
       circle at top left,
@@ -1679,6 +1681,7 @@ textarea {
 }
 
 .curation-workspace {
+  grid-area: workspace;
   min-width: 0;
   display: grid;
   grid-template-rows: minmax(360px, 52vh) auto auto;
@@ -1689,7 +1692,8 @@ textarea {
 }
 
 .curation-rail {
-  border-left: 1px solid rgba(148, 163, 184, 0.16);
+  grid-area: rail;
+  border-right: 1px solid rgba(148, 163, 184, 0.16);
   background: rgba(250, 252, 254, 0.92);
   display: flex;
   flex-direction: column;
@@ -1992,10 +1996,17 @@ textarea {
     border-color 0.15s,
     box-shadow 0.15s,
     transform 0.15s;
+  outline: none;
 }
 
 .curation-rail-card:hover {
   transform: translateY(-1px);
+}
+
+.curation-rail-card:focus-visible {
+  box-shadow:
+    0 0 0 3px rgba(14, 116, 144, 0.16),
+    0 18px 28px rgba(14, 116, 144, 0.12);
 }
 
 .curation-rail-card--selected {
@@ -2066,13 +2077,15 @@ textarea {
 
 @media (max-width: 1200px) {
   .curation-layout {
-    grid-template-columns: 280px minmax(0, 1fr);
+    grid-template-columns: 280px minmax(320px, 420px);
+    grid-template-areas:
+      "sidebar rail"
+      "workspace workspace";
   }
 
   .curation-rail {
-    grid-column: 1 / -1;
-    border-left: none;
-    border-top: 1px solid rgba(148, 163, 184, 0.16);
+    border-right: none;
+    border-left: 1px solid rgba(148, 163, 184, 0.16);
     max-height: 40vh;
   }
 }
@@ -2080,11 +2093,21 @@ textarea {
 @media (max-width: 900px) {
   .curation-layout {
     grid-template-columns: 1fr;
+    grid-template-areas:
+      "sidebar"
+      "rail"
+      "workspace";
   }
 
   .curation-sidebar,
   .curation-rail {
     max-height: none;
+  }
+
+  .curation-rail {
+    border-left: none;
+    border-right: none;
+    border-top: 1px solid rgba(148, 163, 184, 0.16);
   }
 
   .curation-workspace {

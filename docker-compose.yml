@@ -118,6 +118,7 @@ services:
       TEMPORAL_ADDRESS: temporal:7233
     volumes:
       - ./config:/app/config
+      - ./frontend/dist:/app/frontend/dist
       - ./services/orchestrator/state:/app/state
       - ./data:/app/data
       - /var/run/docker.sock:/var/run/docker.sock

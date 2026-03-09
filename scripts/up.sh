@@ -59,6 +59,7 @@ if ! "$ROOT_DIR/scripts/check-motis-data.sh" >/dev/null 2>&1; then
 fi
 
 echo "Starting docker compose services..."
+"$ROOT_DIR/scripts/ensure-frontend-build.sh"
 if [[ "$NO_BUILD" == "true" ]]; then
   (cd "$ROOT_DIR" && docker compose up "${PASS_THROUGH[@]}")
 else

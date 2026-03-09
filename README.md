@@ -8,8 +8,11 @@ GTFS profile switching and route debugging with MOTIS.
 # Install Node workspaces once (frontend + orchestrator + control-plane)
 npm ci
 
-# Start dev environment (Frontend: http://localhost:3000, MOTIS: http://localhost:8080)
+# Start dev environment without rebuilding images on every run
 npm run dev -- --profile pan_europe_runtime
+
+# Force a fresh image rebuild when Docker inputs changed
+npm run start:build -- --profile pan_europe_runtime
 
 # Stop environment
 npm run stop

@@ -7,11 +7,13 @@
     "services/control-plane"
   ],
   "scripts": {
-    "dev": "./scripts/run-test-env.sh",
-    "start": "./scripts/run-test-env.sh",
+    "dev": "./scripts/run-test-env.sh --no-build",
+    "start": "./scripts/run-test-env.sh --no-build",
+    "start:build": "./scripts/run-test-env.sh",
     "stop": "./scripts/stop-test-env.sh",
     "setup": "./scripts/setup.sh",
-    "up": "./scripts/up.sh",
+    "up": "./scripts/up.sh --no-build",
+    "up:build": "./scripts/up.sh",
     "init": "./scripts/init-motis.sh",
     "switch": "./scripts/switch-gtfs.sh",
     "check:data": "./scripts/check-motis-data.sh",

@@ -686,9 +686,26 @@ function CandidateRailCard({
     ? candidate.service_context.outgoing
     : [];
   const contextSummary = candidate.context_summary || {};
+
+  const handleCardSelection = (event) => {
+    onToggleSelection(item.ref, index, event.shiftKey);
+    onFocus(item.ref);
+  };
+
   return (
+    /* biome-ignore lint/a11y/useSemanticElements: the card container needs a non-button wrapper because it contains nested controls */
     <div
       className={`curation-rail-card curation-rail-card--${item.kind} ${selected ? "curation-rail-card--selected" : ""} ${focused ? "curation-rail-card--focused" : ""}`}
+      role="button"
+      aria-pressed={selected}
+      onClick={handleCardSelection}
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        handleCardSelection(event);
+      }}
+      tabIndex={0}
     >
       <div className="curation-rail-card__header">
         <label className="curation-rail-card__select">
@@ -1800,6 +1817,65 @@ export function CurationPage() {
         loading={loading}
       />
 
+      <aside className="curation-rail">
+        <div className="curation-candidates-header">
+          <div>
+            <h4>Candidate Rail</h4>
+            <p id="selectionSummary" className="curation-muted curation-tiny">
+              {uiState.selectedRefs.size === 0
+                ? "No items selected."
+                : `Selected: ${uiState.selectedRefs.size} item(s).`}
+            </p>
+          </div>
+          <div className="curation-candidates-actions">
+            <button
+              id="candidateSelectAllBtn"
+              type="button"
+              className="curation-btn curation-btn--secondary curation-tiny"
+              onClick={() =>
+                dispatch({
+                  type: "set_selection",
+                  refs: railItems.map((item) => item.ref),
+                  lastSelectedIndex: railItems.length - 1,
+                })
+              }
+            >
+              All
+            </button>
+            <button
+              id="candidateClearBtn"
+              type="button"
+              className="curation-btn curation-btn--secondary curation-tiny"
+              onClick={() => dispatch({ type: "clear_selection" })}
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+
+        <div className="curation-candidates-scroll">
+          {railItems.length === 0 && (
+            <p className="curation-muted" style={{ padding: "12px" }}>
+              No cluster selected.
+            </p>
+          )}
+          {railItems.map((item, index) => (
+            <CandidateRailCard
+              key={item.ref}
+              item={item}
+              index={index}
+              selected={uiState.selectedRefs.has(item.ref)}
+              focused={uiState.focusedRef === item.ref}
+              workspace={workspace}
+              candidateMap={candidateMap}
+              onToggleSelection={handleToggleSelection}
+              onFocus={(ref) => dispatch({ type: "focus", ref })}
+              onSplit={handleSplitComposite}
+            />
+          ))}
+        </div>
+      </aside>
+
       <main className="curation-workspace">
         <section className="curation-map-shell">
           <div className="curation-map-toolbar">
@@ -1911,65 +1987,6 @@ export function CurationPage() {
           </ExpandablePanel>
         </section>
       </main>
-
-      <aside className="curation-rail">
-        <div className="curation-candidates-header">
-          <div>
-            <h4>Candidate Rail</h4>
-            <p id="selectionSummary" className="curation-muted curation-tiny">
-              {uiState.selectedRefs.size === 0
-                ? "No items selected."
-                : `Selected: ${uiState.selectedRefs.size} item(s).`}
-            </p>
-          </div>
-          <div className="curation-candidates-actions">
-            <button
-              id="candidateSelectAllBtn"
-              type="button"
-              className="curation-btn curation-btn--secondary curation-tiny"
-              onClick={() =>
-                dispatch({
-                  type: "set_selection",
-                  refs: railItems.map((item) => item.ref),
-                  lastSelectedIndex: railItems.length - 1,
-                })
-              }
-            >
-              All
-            </button>
-            <button
-              id="candidateClearBtn"
-              type="button"
-              className="curation-btn curation-btn--secondary curation-tiny"
-              onClick={() => dispatch({ type: "clear_selection" })}
-            >
-              Clear
-            </button>
-          </div>
-        </div>
-
-        <div className="curation-candidates-scroll">
-          {railItems.length === 0 && (
-            <p className="curation-muted" style={{ padding: "12px" }}>
-              No cluster selected.
-            </p>
-          )}
-          {railItems.map((item, index) => (
-            <CandidateRailCard
-              key={item.ref}
-              item={item}
-              index={index}
-              selected={uiState.selectedRefs.has(item.ref)}
-              focused={uiState.focusedRef === item.ref}
-              workspace={workspace}
-              candidateMap={candidateMap}
-              onToggleSelection={handleToggleSelection}
-              onFocus={(ref) => dispatch({ type: "focus", ref })}
-              onSplit={handleSplitComposite}
-            />
-          ))}
-        </div>
-      </aside>
     </div>
   );
 }
