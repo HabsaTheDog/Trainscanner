@@ -1133,7 +1133,7 @@ button:disabled {
 /* ── Map Marker ── */
 .curation-marker-shell {
   --marker-size: 18px;
-  position: relative;
+  position: absolute;
   display: grid;
   place-items: center;
   width: var(--marker-size);

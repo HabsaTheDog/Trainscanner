@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 
 const {
   BUILD_MERGE_QUEUE_SQL,
+  createMergeQueueRepo,
   extractPhaseFromNotice,
 } = require("../../src/data/postgis/repositories/merge-queue-repo");
 
@@ -46,4 +47,29 @@ test("build sql preserves phase markers and ported evidence primitives", () => {
   assert.match(BUILD_MERGE_QUEUE_SQL, /_pair_seeds/);
   assert.match(BUILD_MERGE_QUEUE_SQL, /name_exact/);
   assert.match(BUILD_MERGE_QUEUE_SQL, /generic_name_penalty/);
+});
+
+test("rebuildMergeQueue ensures evidence columns before running the script", async () => {
+  const calls = [];
+  const client = {
+    async runSql(sql) {
+      calls.push(String(sql).trim().replace(/\s+/g, " "));
+      return { rows: [] };
+    },
+    async runScript() {
+      return {
+        stdout:
+          '{"scopeCountry":"","scopeAsOf":"","scopeTag":"latest","clusters":0,"candidates":0,"evidence":0}',
+        stderr: "",
+      };
+    },
+  };
+
+  const repo = createMergeQueueRepo(client);
+  const result = await repo.rebuildMergeQueue({});
+
+  assert.equal(result.scopeTag, "latest");
+  assert.equal(calls.length, 2);
+  assert.match(calls[0], /ADD COLUMN IF NOT EXISTS status text/);
+  assert.match(calls[1], /ADD COLUMN IF NOT EXISTS raw_value numeric/);
 });

@@ -1,4 +1,4 @@
-import maplibregl from "maplibre-gl";
+import maplibregl from "./maplibre";
 
 const BRACKET_ID_PATTERN = /\[(.+?)\]\s*$/;
 
@@ -289,7 +289,15 @@ export function initHomeApp() {
   async function loadStationSuggestions(query) {
     const requestId = ++stationFetchCounter;
     const q = (query || "").trim();
-    const url = `/api/gtfs/stations?limit=80&q=${encodeURIComponent(q)}`;
+    const params = new URLSearchParams({
+      limit: "80",
+      q,
+    });
+    const selectedProfile = String(profileSelect?.value || "").trim();
+    if (selectedProfile) {
+      params.set("profile", selectedProfile);
+    }
+    const url = `/api/gtfs/stations?${params.toString()}`;
 
     try {
       const payload = await fetchJson(url);

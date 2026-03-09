@@ -2,6 +2,9 @@ const crypto = require("node:crypto");
 
 const { createPostgisClient } = require("../../data/postgis/client");
 const {
+  ensureMergeClusterEvidenceColumns,
+} = require("../../data/postgis/repositories/merge-evidence-schema");
+const {
   createPipelineJobsRepo,
 } = require("../../data/postgis/repositories/pipeline-jobs-repo");
 const { AppError } = require("../../core/errors");
@@ -25,6 +28,7 @@ async function getDbClient() {
   if (!dbClient) {
     dbClient = createPostgisClient();
     await dbClient.ensureReady();
+    await ensureMergeClusterEvidenceColumns(dbClient);
   }
   return dbClient;
 }

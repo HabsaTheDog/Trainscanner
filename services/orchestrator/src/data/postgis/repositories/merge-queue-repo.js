@@ -1,5 +1,8 @@
 const { AppError } = require("../../../core/errors");
 const { validateOrThrow } = require("../../../core/schema");
+const {
+  ensureMergeClusterEvidenceColumns,
+} = require("./merge-evidence-schema");
 
 const MERGE_QUEUE_SUMMARY_SCHEMA = {
   type: "object",
@@ -1264,6 +1267,7 @@ function createMergeQueueRepo(client) {
     async rebuildMergeQueue(scope, options = {}) {
       const onPhase =
         typeof options.onPhase === "function" ? options.onPhase : null;
+      await ensureMergeClusterEvidenceColumns(client);
       const result = await client.runScript(
         BUILD_MERGE_QUEUE_SQL,
         {

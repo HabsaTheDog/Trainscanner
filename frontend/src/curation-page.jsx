@@ -1,4 +1,3 @@
-import maplibregl from "maplibre-gl";
 import {
   useCallback,
   useEffect,
@@ -42,6 +41,7 @@ import {
   updateGroupNodeLabel,
   updateGroupTransferSeconds,
 } from "./curation-page-runtime";
+import maplibregl from "./maplibre";
 
 function formatToneLabel(value) {
   return String(value || "")
@@ -1369,7 +1369,6 @@ export function CurationPage() {
       const data = await apiFetchClusters(filters);
       setClusters(data.items || []);
       setClusterTotalCount(data.totalCount || 0);
-      setClusterListLimit(data.limit || 50);
     } catch (error) {
       showNotice(`Failed to load clusters: ${error.message}`, "error", true);
     } finally {
