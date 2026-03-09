@@ -1,21 +1,46 @@
 import maplibregl from "maplibre-gl";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
+import {
+  addSelectionToGroup,
   fetchClusterDetail as apiFetchClusterDetail,
   fetchClusters as apiFetchClusters,
-  buildResolvePayload,
-  createDraftId,
-  createEmptyDraftState,
-  fetchCuratedProjection,
-  inferCandidateCategory,
-  pairKey,
+  buildCandidateMap,
+  buildRailItems,
+  createEmptyWorkspace,
+  createGroupFromSelection,
+  createMergeFromSelection,
+  formatResultsLabel,
+  getRenameValue,
+  markKeepSeparate,
+  normalizeWorkspace,
   parseRef,
+  removeMemberFromGroup,
+  reopenCluster,
   requestAiScore,
+  resetClusterWorkspace,
+  resolveCluster,
   resolveDefaultMapStyle,
+  resolveDisplayNameForRef,
+  resolveRefMemberStationIds,
   resolveSatelliteMapStyle,
-  submitDecision,
-  toCandidateRef,
+  saveClusterWorkspace,
+  serializeWorkspace,
+  setRenameValue,
+  sortCandidateIds,
+  splitComposite,
   toGroupRef,
+  toRawRef,
+  undoClusterWorkspace,
+  updateCompositeName,
+  updateGroupNodeLabel,
+  updateGroupTransferSeconds,
 } from "./curation-page-runtime";
 
 function formatToneLabel(value) {
@@ -32,34 +57,269 @@ function formatCountryLabel(countryTags, fallback) {
   return fallback || "EU";
 }
 
-// ─── Map Component ────────────────────────────────────────────────────────────
+function formatEvidenceTypeLabel(value) {
+  const labels = {
+    name_exact: "Exact Name",
+    name_loose_similarity: "Loose Name Similarity",
+    token_overlap: "Token Overlap",
+    geographic_distance: "Geographic Distance",
+    coordinate_quality: "Coordinate Quality",
+    shared_provider_sources: "Shared Sources",
+    shared_route_context: "Shared Route Context",
+    shared_adjacent_stations: "Shared Adjacent Stations",
+    country_relation: "Country Relation",
+    generic_name_penalty: "Generic Name Penalty",
+  };
+  return labels[value] || formatToneLabel(value || "unknown");
+}
+
+function formatEvidenceStatusLabel(value) {
+  const labels = {
+    supporting: "Supporting",
+    warning: "Warning",
+    missing: "Missing",
+    informational: "Context",
+    same_location: "Same Location",
+    nearby: "Nearby",
+    far_apart: "Far Apart",
+    too_far: "Too Far",
+    missing_coordinates: "Missing Coordinates",
+    coordinates_present: "Coordinates Present",
+  };
+  return labels[value] || formatToneLabel(value || "unknown");
+}
+
+function formatCoordStatus(value) {
+  return formatEvidenceStatusLabel(value || "missing_coordinates");
+}
+
+function formatEvidenceValue(row) {
+  if (!row) return "No data";
+  if (row.evidence_type === "geographic_distance") {
+    const meters = Number(row.raw_value ?? row.details?.distance_meters);
+    if (Number.isFinite(meters)) {
+      return `${Math.round(meters)} m`;
+    }
+    return formatEvidenceStatusLabel(row.details?.distance_status);
+  }
+  if (
+    ["name_loose_similarity", "token_overlap"].includes(row.evidence_type) &&
+    Number.isFinite(Number(row.raw_value))
+  ) {
+    return `${Math.round(Number(row.raw_value) * 100)}%`;
+  }
+  if (
+    [
+      "shared_provider_sources",
+      "shared_route_context",
+      "shared_adjacent_stations",
+      "coordinate_quality",
+      "generic_name_penalty",
+    ].includes(row.evidence_type) &&
+    Number.isFinite(Number(row.raw_value))
+  ) {
+    return String(Number(row.raw_value));
+  }
+  if (row.evidence_type === "country_relation") {
+    if (row.details?.same_country === true) return "Same country";
+    if (row.details?.same_country === false) return "Cross-border";
+    return "Country unknown";
+  }
+  if (Number.isFinite(Number(row.score))) {
+    return `${Math.round(Number(row.score) * 100)}%`;
+  }
+  return "No data";
+}
+
+function formatEvidenceDetails(details) {
+  if (!details || typeof details !== "object") {
+    return "";
+  }
+  if (details.explanation) {
+    return String(details.explanation);
+  }
+  if (details.distance_status) {
+    return formatEvidenceStatusLabel(details.distance_status);
+  }
+  if (details.reason) {
+    return String(details.reason);
+  }
+  const pairs = Object.entries(details)
+    .filter(([, value]) => value !== null && value !== undefined && value !== "")
+    .slice(0, 3)
+    .map(([key, value]) => `${formatToneLabel(key)}: ${String(value)}`);
+  return pairs.join(" · ");
+}
+
+function getSummaryCounts(summary, key) {
+  const container =
+    summary && typeof summary === "object" ? summary.status_counts || summary : {};
+  return Number.parseInt(String(container?.[key] ?? 0), 10) || 0;
+}
+
+function getTypeCounts(summary) {
+  const container =
+    summary && typeof summary === "object" && summary.type_counts
+      ? summary.type_counts
+      : {};
+  return Object.entries(container)
+    .map(([type, count]) => ({
+      type,
+      count: Number.parseInt(String(count ?? 0), 10) || 0,
+    }))
+    .filter((entry) => entry.count > 0)
+    .sort((left, right) => right.count - left.count || left.type.localeCompare(right.type));
+}
+
+function createUiState() {
+  return {
+    selectedRefs: new Set(),
+    focusedRef: "",
+    activeTool: "merge",
+    mapMode: "default",
+    lastSelectedIndex: -1,
+  };
+}
+
+function uiReducer(state, action) {
+  switch (action.type) {
+    case "clear_selection":
+      return {
+        ...state,
+        selectedRefs: new Set(),
+        lastSelectedIndex: -1,
+      };
+    case "set_selection":
+      return {
+        ...state,
+        selectedRefs: new Set(action.refs || []),
+        lastSelectedIndex: Number.isFinite(action.lastSelectedIndex)
+          ? action.lastSelectedIndex
+          : state.lastSelectedIndex,
+      };
+    case "toggle_selection": {
+      const next = new Set(state.selectedRefs);
+      if (next.has(action.ref)) next.delete(action.ref);
+      else next.add(action.ref);
+      return {
+        ...state,
+        selectedRefs: next,
+        lastSelectedIndex: Number.isFinite(action.index)
+          ? action.index
+          : state.lastSelectedIndex,
+      };
+    }
+    case "focus":
+      return {
+        ...state,
+        focusedRef: action.ref || "",
+        activeTool:
+          action.tool ||
+          (parseRef(action.ref).type === "group"
+            ? "group"
+            : parseRef(action.ref).type === "merge"
+              ? "merge"
+              : state.activeTool),
+      };
+    case "tool":
+      return {
+        ...state,
+        activeTool: action.tool,
+      };
+    case "map_mode":
+      return {
+        ...state,
+        mapMode: action.mode,
+      };
+    default:
+      return state;
+  }
+}
 
 const OVERLAP_COORDINATE_PRECISION = 7;
+const OVERLAP_BASE_MARKER_SIZE = 24;
+const OVERLAP_SELECTION_RING_SIZE = 3;
+const OVERLAP_SCREEN_DISTANCE_PX = 24;
 
 function buildCoordinateKey(lat, lon) {
   return `${Number(lat).toFixed(OVERLAP_COORDINATE_PRECISION)}:${Number(lon).toFixed(OVERLAP_COORDINATE_PRECISION)}`;
 }
 
-function buildMarkerOverlapLayout(candidates) {
+function buildMarkerOverlapGroups(items) {
   const overlapGroups = new Map();
 
-  for (const candidate of candidates) {
-    const key = buildCoordinateKey(candidate.lat, candidate.lon);
+  for (const item of items) {
+    const key = buildCoordinateKey(item.lat, item.lon);
     const existing = overlapGroups.get(key);
-    if (existing) existing.push(candidate);
-    else overlapGroups.set(key, [candidate]);
+    if (existing) existing.items.push(item);
+    else
+      overlapGroups.set(key, {
+        key,
+        lat: item.lat,
+        lon: item.lon,
+        items: [item],
+      });
   }
 
+  return Array.from(overlapGroups.values());
+}
+
+function buildMarkerOverlapLayout(map, items) {
+  if (!map) return new Map();
+
   const layout = new Map();
-  for (const group of overlapGroups.values()) {
-    const stackSize = group.length;
-    for (const [index, candidate] of group.entries()) {
-      const centeredIndex = index - (stackSize - 1) / 2;
-      layout.set(candidate.global_station_id, {
+  const screenGroups = [];
+
+  for (const group of buildMarkerOverlapGroups(items)) {
+    for (const item of group.items) {
+      const point = map.project([item.lon, item.lat]);
+      let targetGroup = null;
+
+      for (const candidateGroup of screenGroups) {
+        const dx = candidateGroup.screenX - point.x;
+        const dy = candidateGroup.screenY - point.y;
+        if (Math.hypot(dx, dy) <= OVERLAP_SCREEN_DISTANCE_PX) {
+          targetGroup = candidateGroup;
+          break;
+        }
+      }
+
+      if (!targetGroup) {
+        targetGroup = {
+          items: [],
+          screenX: point.x,
+          screenY: point.y,
+          anchorLat: item.lat,
+          anchorLon: item.lon,
+        };
+        screenGroups.push(targetGroup);
+      }
+
+      targetGroup.items.push(item);
+      const count = targetGroup.items.length;
+      targetGroup.screenX =
+        (targetGroup.screenX * (count - 1) + point.x) / count;
+      targetGroup.screenY =
+        (targetGroup.screenY * (count - 1) + point.y) / count;
+      targetGroup.anchorLat =
+        (targetGroup.anchorLat * (count - 1) + item.lat) / count;
+      targetGroup.anchorLon =
+        (targetGroup.anchorLon * (count - 1) + item.lon) / count;
+    }
+  }
+
+  for (const group of screenGroups) {
+    const stackSize = group.items.length;
+    for (const [index, item] of group.items.entries()) {
+      const sizeMultiplier = Math.max(1, stackSize - index);
+      layout.set(item.ref, {
         stackIndex: index,
         stackSize,
-        offsetX: Math.round(centeredIndex * 10),
-        offsetY: Math.round(centeredIndex * -8),
+        sizeMultiplier,
+        markerSize: OVERLAP_BASE_MARKER_SIZE * sizeMultiplier,
+        zIndex: 2000 + index,
+        anchorLat: group.anchorLat,
+        anchorLon: group.anchorLon,
       });
     }
   }
@@ -67,41 +327,114 @@ function buildMarkerOverlapLayout(candidates) {
   return layout;
 }
 
-function createMarkerElement(candidate, isSelected, overlapMeta) {
-  const { stackIndex = 0, stackSize = 1 } = overlapMeta || {};
+function buildMappableItems(items) {
+  const rows = Array.isArray(items) ? items : [];
+  return rows
+    .map((item) => {
+      if (Number.isFinite(item.lat) && Number.isFinite(item.lon)) {
+        return {
+          ...item,
+          approximatePosition: false,
+        };
+      }
+
+      const displayName = String(item.display_name || "")
+        .trim()
+        .toLowerCase();
+      const rankedPeers = rows
+        .filter(
+          (candidate) =>
+            candidate.ref !== item.ref &&
+            Number.isFinite(candidate.lat) &&
+            Number.isFinite(candidate.lon) &&
+            String(candidate.display_name || "")
+              .trim()
+              .toLowerCase() === displayName,
+        )
+        .sort((left, right) => {
+          const leftRank = Math.abs(
+            Number(left.candidate?.candidate_rank || 9999) -
+              Number(item.candidate?.candidate_rank || 9999),
+          );
+          const rightRank = Math.abs(
+            Number(right.candidate?.candidate_rank || 9999) -
+              Number(item.candidate?.candidate_rank || 9999),
+          );
+          return leftRank - rightRank;
+        });
+
+      if (rankedPeers.length === 0) {
+        return {
+          ...item,
+          approximatePosition: false,
+        };
+      }
+
+      const sourcePeers = rankedPeers.slice(0, Math.min(2, rankedPeers.length));
+      const lat =
+        sourcePeers.reduce((sum, candidate) => sum + Number(candidate.lat), 0) /
+        sourcePeers.length;
+      const lon =
+        sourcePeers.reduce((sum, candidate) => sum + Number(candidate.lon), 0) /
+        sourcePeers.length;
+
+      return {
+        ...item,
+        lat,
+        lon,
+        approximatePosition: true,
+      };
+    })
+    .filter((item) => Number.isFinite(item.lat) && Number.isFinite(item.lon));
+}
+
+function createMarkerElement(item, isSelected, overlapMeta, onSelectRef) {
+  const {
+    stackSize = 1,
+    sizeMultiplier = 1,
+    markerSize = OVERLAP_BASE_MARKER_SIZE,
+    zIndex = 2000,
+  } = overlapMeta || {};
   const shell = document.createElement("button");
   shell.type = "button";
   shell.className = `curation-marker-shell ${stackSize > 1 ? "curation-marker-shell--stacked" : ""} ${isSelected ? "curation-marker-shell--selected" : ""}`;
-  shell.setAttribute(
-    "aria-label",
-    `${candidate.display_name || candidate.global_station_id} (${stackSize} station${stackSize === 1 ? "" : "s"} at these coordinates)`,
-  );
-  shell.title = `${candidate.display_name || candidate.global_station_id} · ${stackSize} station${stackSize === 1 ? "" : "s"} at these coordinates`;
-  shell.style.zIndex = String(isSelected ? 1000 + stackIndex : 10 + stackIndex);
-
-  if (isSelected) {
-    const rings = document.createElement("span");
-    rings.className = "curation-marker__rings";
-    for (let ringIndex = 0; ringIndex < stackSize; ringIndex += 1) {
-      const ring = document.createElement("span");
-      ring.className = "curation-marker__ring";
-      ring.style.setProperty("--ring-index", String(ringIndex));
-      rings.appendChild(ring);
+  shell.title = `${item.display_name || item.ref}${item.approximatePosition ? " (approximate map position)" : ""}`;
+  shell.setAttribute("aria-label", item.display_name || item.ref);
+  shell.setAttribute("aria-pressed", isSelected ? "true" : "false");
+  shell.style.setProperty("--marker-size", `${markerSize}px`);
+  shell.style.setProperty("--marker-scale", String(sizeMultiplier));
+  shell.style.zIndex = String(zIndex);
+  shell.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (!String(item.ref || "").startsWith("node:")) {
+      onSelectRef(item.ref);
     }
-    shell.appendChild(rings);
-  }
+  });
 
   const dot = document.createElement("span");
   dot.className = `curation-marker ${isSelected ? "curation-marker--selected" : ""}`;
+  if (item.map_kind === "group-node") {
+    dot.classList.add("curation-marker--node");
+  }
   shell.appendChild(dot);
+
+  if (isSelected) {
+    const ring = document.createElement("span");
+    ring.className = "curation-marker__selection-ring";
+    ring.style.setProperty(
+      "--selection-ring-size",
+      `${markerSize + OVERLAP_SELECTION_RING_SIZE * 2}px`,
+    );
+    shell.appendChild(ring);
+  }
 
   return shell;
 }
 
 function CurationMap({
-  candidates,
-  selectedIds,
-  onToggleCandidate,
+  items,
+  selectedRefs,
+  onSelectRef,
   mapMode = "default",
 }) {
   const mapRef = useRef(null);
@@ -137,49 +470,56 @@ function CurationMap({
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
+    let frameId = 0;
 
-    // Clear old markers
-    for (const m of markersRef.current) m.remove();
+    for (const marker of markersRef.current) marker.remove();
     markersRef.current = [];
 
-    const valid = (candidates || []).filter(
-      (c) => Number.isFinite(c.lat) && Number.isFinite(c.lon),
+    const valid = (items || []).filter(
+      (item) => Number.isFinite(item.lat) && Number.isFinite(item.lon),
     );
     if (valid.length === 0) return;
-    const overlapLayout = buildMarkerOverlapLayout(valid);
 
     const bounds = new maplibregl.LngLatBounds();
-    for (const c of valid) {
-      const isSelected = selectedIds.has(c.global_station_id);
-      const overlapMeta = overlapLayout.get(c.global_station_id);
-      const el = createMarkerElement(c, isSelected, overlapMeta);
-      el.addEventListener("click", (e) => {
-        e.stopPropagation();
-        onToggleCandidate(c.global_station_id);
-      });
-
-      const marker = new maplibregl.Marker({
-        element: el,
-        anchor: "center",
-        offset: [overlapMeta?.offsetX || 0, overlapMeta?.offsetY || 0],
-      })
-        .setLngLat([c.lon, c.lat])
-        .addTo(map);
-      markersRef.current.push(marker);
-      bounds.extend([c.lon, c.lat]);
+    for (const item of valid) {
+      bounds.extend([item.lon, item.lat]);
     }
-    map.fitBounds(bounds, { padding: 60, maxZoom: 15 });
-  }, [candidates, selectedIds, onToggleCandidate]);
+    map.fitBounds(bounds, { padding: 60, maxZoom: 15, duration: 0 });
+
+    frameId = globalThis.requestAnimationFrame(() => {
+      const overlapLayout = buildMarkerOverlapLayout(map, valid);
+      for (const item of valid) {
+        const overlapMeta = overlapLayout.get(item.ref);
+        const el = createMarkerElement(
+          item,
+          selectedRefs.has(item.ref),
+          overlapMeta,
+          onSelectRef,
+        );
+        const marker = new maplibregl.Marker({
+          element: el,
+          anchor: "center",
+        })
+          .setLngLat([
+            overlapMeta?.anchorLon ?? item.lon,
+            overlapMeta?.anchorLat ?? item.lat,
+          ])
+          .addTo(map);
+        markersRef.current.push(marker);
+      }
+    });
+
+    return () => {
+      if (frameId) globalThis.cancelAnimationFrame(frameId);
+    };
+  }, [items, onSelectRef, selectedRefs]);
 
   return <div ref={mapContainerRef} className="curation-map" />;
 }
 
-// ─── Left Sidebar ─────────────────────────────────────────────────────────────
-
 function ClusterSidebar({
   clusters,
   totalCount,
-  listLimit,
   activeClusterId,
   filters,
   onFilterChange,
@@ -187,22 +527,10 @@ function ClusterSidebar({
   onRefresh,
   loading,
 }) {
-  const statusCounts = { open: 0, in_review: 0, resolved: 0, dismissed: 0 };
-  for (const c of clusters) {
-    const key = String(c.status || "").toLowerCase();
-    if (key in statusCounts) statusCounts[key] += 1;
-  }
-  const unresolvedCount = statusCounts.open + statusCounts.in_review;
-  const resolvedCount = statusCounts.resolved + statusCounts.dismissed;
   const displayTotalCount =
     Number.isFinite(totalCount) && totalCount > 0
       ? totalCount
       : clusters.length;
-  const showingSubset =
-    displayTotalCount > clusters.length &&
-    Number.isFinite(listLimit) &&
-    clusters.length >= listLimit;
-
   return (
     <aside className="curation-sidebar">
       <div className="curation-sidebar__header">
@@ -223,8 +551,8 @@ function ClusterSidebar({
           <select
             id="countryFilter"
             value={filters.country}
-            onChange={(e) =>
-              onFilterChange({ ...filters, country: e.target.value })
+            onChange={(event) =>
+              onFilterChange({ ...filters, country: event.target.value })
             }
           >
             <option value="">All</option>
@@ -246,8 +574,8 @@ function ClusterSidebar({
           <select
             id="statusFilter"
             value={filters.status}
-            onChange={(e) =>
-              onFilterChange({ ...filters, status: e.target.value })
+            onChange={(event) =>
+              onFilterChange({ ...filters, status: event.target.value })
             }
           >
             <option value="">All</option>
@@ -267,27 +595,8 @@ function ClusterSidebar({
         </button>
       </div>
 
-      <div className="curation-sidebar__summary">
-        <div className="curation-sidebar__summary-card">
-          <span className="curation-sidebar__summary-label">Total</span>
-          <strong>{loading ? "..." : displayTotalCount}</strong>
-        </div>
-        <div className="curation-sidebar__summary-card">
-          <span className="curation-sidebar__summary-label">Unresolved</span>
-          <strong>{loading ? "..." : unresolvedCount}</strong>
-        </div>
-        <div className="curation-sidebar__summary-card">
-          <span className="curation-sidebar__summary-label">Closed</span>
-          <strong>{loading ? "..." : resolvedCount}</strong>
-        </div>
-      </div>
-
       <p className="curation-sidebar__meta">
-        {loading
-          ? "Loading..."
-          : showingSubset
-            ? `${displayTotalCount} matching clusters · showing ${clusters.length}`
-            : `${displayTotalCount} matching clusters · prioritize dense clusters with cross-border overlap and unresolved evidence conflicts.`}
+        {loading ? "Loading..." : formatResultsLabel(displayTotalCount)}
       </p>
 
       <div className="curation-sidebar__list">
@@ -311,30 +620,26 @@ function ClusterSidebar({
                 {formatToneLabel(cluster.severity || "Unknown")}
               </span>
             </div>
-
             <div className="curation-cluster-item__badges">
               <span
-                className={`curation-badge curation-badge--status-${String(cluster.status || "").toLowerCase() || "default"}`}
+                className={`curation-badge curation-badge--status-${String(cluster.effective_status || cluster.status || "").toLowerCase() || "default"}`}
               >
-                {formatToneLabel(cluster.status || "Unknown")}
+                {formatToneLabel(
+                  cluster.effective_status || cluster.status || "Unknown",
+                )}
               </span>
+              {cluster.has_workspace && (
+                <span className="curation-badge curation-badge--neutral">
+                  ws v{cluster.workspace_version || 0}
+                </span>
+              )}
               <span className="curation-badge curation-badge--neutral">
                 {formatCountryLabel(cluster.country_tags, cluster.country)}
               </span>
-              <span className="curation-badge curation-badge--neutral">
-                {formatToneLabel(cluster.scope_tag || "General")}
-              </span>
             </div>
-
-            <div className="curation-cluster-item__stats">
-              <span className="curation-cluster-stat">
-                <strong>{cluster.candidate_count}</strong>
-                <span>candidates</span>
-              </span>
-              <span className="curation-cluster-stat">
-                <strong>{cluster.issue_count}</strong>
-                <span>issues</span>
-              </span>
+            <div className="curation-cluster-item__meta">
+              <strong>{cluster.candidate_count}</strong>
+              <span>candidates</span>
             </div>
           </button>
         ))}
@@ -343,210 +648,240 @@ function ClusterSidebar({
   );
 }
 
-// ─── Candidate Card ───────────────────────────────────────────────────────────
-
-function CandidateCard({
-  candidate,
+function CandidateRailCard({
+  item,
+  index,
   selected,
-  renameByRef,
-  onToggle,
-  rawCandidates,
+  focused,
+  workspace,
+  candidateMap,
+  onToggleSelection,
+  onFocus,
+  onSplit,
 }) {
-  const id = candidate.global_station_id;
-  const renamed = renameByRef?.[toCandidateRef(id)] || "";
-  const displayName = renamed || candidate.display_name || id;
+  const candidate = item.candidate || {};
+  const memberNames =
+    item.member_refs?.map((ref) =>
+      resolveDisplayNameForRef(ref, workspace, candidateMap),
+    ) || [];
   const aliases = Array.isArray(candidate.aliases)
     ? candidate.aliases.filter(Boolean)
     : [];
-  const providers = Array.isArray(candidate.provider_labels)
-    ? candidate.provider_labels.filter(Boolean)
+  const transportModes = Array.isArray(candidate.service_context?.transport_modes)
+    ? candidate.service_context.transport_modes
     : [];
-  const lines = candidate.service_context?.lines?.slice(0, 8) || [];
-  const isMerged =
-    candidate.is_curated &&
-    Array.isArray(candidate.members) &&
-    candidate.members.length >= 2;
-  const handleToggle = () => onToggle(id);
-  const country = candidate.metadata?.country || candidate.country || "";
-  const providerCount = providers.length;
-
+  const incoming = Array.isArray(candidate.service_context?.incoming)
+    ? candidate.service_context.incoming
+    : [];
+  const outgoing = Array.isArray(candidate.service_context?.outgoing)
+    ? candidate.service_context.outgoing
+    : [];
+  const contextSummary = candidate.context_summary || {};
   return (
     <div
-      className={`curation-candidate ${selected ? "curation-candidate--selected" : ""} ${isMerged ? "curation-candidate--merged" : ""}`}
+      className={`curation-rail-card curation-rail-card--${item.kind} ${selected ? "curation-rail-card--selected" : ""} ${focused ? "curation-rail-card--focused" : ""}`}
     >
-      <div className="curation-candidate__header">
-        <label className="curation-candidate__select">
+      <div className="curation-rail-card__header">
+        <label className="curation-rail-card__select">
           <input
             type="checkbox"
             checked={selected}
-            data-station-id={id}
-            onChange={handleToggle}
+            data-station-id={item.ref}
+            onChange={(event) =>
+              onToggleSelection(item.ref, index, event.shiftKey)
+            }
+            onClick={(event) => event.stopPropagation()}
           />
-          <span className="curation-candidate__title-wrap">
-            <strong>{displayName}</strong>
-            <span className="curation-candidate__id">{id}</span>
-          </span>
         </label>
-        <span className="curation-candidate__rank">
-          {isMerged ? (
-            <span className="curation-tag curation-tag--merged">
-              merged · {candidate.members.length} members
-            </span>
-          ) : (
-            `#${candidate.candidate_rank}`
-          )}
-        </span>
-      </div>
-      <div className="curation-candidate__meta">
-        {country && (
-          <span className="curation-candidate__meta-item">
-            {formatCountryLabel([country])}
-          </span>
-        )}
-        <span className="curation-candidate__meta-item">
-          {providerCount} {providerCount === 1 ? "feed" : "feeds"}
-        </span>
-        {lines.length > 0 && (
-          <span className="curation-candidate__meta-item">
-            {lines.length} line contexts
-          </span>
-        )}
-      </div>
-      <div className="curation-candidate__tags">
-        {providers.length > 0 && (
-          <span className="curation-tag">feeds: {providers.join(", ")}</span>
-        )}
-        {lines.length > 0 && (
-          <span className="curation-tag">lines: {lines.join(", ")}</span>
-        )}
-        {candidate.segment_context?.segment_type && (
-          <span className="curation-tag">
-            type: {candidate.segment_context.segment_type}
-          </span>
-        )}
-      </div>
-      {isMerged && (
-        <details
-          className="curation-muted curation-tiny"
-          style={{ marginTop: 4 }}
+        <button
+          type="button"
+          className="curation-rail-card__focus"
+          onClick={() => onFocus(item.ref)}
         >
-          <summary style={{ cursor: "pointer" }}>
-            Members ({candidate.members.length})
-          </summary>
-          <ul style={{ margin: "4px 0 0 16px", padding: 0 }}>
-            {candidate.members.map((m) => {
-              const orig = rawCandidates?.find(
-                (c) => c.global_station_id === m.global_station_id,
-              );
-              const providers = orig?.provider_labels?.filter(Boolean) || [];
-              const sourceText =
-                providers.length > 0
-                  ? providers.join(", ")
-                  : m.global_station_id.split(":")[0] || "unknown";
-              const name = orig?.display_name || m.global_station_id;
-
-              return (
-                <li key={m.global_station_id} style={{ marginBottom: 4 }}>
-                  <strong>{name}</strong>
-                  <span
-                    className="curation-muted curation-tiny"
-                    style={{ marginLeft: 4 }}
-                  >
-                    ({m.global_station_id})
-                  </span>
-                  <span className="curation-tag" style={{ marginLeft: 6 }}>
-                    feed: {sourceText}
-                  </span>
-                  {m.member_role && m.member_role !== "member" ? (
-                    <span className="curation-tag" style={{ marginLeft: 6 }}>
-                      role: {m.member_role}
-                    </span>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
-        </details>
+          <strong>{item.display_name}</strong>
+          <span className="curation-candidate__id">{item.ref}</span>
+        </button>
+        <span className="curation-tag">{item.kind}</span>
+      </div>
+      {item.kind === "raw" ? (
+        <>
+          <div className="curation-candidate__meta">
+            <span className="curation-candidate__meta-item">
+              {formatCountryLabel([candidate.metadata?.country || ""])}
+            </span>
+            <span className="curation-candidate__meta-item">
+              {(item.provider_labels || []).length} feeds
+            </span>
+            <span className="curation-status-pill">
+              {formatCoordStatus(candidate.coord_status)}
+            </span>
+          </div>
+          <div className="curation-context-chips">
+            {transportModes.slice(0, 3).map((mode) => (
+              <span key={`${item.ref}-mode-${mode}`} className="curation-tag">
+                {mode}
+              </span>
+            ))}
+            <span className="curation-tag">
+              {contextSummary.stop_point_count ?? 0} stop points
+            </span>
+            <span className="curation-tag">
+              {contextSummary.route_count ?? 0} routes
+            </span>
+          </div>
+          {aliases.length > 0 && (
+            <p className="curation-muted curation-tiny curation-candidate__aliases">
+              Aliases: {aliases.slice(0, 4).join(", ")}
+            </p>
+          )}
+          <div className="curation-candidate__adjacency">
+            <span>In: {incoming.slice(0, 2).join(", ") || "none"}</span>
+            <span>Out: {outgoing.slice(0, 2).join(", ") || "none"}</span>
+          </div>
+        </>
+      ) : (
+        <div className="curation-rail-card__summary">
+          <span>{item.member_refs?.length || 0} members</span>
+          {item.kind === "group" && (
+            <span>{item.internal_nodes?.length || 0} nodes</span>
+          )}
+        </div>
       )}
-      {aliases.length > 0 && (
-        <p className="curation-muted curation-tiny curation-candidate__aliases">
-          Aliases: {aliases.join(", ")}
-        </p>
+      {memberNames.length > 0 && (
+        <div className="curation-rail-card__members">
+          {memberNames.slice(0, 4).map((name) => (
+            <span key={`${item.ref}-${name}`} className="curation-tag">
+              {name}
+            </span>
+          ))}
+          {memberNames.length > 4 && (
+            <span className="curation-tag">+{memberNames.length - 4}</span>
+          )}
+        </div>
+      )}
+      {item.kind !== "raw" && (
+        <div className="curation-rail-card__inline-actions">
+          <button
+            type="button"
+            className="curation-btn curation-btn--secondary curation-tiny"
+            onClick={(event) => {
+              event.stopPropagation();
+              onSplit(item.ref);
+            }}
+          >
+            Split
+          </button>
+        </div>
       )}
     </div>
   );
 }
 
-// ─── Tools Panel ──────────────────────────────────────────────────────────────
-
-function CurationTools({
-  activeTool,
-  onSetTool,
-  draftState,
-  setDraftState,
-  selectedIds,
-  candidates,
+function WorkspacePanel({
   clusterDetail,
+  saveState,
+  notice,
+  toolMode,
+  selectedRefs,
+  focusedItem,
+  workspace,
+  candidateMap,
+  onMergeSelection,
+  onCreateGroup,
+  onKeepSeparate,
+  onSplitFocused,
+  onAddSelectionToGroup,
+  onUndo,
+  onReset,
   onResolve,
+  onUnresolve,
+  onDismiss,
   onAiScore,
   aiResult,
-  notice,
+  onRenameRef,
+  onRenameComposite,
+  onUpdateGroupTransfer,
+  onUpdateGroupNodeLabel,
+  onRemoveGroupMember,
+  onToolModeChange,
 }) {
-  const selectedCount = selectedIds.size;
-  const mergeAvailable = selectedCount >= 2;
-  const selectedCuratedItems = [...selectedIds].filter((id) => {
-    const c = (candidates || []).find((x) => x.global_station_id === id);
-    return c?.is_curated && Array.isArray(c.members) && c.members.length >= 2;
-  });
-  const splitAvailable = selectedCuratedItems.length > 0;
-  const groupAvailable = selectedCount > 0 || draftState.groups.length > 0;
-
-  const handleCreateGroup = () => {
-    const refs = Array.from(selectedIds).map(toCandidateRef);
-    if (refs.length === 0) return;
-    const groupId = createDraftId("grp");
-    const firstRef = parseRef(refs[0]);
-    const firstCandidate = (candidates || []).find(
-      (c) => c.global_station_id === firstRef.id,
-    );
-    const groupName =
-      firstCandidate?.display_name || `Group ${draftState.groups.length + 1}`;
-    const sectionType = inferCandidateCategory(firstCandidate);
-
-    setDraftState((prev) => ({
-      ...prev,
-      groups: [
-        ...prev.groups,
-        {
-          group_id: groupId,
-          section_type: sectionType,
-          section_name: groupName,
-          member_refs: refs,
-        },
-      ],
-      renameByRef: { ...prev.renameByRef, [toGroupRef(groupId)]: groupName },
-    }));
-  };
-
-  const handleRemoveGroup = (groupId) => {
-    setDraftState((prev) => ({
-      ...prev,
-      groups: prev.groups.filter((g) => g.group_id !== groupId),
-    }));
-  };
+  const selectedArray = Array.from(selectedRefs);
+  const selectedRawRefs = selectedArray.filter(
+    (ref) => parseRef(ref).type === "raw",
+  );
+  const clusterStatus = String(
+    clusterDetail?.effective_status || clusterDetail?.status || "",
+  ).toLowerCase();
+  const canUnresolve =
+    clusterStatus === "resolved" || clusterStatus === "dismissed";
+  const canMerge = selectedRawRefs.length >= 2;
+  const canGroup =
+    selectedArray.filter((ref) => {
+      const type = parseRef(ref).type;
+      return type === "raw" || type === "merge";
+    }).length >= 2;
 
   return (
-    <aside className="curation-tools">
-      <div className="curation-tools__header">
-        <h3>Curation Tools</h3>
-        <button
-          id="resolveConflictBtn"
-          type="button"
-          className="curation-btn curation-btn--save"
-          onClick={onResolve}
-        >
-          Apply Decision
-        </button>
+    <section className="curation-workspace-panel">
+      <div id="contextualActionBar" className="curation-action-bar">
+        <div className="curation-action-bar__summary">
+          <strong>
+            {clusterDetail
+              ? clusterDetail.display_name || clusterDetail.cluster_id
+              : "No cluster selected"}
+          </strong>
+          <span
+            id="saveStateIndicator"
+            className={`curation-save-state curation-save-state--${saveState.toLowerCase()}`}
+          >
+            {saveState}
+          </span>
+        </div>
+
+        <div className="curation-action-bar__actions">
+          <button
+            id="undoWorkspaceBtn"
+            type="button"
+            className="curation-btn curation-btn--secondary"
+            onClick={onUndo}
+          >
+            Undo
+          </button>
+          <button
+            id="resetWorkspaceBtn"
+            type="button"
+            className="curation-btn curation-btn--secondary"
+            onClick={onReset}
+          >
+            Reset
+          </button>
+          <button
+            type="button"
+            className="curation-btn curation-btn--secondary"
+            onClick={onAiScore}
+          >
+            AI Suggest
+          </button>
+        </div>
+
+        <div className="curation-action-bar__resolve">
+          <button
+            id="dismissClusterBtn"
+            type="button"
+            className="curation-btn curation-btn--danger"
+            onClick={onDismiss}
+          >
+            Dismiss
+          </button>
+          <button
+            id="resolveClusterBtn"
+            type="button"
+            className="curation-btn curation-btn--save"
+            onClick={canUnresolve ? onUnresolve : onResolve}
+          >
+            {canUnresolve ? "Unresolve" : "Resolve"}
+          </button>
+        </div>
       </div>
 
       {notice && (
@@ -555,299 +890,459 @@ function CurationTools({
         </div>
       )}
 
-      <div className="curation-tools__operations">
-        <div className="curation-filter-label" style={{ fontWeight: 600 }}>
-          Operation
+      {aiResult && (
+        <div
+          id="aiScoreResult"
+          className="curation-notice curation-notice--info"
+        >
+          <strong>AI {(aiResult.confidence_score * 100).toFixed(0)}%</strong>{" "}
+          suggests {String(aiResult.suggested_action || "").toUpperCase()}.{" "}
+          {aiResult.reasoning}
         </div>
-        <div className="curation-tool-strip">
+      )}
+
+      <div className="curation-tool-panel">
+        <div
+          className="curation-tool-tabs"
+          role="tablist"
+          aria-label="Curation tools"
+        >
           <button
-            id="toolMergeBtn"
+            id="mergeToolTabBtn"
             type="button"
-            className={`curation-tool-btn ${activeTool === "merge" ? "curation-tool-btn--active" : ""}`}
-            data-tool="merge"
-            onClick={() => onSetTool("merge")}
-            disabled={!mergeAvailable}
+            className={`curation-tool-tab ${toolMode === "merge" ? "curation-tool-tab--active" : ""}`}
+            onClick={() => onToolModeChange("merge")}
           >
             Merge
           </button>
           <button
-            id="toolSplitBtn"
+            id="groupToolTabBtn"
             type="button"
-            className={`curation-tool-btn ${activeTool === "split" ? "curation-tool-btn--active" : ""}`}
-            data-tool="split"
-            onClick={() => onSetTool("split")}
-            disabled={!splitAvailable}
-          >
-            Split
-          </button>
-          <button
-            id="toolGroupBtn"
-            type="button"
-            className={`curation-tool-btn ${activeTool === "group" ? "curation-tool-btn--active" : ""}`}
-            data-tool="group"
-            onClick={() => onSetTool("group")}
-            disabled={!groupAvailable}
+            className={`curation-tool-tab ${toolMode === "group" ? "curation-tool-tab--active" : ""}`}
+            onClick={() => onToolModeChange("group")}
           >
             Group
           </button>
         </div>
-        <p
-          className="curation-muted curation-tiny"
-          style={{ marginTop: 4, fontStyle: "italic" }}
-        >
-          {mergeAvailable ? "Merge ✓" : "Merge needs 2+"} ·{" "}
-          {splitAvailable ? "Split ✓" : "Split: select merged"} ·{" "}
-          {groupAvailable ? "Group ✓" : "Group: select entries"}
-        </p>
-      </div>
 
-      {/* Merge Panel */}
-      {activeTool === "merge" && (
-        <div
-          id="toolPanelMerge"
-          className="curation-edit-panel"
-          data-tool-panel="merge"
-        >
-          <label className="curation-tiny" htmlFor="editMergeRenameInput">
-            Merged Name <span style={{ color: "red" }}>*</span>
-          </label>
-          <input
-            id="editMergeRenameInput"
-            type="text"
-            placeholder="e.g. Central Station"
-            value={draftState.renameByRef.__merge_name || ""}
-            onChange={(e) =>
-              setDraftState((prev) => ({
-                ...prev,
-                renameByRef: {
-                  ...prev.renameByRef,
-                  __merge_name: e.target.value,
-                },
-              }))
-            }
-          />
-        </div>
-      )}
-
-      {/* Split Panel */}
-      {activeTool === "split" && (
-        <div
-          id="toolPanelSplit"
-          className="curation-edit-panel"
-          data-tool-panel="split"
-        >
-          {splitAvailable ? (
-            <>
-              <p className="curation-muted curation-tiny">
-                Split selected merged candidate(s) back into their individual
-                members.
-              </p>
-              {selectedCuratedItems.map((id) => {
-                const c = (candidates || []).find(
-                  (x) => x.global_station_id === id,
-                );
-                if (!c) return null;
-                return (
-                  <div
-                    key={id}
-                    className="curation-curated-card"
-                    style={{ margin: "4px 0", padding: "4px 8px" }}
-                  >
-                    <strong>{c.display_name}</strong>
-                    <span className="curation-muted curation-tiny">
-                      {" "}
-                      — {c.members?.length || 0} members will be separated
-                    </span>
-                  </div>
-                );
-              })}
-            </>
-          ) : (
-            <p className="curation-muted curation-tiny">
-              Select a merged candidate to split it back into individual
-              stations.
-            </p>
-          )}
-        </div>
-      )}
-
-      {/* Group Panel */}
-      {activeTool === "group" && (
-        <div
-          id="toolPanelGroup"
-          className="curation-edit-panel"
-          data-tool-panel="group"
-        >
-          <div className="curation-group-creator">
-            <button
-              type="button"
-              className="curation-btn curation-btn--full"
-              onClick={handleCreateGroup}
-            >
-              Create Group from Selection
-            </button>
-          </div>
-
-          <div id="groupSectionList" style={{ marginTop: 12 }}>
-            {draftState.groups.length === 0 && (
-              <p className="curation-muted curation-tiny">No groups yet.</p>
-            )}
-            {draftState.groups.map((group) => {
-              const groupLabel =
-                draftState.renameByRef[toGroupRef(group.group_id)] ||
-                group.section_name ||
-                group.group_id;
-              return (
-                <div key={group.group_id} className="curation-group-card">
-                  <div className="curation-group-card__header">
-                    <strong>{groupLabel}</strong>
-                    <span className="curation-tag">{group.section_type}</span>
-                    <button
-                      type="button"
-                      className="curation-btn curation-btn--danger curation-tiny"
-                      onClick={() => handleRemoveGroup(group.group_id)}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                  <p className="curation-muted curation-tiny">
-                    {group.member_refs.length} member(s)
-                  </p>
-                </div>
-              );
-            })}
-          </div>
-
-          {draftState.groups.length >= 2 && (
-            <div id="groupPairWalkList" style={{ marginTop: 12 }}>
-              <div className="curation-tiny" style={{ fontWeight: 600 }}>
-                Walk Times
-              </div>
-              {draftState.groups.map((gA, i) =>
-                draftState.groups.slice(i + 1).map((gB) => {
-                  const pk = pairKey(gA.group_id, gB.group_id);
-                  return (
-                    <div key={pk} className="curation-walk-link">
-                      <span>
-                        {draftState.renameByRef[toGroupRef(gA.group_id)] ||
-                          gA.section_name}{" "}
-                        ↔{" "}
-                        {draftState.renameByRef[toGroupRef(gB.group_id)] ||
-                          gB.section_name}
-                      </span>
-                      <input
-                        type="number"
-                        min="0"
-                        step="1"
-                        value={draftState.pairWalkMinutesByKey[pk] ?? 5}
-                        onChange={(e) =>
-                          setDraftState((prev) => ({
-                            ...prev,
-                            pairWalkMinutesByKey: {
-                              ...prev.pairWalkMinutesByKey,
-                              [pk]: Number(e.target.value) || 5,
-                            },
-                          }))
-                        }
-                      />
-                      <span className="curation-muted curation-tiny">min</span>
-                    </div>
-                  );
-                }),
+        {toolMode === "merge" && (
+          <div className="curation-tool-body">
+            <div className="curation-tool-body__actions">
+              <button
+                id="mergeSelectedActionBtn"
+                type="button"
+                className="curation-btn"
+                onClick={onMergeSelection}
+                disabled={!canMerge}
+              >
+                Merge selected
+              </button>
+              <button
+                id="keepSeparateActionBtn"
+                type="button"
+                className="curation-btn curation-btn--secondary"
+                onClick={onKeepSeparate}
+                disabled={selectedArray.length < 2}
+              >
+                Keep separate
+              </button>
+              {focusedItem?.kind === "merge" && (
+                <button
+                  id="splitCompositeActionBtn"
+                  type="button"
+                  className="curation-btn curation-btn--secondary"
+                  onClick={onSplitFocused}
+                >
+                  Split
+                </button>
               )}
             </div>
-          )}
-        </div>
-      )}
+            <p className="curation-muted curation-tiny">
+              Select at least two raw candidates to merge them into one station
+              draft.
+            </p>
+          </div>
+        )}
 
-      {/* AI Score */}
-      <div style={{ marginTop: 16 }}>
-        <button
-          type="button"
-          className="curation-btn curation-btn--secondary"
-          onClick={onAiScore}
-          style={{ width: "100%" }}
-        >
-          ✨ AI Suggest
-        </button>
-        {aiResult && (
-          <div
-            id="aiScoreResult"
-            className={`curation-notice ${aiResult.suggested_action === "merge" ? "curation-notice--success" : "curation-notice--warning"}`}
-            style={{ marginTop: 8 }}
-          >
-            <strong>
-              AI Confidence {(aiResult.confidence_score * 100).toFixed(0)}%:
-            </strong>{" "}
-            Suggests{" "}
-            <strong>{(aiResult.suggested_action || "").toUpperCase()}</strong>.{" "}
-            {aiResult.reasoning}
+        {toolMode === "group" && (
+          <div className="curation-tool-body">
+            <div className="curation-tool-body__actions">
+              <button
+                id="createGroupActionBtn"
+                type="button"
+                className="curation-btn"
+                onClick={onCreateGroup}
+                disabled={!canGroup}
+              >
+                Create group
+              </button>
+              <button
+                id="groupEditorActionBtn"
+                type="button"
+                className="curation-btn curation-btn--secondary"
+                onClick={onAddSelectionToGroup}
+                disabled={
+                  focusedItem?.kind !== "group" || selectedArray.length === 0
+                }
+              >
+                Add selected
+              </button>
+              {focusedItem?.kind === "group" && (
+                <button
+                  type="button"
+                  className="curation-btn curation-btn--secondary"
+                  onClick={onSplitFocused}
+                >
+                  Split group
+                </button>
+              )}
+            </div>
+            <p className="curation-muted curation-tiny">
+              Use groups for one station with multiple internal stop points and
+              transfer times.
+            </p>
           </div>
         )}
       </div>
 
-      {/* Decision Note */}
-      <div style={{ marginTop: 16 }}>
-        <label className="curation-tiny" htmlFor="editNoteInput">
-          Decision Note (optional)
-        </label>
-        <textarea
-          id="editNoteInput"
-          rows="3"
-          placeholder="Explain why this change is correct..."
-          value={draftState.note}
-          onChange={(e) =>
-            setDraftState((prev) => ({ ...prev, note: e.target.value }))
-          }
-        />
-      </div>
-
-      {/* Edit History */}
-      {clusterDetail?.decisions?.length > 0 && (
-        <details style={{ marginTop: 16 }}>
-          <summary
-            className="curation-tiny"
-            style={{ fontWeight: 600, cursor: "pointer" }}
-          >
-            Edit History
-          </summary>
-          <div id="decisionHistoryList" style={{ marginTop: 8 }}>
-            {clusterDetail.decisions.map((d) => (
-              <div
-                key={`${d.created_at ?? "unknown"}-${d.operation ?? "unknown"}-${d.requested_by ?? "unknown"}`}
-                className="curation-history-row"
-              >
-                <strong>{d.operation}</strong> · {d.requested_by} ·{" "}
-                {d.created_at}
-              </div>
-            ))}
-          </div>
-        </details>
-      )}
-    </aside>
+      <DraftTab
+        workspace={workspace}
+        focusedItem={focusedItem}
+        candidateMap={candidateMap}
+        onRenameRef={onRenameRef}
+        onRenameComposite={onRenameComposite}
+        onUpdateGroupTransfer={onUpdateGroupTransfer}
+        onUpdateGroupNodeLabel={onUpdateGroupNodeLabel}
+        onRemoveGroupMember={onRemoveGroupMember}
+      />
+    </section>
   );
 }
 
-// ─── Main Page Component ──────────────────────────────────────────────────────
+function ExpandablePanel({ id, title, children, defaultOpen = false }) {
+  return (
+    <details id={id} className="curation-expandable" open={defaultOpen}>
+      <summary className="curation-expandable__summary">{title}</summary>
+      <div className="curation-expandable__body">{children}</div>
+    </details>
+  );
+}
+
+function DraftTab({
+  workspace,
+  focusedItem,
+  candidateMap,
+  onRenameRef,
+  onRenameComposite,
+  onUpdateGroupTransfer,
+  onUpdateGroupNodeLabel,
+  onRemoveGroupMember,
+}) {
+  const focusedRef = focusedItem?.ref || "";
+  const focusedGroup =
+    focusedItem?.kind === "group"
+      ? (workspace.groups || []).find(
+          (group) => group.entity_id === parseRef(focusedRef).id,
+        )
+      : null;
+  const focusedMerge =
+    focusedItem?.kind === "merge"
+      ? (workspace.merges || []).find(
+          (merge) => merge.entity_id === parseRef(focusedRef).id,
+        )
+      : null;
+
+  return (
+    <div id="draftTabPanel" className="curation-draft-stack">
+      {focusedItem?.kind === "raw" && (
+        <div className="curation-edit-panel">
+          <label className="curation-tiny" htmlFor="rawRenameInput">
+            Rename candidate
+          </label>
+          <input
+            id="rawRenameInput"
+            type="text"
+            value={
+              getRenameValue(workspace, focusedRef) || focusedItem.display_name
+            }
+            onChange={(event) => onRenameRef(focusedRef, event.target.value)}
+          />
+        </div>
+      )}
+
+      {focusedMerge && (
+        <div className="curation-edit-panel">
+          <label className="curation-tiny" htmlFor="mergeRenameInput">
+            Rename merged entity
+          </label>
+          <input
+            id="mergeRenameInput"
+            type="text"
+            value={focusedMerge.display_name}
+            onChange={(event) =>
+              onRenameComposite(focusedRef, event.target.value)
+            }
+          />
+          <div className="curation-rail-card__members">
+            {focusedMerge.member_refs.map((ref) => (
+              <span key={ref} className="curation-tag">
+                {resolveDisplayNameForRef(ref, workspace, candidateMap)}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {focusedGroup && (
+        <div id="groupEditorPanel" className="curation-group-editor">
+          <div className="curation-edit-panel">
+            <label className="curation-tiny" htmlFor="groupRenameInput">
+              Group name
+            </label>
+            <input
+              id="groupRenameInput"
+              type="text"
+              value={focusedGroup.display_name}
+              onChange={(event) =>
+                onRenameComposite(focusedRef, event.target.value)
+              }
+            />
+          </div>
+
+          <div className="curation-group-editor__section">
+            <div className="curation-group-editor__heading">Internal nodes</div>
+            <div className="curation-group-node-list">
+              {focusedGroup.internal_nodes.map((node) => (
+                <div key={node.node_id} className="curation-group-node-row">
+                  <input
+                    type="text"
+                    value={node.label}
+                    onChange={(event) =>
+                      onUpdateGroupNodeLabel(
+                        focusedGroup.entity_id,
+                        node.node_id,
+                        event.target.value,
+                      )
+                    }
+                  />
+                  <span className="curation-muted curation-tiny">
+                    {resolveDisplayNameForRef(
+                      node.source_ref,
+                      workspace,
+                      candidateMap,
+                    )}
+                  </span>
+                  <button
+                    type="button"
+                    className="curation-btn curation-btn--danger curation-tiny"
+                    onClick={() =>
+                      onRemoveGroupMember(
+                        focusedGroup.entity_id,
+                        node.source_ref,
+                      )
+                    }
+                  >
+                    Remove member
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="curation-group-editor__section">
+            <div className="curation-group-editor__heading">
+              Transfer matrix
+            </div>
+            <div id="groupTransferMatrix" className="curation-transfer-matrix">
+              {focusedGroup.transfer_matrix.map((row) => (
+                <div
+                  key={`${row.from_node_id}-${row.to_node_id}`}
+                  className="curation-transfer-matrix__row"
+                >
+                  <span>
+                    {focusedGroup.internal_nodes.find(
+                      (node) => node.node_id === row.from_node_id,
+                    )?.label || row.from_node_id}{" "}
+                    ↔{" "}
+                    {focusedGroup.internal_nodes.find(
+                      (node) => node.node_id === row.to_node_id,
+                    )?.label || row.to_node_id}
+                  </span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="10"
+                    value={row.min_walk_seconds}
+                    onChange={(event) =>
+                      onUpdateGroupTransfer(
+                        focusedGroup.entity_id,
+                        row.from_node_id,
+                        row.to_node_id,
+                        event.target.value,
+                      )
+                    }
+                  />
+                  <span className="curation-muted curation-tiny">sec</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EvidenceTab({ clusterDetail, focusedItem, workspace }) {
+  const focusedStationIds = focusedItem
+    ? resolveRefMemberStationIds(focusedItem.ref, workspace)
+    : [];
+  const evidenceRows = (clusterDetail?.evidence || []).filter((row) => {
+    if (focusedStationIds.length === 0) return true;
+    return (
+      focusedStationIds.includes(row.source_global_station_id) ||
+      focusedStationIds.includes(row.target_global_station_id)
+    );
+  });
+  const pairSummaries = (clusterDetail?.pair_summaries || []).filter((row) => {
+    if (focusedStationIds.length === 0) return true;
+    return (
+      focusedStationIds.includes(row.source_global_station_id) ||
+      focusedStationIds.includes(row.target_global_station_id)
+    );
+  });
+  const typeCounts = getTypeCounts(clusterDetail?.evidence_summary);
+
+  return (
+    <div id="evidenceTabPanel" className="curation-tab-panel">
+      <div className="curation-evidence-summary">
+        {["supporting", "warning", "missing", "informational"].map((status) => (
+          <span
+            key={status}
+            className={`curation-status-pill curation-status-pill--${status}`}
+          >
+            {formatEvidenceStatusLabel(status)}{" "}
+            {getSummaryCounts(clusterDetail?.evidence_summary, status)}
+          </span>
+        ))}
+      </div>
+      {typeCounts.length > 0 && (
+        <div className="curation-context-chips">
+          {typeCounts.slice(0, 6).map((entry) => (
+            <span key={entry.type} className="curation-tag">
+              {formatEvidenceTypeLabel(entry.type)} {entry.count}
+            </span>
+          ))}
+        </div>
+      )}
+      {pairSummaries.length > 0 && (
+        <div className="curation-pair-summary-list">
+          {pairSummaries.slice(0, 8).map((row) => (
+            <div
+              key={`${row.source_global_station_id}-${row.target_global_station_id}`}
+              className="curation-pair-summary"
+            >
+              <div className="curation-pair-summary__header">
+                <strong>
+                  {row.source_global_station_id} ↔ {row.target_global_station_id}
+                </strong>
+                <span>{row.summary || "Evidence summary"}</span>
+              </div>
+              <div className="curation-pair-summary__metrics">
+                <span>support {row.supporting_count || 0}</span>
+                <span>warn {row.warning_count || 0}</span>
+                <span>missing {row.missing_count || 0}</span>
+                <span>context {row.informational_count || 0}</span>
+                <span>
+                  score{" "}
+                  {Number.isFinite(Number(row.score))
+                    ? Number(row.score).toFixed(2)
+                    : "n/a"}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {evidenceRows.length === 0 ? (
+        <p className="curation-muted">No evidence for the current focus.</p>
+      ) : (
+        <div id="evidenceList" className="curation-evidence-list">
+          {evidenceRows.map((row) => (
+            <div
+              key={`${row.evidence_type}-${row.source_global_station_id}-${row.target_global_station_id}-${row.score ?? "na"}`}
+              className="curation-evidence-row"
+            >
+              <div className="curation-evidence-row__top">
+                <strong>{formatEvidenceTypeLabel(row.evidence_type)}</strong>
+                <span
+                  className={`curation-status-pill curation-status-pill--${row.status || "informational"}`}
+                >
+                  {formatEvidenceStatusLabel(row.status)}
+                </span>
+              </div>
+              <div className="curation-evidence-row__meta">
+                <span>
+                  {row.source_global_station_id} ↔ {row.target_global_station_id}
+                </span>
+                <span>{formatEvidenceValue(row)}</span>
+                <span>
+                  score{" "}
+                  {Number.isFinite(Number(row.score))
+                    ? Number(row.score).toFixed(2)
+                    : "n/a"}
+                </span>
+              </div>
+              {formatEvidenceDetails(row.details) && (
+                <div className="curation-muted curation-tiny">
+                  {formatEvidenceDetails(row.details)}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HistoryTab({ clusterDetail }) {
+  return (
+    <div id="historyTabPanel" className="curation-tab-panel">
+      <div className="curation-history-list">
+        {(clusterDetail?.edit_history || []).map((row, index) => (
+          <div
+            key={`${row.event_type}-${row.created_at}-${index}`}
+            className="curation-history-row"
+          >
+            <strong>{row.event_type}</strong> · {row.requested_by} ·{" "}
+            {row.created_at}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export function CurationPage() {
   const [clusters, setClusters] = useState([]);
   const [clusterTotalCount, setClusterTotalCount] = useState(0);
-  const [clusterListLimit, setClusterListLimit] = useState(50);
   const [activeClusterId, setActiveClusterId] = useState(null);
   const [clusterDetail, setClusterDetail] = useState(null);
-  const [curatedItems, setCuratedItems] = useState([]);
-  const [optimisticItems, setOptimisticItems] = useState([]);
-  const [hiddenServerIds, setHiddenServerIds] = useState(new Set());
+  const [workspace, setWorkspace] = useState(createEmptyWorkspace());
+  const [workspaceVersion, setWorkspaceVersion] = useState(0);
   const [filters, setFilters] = useState({ country: "", status: "" });
-  const [selectedIds, setSelectedIds] = useState(new Set());
-  const [draftState, setDraftState] = useState(createEmptyDraftState());
-  const [activeTool, setActiveTool] = useState("merge");
-  const [mapMode, setMapMode] = useState("default");
+  const [uiState, dispatch] = useReducer(uiReducer, undefined, createUiState);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState(null);
+  const [saveState, setSaveState] = useState("Saved");
   const [aiResult, setAiResult] = useState(null);
   const noticeTimerRef = useRef(null);
+  const lastSavedSerializedRef = useRef(
+    serializeWorkspace(createEmptyWorkspace()),
+  );
+  const saveRequestIdRef = useRef(0);
+  const immediateSaveRef = useRef(false);
 
   const showNotice = useCallback((message, tone = "info", sticky = false) => {
     setNotice({ message, tone });
@@ -857,7 +1352,6 @@ export function CurationPage() {
     }
   }, []);
 
-  // Load clusters
   const loadClusters = useCallback(async () => {
     setLoading(true);
     try {
@@ -865,308 +1359,429 @@ export function CurationPage() {
       setClusters(data.items || []);
       setClusterTotalCount(data.totalCount || 0);
       setClusterListLimit(data.limit || 50);
-    } catch (err) {
-      showNotice(`Failed to load clusters: ${err.message}`, "error", true);
+    } catch (error) {
+      showNotice(`Failed to load clusters: ${error.message}`, "error", true);
     } finally {
       setLoading(false);
     }
   }, [filters, showNotice]);
 
-  // Load cluster detail
   const loadClusterDetail = useCallback(
     async (clusterId) => {
       try {
-        const [detail, curated] = await Promise.all([
-          apiFetchClusterDetail(clusterId),
-          fetchCuratedProjection(clusterId).catch(() => []),
-        ]);
+        const detail = await apiFetchClusterDetail(clusterId);
         setClusterDetail(detail);
-        setCuratedItems(curated);
-        setActiveClusterId((prev) => {
-          if (prev !== clusterId) {
-            setOptimisticItems([]);
-            setHiddenServerIds(new Set());
-          }
-          return clusterId;
-        });
-        setSelectedIds(new Set());
-        setDraftState(createEmptyDraftState());
+        setActiveClusterId(clusterId);
+        const normalizedWorkspace = normalizeWorkspace(detail?.workspace);
+        setWorkspace(normalizedWorkspace);
+        setWorkspaceVersion(detail?.workspace_version || 0);
+        lastSavedSerializedRef.current =
+          serializeWorkspace(normalizedWorkspace);
+        setSaveState("Saved");
+        dispatch({ type: "clear_selection" });
+        dispatch({ type: "focus", ref: "" });
         setAiResult(null);
-      } catch (err) {
-        showNotice(`Failed to load cluster: ${err.message}`, "error", true);
+      } catch (error) {
+        showNotice(`Failed to load cluster: ${error.message}`, "error", true);
       }
     },
     [showNotice],
   );
 
-  // Initial load
   useEffect(() => {
     loadClusters();
   }, [loadClusters]);
 
-  // Auto-select first cluster
   useEffect(() => {
     if (clusters.length > 0 && !activeClusterId) {
       loadClusterDetail(clusters[0].cluster_id);
     }
-  }, [clusters, activeClusterId, loadClusterDetail]);
+  }, [activeClusterId, clusters, loadClusterDetail]);
 
-  const handleToggleCandidate = useCallback((stationId) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(stationId)) next.delete(stationId);
-      else next.add(stationId);
-      return next;
-    });
-  }, []);
+  const candidateMap = useMemo(
+    () => buildCandidateMap(clusterDetail?.candidates || []),
+    [clusterDetail?.candidates],
+  );
+  const railItems = useMemo(
+    () => buildRailItems(clusterDetail, workspace),
+    [clusterDetail, workspace],
+  );
+  const railIndexByRef = useMemo(
+    () => new Map(railItems.map((item, index) => [item.ref, index])),
+    [railItems],
+  );
+  const focusedItem = useMemo(
+    () => railItems.find((item) => item.ref === uiState.focusedRef) || null,
+    [railItems, uiState.focusedRef],
+  );
+  const mapItems = useMemo(() => {
+    if (focusedItem?.kind !== "group") return railItems;
+    const nodeMarkers = (focusedItem.internal_nodes || []).map((node) => ({
+      ref: `node:${focusedItem.ref}:${node.node_id}`,
+      display_name: node.label,
+      lat: node.lat,
+      lon: node.lon,
+      map_kind: "group-node",
+    }));
+    return [...railItems, ...nodeMarkers];
+  }, [focusedItem, railItems]);
+  const plottedMapItems = useMemo(
+    () => buildMappableItems(mapItems),
+    [mapItems],
+  );
 
-  const combinedCuratedItems = useMemo(() => {
-    const activeCurated = curatedItems.filter(
-      (ci) => !hiddenServerIds.has(ci.curated_station_id),
-    );
-    const combined = [...activeCurated];
-
-    for (const opt of optimisticItems) {
-      const optMemberIds = opt.members.map((m) => m.global_station_id);
-      const isCovered = activeCurated.some((ci) =>
-        ci.members?.some((cm) => optMemberIds.includes(cm.global_station_id)),
-      );
-      if (!isCovered) {
-        combined.push(opt);
-      }
-    }
-    return combined;
-  }, [curatedItems, optimisticItems, hiddenServerIds]);
-
-  const candidates = useMemo(() => {
-    const rawCandidates = clusterDetail?.candidates || [];
-    const absorbedIds = new Set();
-    const curatedCandidates = [];
-
-    for (const item of combinedCuratedItems) {
-      if (Array.isArray(item.members)) {
-        for (const m of item.members) {
-          absorbedIds.add(m.global_station_id);
-        }
-      }
-
-      let lat = 0,
-        lon = 0,
-        count = 0;
-      if (Array.isArray(item.members)) {
-        for (const m of item.members) {
-          const match = rawCandidates.find(
-            (c) => c.global_station_id === m.global_station_id,
-          );
-          if (
-            match &&
-            Number.isFinite(match.lat) &&
-            Number.isFinite(match.lon)
-          ) {
-            lat += match.lat;
-            lon += match.lon;
-            count++;
-          }
-        }
-      }
-      if (count > 0) {
-        lat /= count;
-        lon /= count;
-      } else {
-        lat = undefined;
-        lon = undefined;
-      }
-
-      curatedCandidates.push({
-        global_station_id: item.curated_station_id,
-        display_name: item.display_name || item.curated_station_id,
-        candidate_rank: 0,
-        aliases: [],
-        provider_labels: ["curated", item.derived_operation].filter(Boolean),
-        lat,
-        lon,
-        is_curated: true,
-        derived_operation: item.derived_operation,
-        members: item.members,
-        service_context: {},
-        segment_context: {},
-      });
-    }
-
-    const unabsorbed = rawCandidates.filter(
-      (c) => !absorbedIds.has(c.global_station_id),
-    );
-    return [...curatedCandidates, ...unabsorbed];
-  }, [clusterDetail?.candidates, combinedCuratedItems]);
-
-  // Auto-fill Merged Name with the first selection
   useEffect(() => {
-    if (activeTool === "merge") {
-      if (selectedIds.size > 0) {
-        setDraftState((prev) => {
-          if (!prev.renameByRef.__merge_name) {
-            const firstId = Array.from(selectedIds)[0];
-            const firstSelected = candidates.find(
-              (c) => c.global_station_id === firstId,
-            );
-            if (firstSelected) {
-              return {
-                ...prev,
-                renameByRef: {
-                  ...prev.renameByRef,
-                  __merge_name:
-                    firstSelected.display_name ||
-                    firstSelected.global_station_id,
-                },
-              };
-            }
-          }
-          return prev;
-        });
-      } else {
-        setDraftState((prev) => {
-          if (prev.renameByRef.__merge_name) {
-            return {
-              ...prev,
-              renameByRef: { ...prev.renameByRef, __merge_name: "" },
-            };
-          }
-          return prev;
-        });
-      }
+    if (!uiState.focusedRef) return;
+    if (!railItems.some((item) => item.ref === uiState.focusedRef)) {
+      dispatch({ type: "focus", ref: "" });
     }
-  }, [selectedIds, activeTool, candidates]);
+  }, [railItems, uiState.focusedRef]);
 
-  const handleSelectAll = useCallback(() => {
-    const all = candidates.map((c) => c.global_station_id);
-    setSelectedIds(new Set(all));
-  }, [candidates]);
+  useEffect(() => {
+    if (!activeClusterId) return undefined;
+    const serialized = serializeWorkspace(workspace);
+    if (serialized === lastSavedSerializedRef.current) return undefined;
 
-  const handleClearSelection = useCallback(() => {
-    setSelectedIds(new Set());
+    const requestId = saveRequestIdRef.current + 1;
+    saveRequestIdRef.current = requestId;
+    setSaveState("Saving");
+    const delay = immediateSaveRef.current ? 80 : 500;
+    immediateSaveRef.current = false;
+
+    const timer = setTimeout(async () => {
+      try {
+        const result = await saveClusterWorkspace(activeClusterId, workspace);
+        if (requestId !== saveRequestIdRef.current) return;
+        lastSavedSerializedRef.current = serializeWorkspace(result.workspace);
+        setWorkspaceVersion(result.workspace_version || 0);
+        setClusterDetail((previous) =>
+          previous
+            ? {
+                ...previous,
+                workspace: result.workspace,
+                workspace_version: result.workspace_version,
+                has_workspace: true,
+                effective_status: result.effective_status,
+              }
+            : previous,
+        );
+        setClusters((previous) =>
+          previous.map((cluster) =>
+            cluster.cluster_id === activeClusterId
+              ? {
+                  ...cluster,
+                  effective_status: result.effective_status,
+                  has_workspace: true,
+                  workspace_version: result.workspace_version,
+                }
+              : cluster,
+          ),
+        );
+        setSaveState("Saved");
+      } catch (error) {
+        if (requestId !== saveRequestIdRef.current) return;
+        setSaveState("Failed");
+        showNotice(`Workspace save failed: ${error.message}`, "error", true);
+      }
+    }, delay);
+
+    return () => clearTimeout(timer);
+  }, [activeClusterId, showNotice, workspace]);
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        if (activeClusterId) {
+          undoClusterWorkspace(activeClusterId)
+            .then((result) => {
+              const nextWorkspace = normalizeWorkspace(result.workspace);
+              setWorkspace(nextWorkspace);
+              lastSavedSerializedRef.current =
+                serializeWorkspace(nextWorkspace);
+              setWorkspaceVersion(result.workspace_version || 0);
+              setSaveState("Saved");
+            })
+            .catch((error) =>
+              showNotice(`Undo failed: ${error.message}`, "error", true),
+            );
+        }
+      }
+      if (event.key === "Escape") {
+        dispatch({ type: "clear_selection" });
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [activeClusterId, showNotice]);
+
+  const commitWorkspace = useCallback((nextWorkspace, options = {}) => {
+    immediateSaveRef.current = options.immediate === true;
+    setWorkspace(normalizeWorkspace(nextWorkspace));
   }, []);
 
-  const handleResolve = useCallback(async () => {
-    if (!clusterDetail) {
-      showNotice("Select a cluster first.", "error");
-      return;
-    }
-
-    if (activeTool === "merge") {
-      const mergedName = draftState.renameByRef.__merge_name?.trim();
-      if (!mergedName) {
-        showNotice("Merged Name is a mandatory field.", "error");
-        return;
+  const handleToggleSelection = useCallback(
+    (ref, index, useRange) => {
+      if (useRange && uiState.lastSelectedIndex >= 0) {
+        const start = Math.min(index, uiState.lastSelectedIndex);
+        const end = Math.max(index, uiState.lastSelectedIndex);
+        dispatch({
+          type: "set_selection",
+          refs: railItems.slice(start, end + 1).map((item) => item.ref),
+          lastSelectedIndex: index,
+        });
+      } else {
+        dispatch({ type: "toggle_selection", ref, index });
       }
-    }
-    try {
-      const payload = buildResolvePayload({
-        draftState,
-        selectedStationIds: selectedIds,
-        activeTool,
-        clusterDetail,
-        curatedItems: combinedCuratedItems,
-      });
+    },
+    [railItems, uiState.lastSelectedIndex],
+  );
 
-      // Optimistic state backwards compatible backup
-      const prevOptimistic = [...optimisticItems];
-      const prevHidden = new Set(hiddenServerIds);
+  const handleSelectRef = useCallback((ref) => {
+    dispatch({ type: "toggle_selection", ref });
+    dispatch({ type: "focus", ref });
+  }, []);
 
-      // Optimistic state updates
-      const actedUponIds = new Set(payload.selected_global_station_ids);
-      const newHidden = new Set(hiddenServerIds);
-      for (const ci of curatedItems) {
-        if (ci.members?.some((m) => actedUponIds.has(m.global_station_id))) {
-          newHidden.add(ci.curated_station_id);
-        }
-      }
-      setHiddenServerIds(newHidden);
-
-      const newOptimistic = [];
-      for (const g of payload.groups || []) {
-        if (
-          g.member_global_station_ids &&
-          g.member_global_station_ids.length > 1
-        ) {
-          newOptimistic.push({
-            curated_station_id: `opt_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-            display_name: g.rename_to || g.group_label || "Optimistic Action",
-            derived_operation:
-              payload.operation === "split" ? "group" : "merge",
-            members: g.member_global_station_ids.map((id) => ({
-              global_station_id: id,
-              member_role: "member",
-            })),
-          });
-        }
-      }
-
-      setOptimisticItems((prev) => {
-        const next = [...prev];
-        const filtered = next.filter(
-          (opt) =>
-            !opt.members.some((m) => actedUponIds.has(m.global_station_id)),
-        );
-        return [...filtered, ...newOptimistic];
-      });
-
-      setSelectedIds(new Set());
-      setDraftState(createEmptyDraftState());
-
-      try {
-        const result = await submitDecision(clusterDetail.cluster_id, payload);
-        showNotice(
-          `Conflict resolved (decision id=${result.decision_id || "n/a"}).`,
-          "success",
-        );
-        await loadClusters(); // This might trigger updates, but that's fine
-        await loadClusterDetail(clusterDetail.cluster_id);
-      } catch (err) {
-        // Rollback optimistic map on failure
-        setOptimisticItems(prevOptimistic);
-        setHiddenServerIds(prevHidden);
-        throw err;
-      }
-    } catch (err) {
-      showNotice(`Failed: ${err.message}`, "error", true);
-    }
+  const handleMergeSelection = useCallback(() => {
+    commitWorkspace(
+      createMergeFromSelection(
+        workspace,
+        uiState.selectedRefs,
+        clusterDetail?.candidates || [],
+      ),
+      {
+        immediate: true,
+      },
+    );
+    dispatch({ type: "clear_selection" });
   }, [
-    clusterDetail,
-    draftState,
-    selectedIds,
-    activeTool,
-    showNotice,
-    loadClusters,
-    loadClusterDetail,
-    curatedItems,
-    hiddenServerIds,
-    optimisticItems,
-    combinedCuratedItems,
+    clusterDetail?.candidates,
+    commitWorkspace,
+    uiState.selectedRefs,
+    workspace,
   ]);
 
-  const handleAiScore = useCallback(async () => {
-    if (!clusterDetail) {
-      showNotice("Select a cluster first.", "error");
-      return;
+  const handleCreateGroup = useCallback(() => {
+    const nextWorkspace = createGroupFromSelection(
+      workspace,
+      uiState.selectedRefs,
+      clusterDetail?.candidates || [],
+    );
+    const createdGroup = nextWorkspace.groups.at(-1);
+    commitWorkspace(nextWorkspace, { immediate: true });
+    dispatch({ type: "clear_selection" });
+    if (createdGroup) {
+      dispatch({
+        type: "focus",
+        ref: toGroupRef(createdGroup.entity_id),
+        tool: "group",
+      });
     }
-    setAiResult(null);
+  }, [
+    clusterDetail?.candidates,
+    commitWorkspace,
+    uiState.selectedRefs,
+    workspace,
+  ]);
+
+  const handleKeepSeparate = useCallback(() => {
+    commitWorkspace(markKeepSeparate(workspace, uiState.selectedRefs), {
+      immediate: true,
+    });
+    dispatch({ type: "clear_selection" });
+  }, [commitWorkspace, uiState.selectedRefs, workspace]);
+
+  const handleSplitComposite = useCallback(
+    (ref = focusedItem?.ref) => {
+      if (!ref) return;
+      commitWorkspace(splitComposite(workspace, ref), { immediate: true });
+      dispatch({ type: "focus", ref: "" });
+    },
+    [commitWorkspace, focusedItem?.ref, workspace],
+  );
+
+  const handleAddSelectionToGroup = useCallback(() => {
+    if (focusedItem?.kind !== "group") return;
+    commitWorkspace(
+      addSelectionToGroup(
+        workspace,
+        parseRef(focusedItem.ref).id,
+        uiState.selectedRefs,
+        clusterDetail?.candidates || [],
+      ),
+      { immediate: true },
+    );
+  }, [
+    clusterDetail?.candidates,
+    commitWorkspace,
+    focusedItem,
+    uiState.selectedRefs,
+    workspace,
+  ]);
+
+  const handleUndo = useCallback(async () => {
+    if (!activeClusterId) return;
     try {
-      const result = await requestAiScore(clusterDetail.cluster_id);
-      setAiResult(result);
-      if (["merge", "split", "group"].includes(result.suggested_action)) {
-        setActiveTool(result.suggested_action);
-      }
-    } catch (err) {
-      showNotice(`AI failed: ${err.message}`, "error");
+      const result = await undoClusterWorkspace(activeClusterId);
+      const nextWorkspace = normalizeWorkspace(result.workspace);
+      setWorkspace(nextWorkspace);
+      lastSavedSerializedRef.current = serializeWorkspace(nextWorkspace);
+      setWorkspaceVersion(result.workspace_version || 0);
+      setSaveState("Saved");
+      setClusterDetail((previous) =>
+        previous
+          ? {
+              ...previous,
+              workspace: nextWorkspace,
+              workspace_version: result.workspace_version,
+              has_workspace: Boolean(result.workspace),
+              effective_status: result.effective_status,
+            }
+          : previous,
+      );
+      showNotice("Workspace reverted to the previous snapshot.", "success");
+    } catch (error) {
+      showNotice(`Undo failed: ${error.message}`, "error", true);
     }
-  }, [clusterDetail, showNotice]);
+  }, [activeClusterId, showNotice]);
+
+  const handleReset = useCallback(async () => {
+    if (!activeClusterId) return;
+    try {
+      const result = await resetClusterWorkspace(activeClusterId);
+      const nextWorkspace = normalizeWorkspace(result.workspace);
+      setWorkspace(nextWorkspace);
+      lastSavedSerializedRef.current = serializeWorkspace(nextWorkspace);
+      setWorkspaceVersion(0);
+      setSaveState("Saved");
+      dispatch({ type: "clear_selection" });
+      dispatch({ type: "focus", ref: "" });
+      setClusterDetail((previous) =>
+        previous
+          ? {
+              ...previous,
+              workspace: nextWorkspace,
+              workspace_version: 0,
+              has_workspace: false,
+              effective_status: result.effective_status,
+            }
+          : previous,
+      );
+      showNotice("Workspace cleared and cluster returned to open.", "success");
+    } catch (error) {
+      showNotice(`Reset failed: ${error.message}`, "error", true);
+    }
+  }, [activeClusterId, showNotice]);
+
+  const handleUnresolve = useCallback(async () => {
+    if (!activeClusterId) return;
+    try {
+      const result = await reopenCluster(activeClusterId);
+      const nextWorkspace = normalizeWorkspace(result.workspace);
+      setWorkspace(nextWorkspace);
+      lastSavedSerializedRef.current = serializeWorkspace(nextWorkspace);
+      setWorkspaceVersion(result.workspace_version || 0);
+      setSaveState("Saved");
+      setClusterDetail((previous) =>
+        previous
+          ? {
+              ...previous,
+              workspace: nextWorkspace,
+              workspace_version: result.workspace_version,
+              has_workspace: result.workspace_version > 0,
+              effective_status: result.effective_status,
+              status: result.effective_status,
+            }
+          : previous,
+      );
+      setClusters((previous) =>
+        previous.map((cluster) =>
+          cluster.cluster_id === activeClusterId
+            ? {
+                ...cluster,
+                effective_status: result.effective_status,
+                status: result.effective_status,
+                has_workspace: result.workspace_version > 0,
+                workspace_version: result.workspace_version,
+              }
+            : cluster,
+        ),
+      );
+      showNotice("Cluster reopened for editing.", "success");
+    } catch (error) {
+      showNotice(`Unresolve failed: ${error.message}`, "error", true);
+    }
+  }, [activeClusterId, showNotice]);
+
+  const handleResolveStatus = useCallback(
+    async (status) => {
+      if (!activeClusterId) return;
+      try {
+        const result = await resolveCluster(
+          activeClusterId,
+          status,
+          workspace.note,
+        );
+        showNotice(
+          `${formatToneLabel(status)} complete (decision id=${result.decision_id || "n/a"}).`,
+          "success",
+        );
+        await loadClusters();
+        const nextClusterId = result.next_cluster_id || null;
+        if (nextClusterId) {
+          await loadClusterDetail(nextClusterId);
+        } else {
+          await loadClusterDetail(activeClusterId);
+        }
+      } catch (error) {
+        showNotice(`Resolve failed: ${error.message}`, "error", true);
+      }
+    },
+    [
+      activeClusterId,
+      loadClusterDetail,
+      loadClusters,
+      showNotice,
+      workspace.note,
+    ],
+  );
+
+  const handleAiScore = useCallback(async () => {
+    if (!activeClusterId) return;
+    try {
+      const result = await requestAiScore(activeClusterId);
+      setAiResult(result);
+      if (String(result.suggested_action || "").toLowerCase() === "merge") {
+        const rawRefs = sortCandidateIds(
+          (clusterDetail?.candidates || [])
+            .slice(0, 2)
+            .map((candidate) => candidate.global_station_id),
+          candidateMap,
+        ).map(toRawRef);
+        dispatch({
+          type: "set_selection",
+          refs: rawRefs,
+          lastSelectedIndex:
+            rawRefs.length > 0 ? railIndexByRef.get(rawRefs.at(-1)) || 0 : -1,
+        });
+      }
+    } catch (error) {
+      showNotice(`AI failed: ${error.message}`, "error", true);
+    }
+  }, [
+    activeClusterId,
+    candidateMap,
+    clusterDetail?.candidates,
+    railIndexByRef,
+    showNotice,
+  ]);
 
   return (
-    <div className="curation-container">
+    <div className="curation-layout">
       <ClusterSidebar
         clusters={clusters}
         totalCount={clusterTotalCount}
-        listLimit={clusterListLimit}
         activeClusterId={activeClusterId}
         filters={filters}
         onFilterChange={setFilters}
@@ -1175,15 +1790,15 @@ export function CurationPage() {
         loading={loading}
       />
 
-      <main className="curation-center">
-        <div className="curation-center__map-section">
+      <main className="curation-workspace">
+        <section className="curation-map-shell">
           <div className="curation-map-toolbar">
             <span
-              className="curation-muted curation-tiny"
               id="curationMapStatus"
+              className="curation-muted curation-tiny"
             >
-              {candidates.length > 0
-                ? `${candidates.length} candidates plotted · ${mapMode === "satellite" ? "satellite" : "map"} view.`
+              {mapItems.length > 0
+                ? `${plottedMapItems.length}/${mapItems.length} workspace items plotted · v${workspaceVersion || 0}.`
                 : "Select a cluster."}
             </span>
             <div className="curation-map-mode-toggle">
@@ -1191,9 +1806,9 @@ export function CurationPage() {
                 id="mapModeDefaultBtn"
                 type="button"
                 className="curation-btn curation-btn--secondary curation-tiny"
-                aria-pressed={mapMode === "default"}
-                disabled={mapMode === "default"}
-                onClick={() => setMapMode("default")}
+                aria-pressed={uiState.mapMode === "default"}
+                disabled={uiState.mapMode === "default"}
+                onClick={() => dispatch({ type: "map_mode", mode: "default" })}
               >
                 Map
               </button>
@@ -1201,179 +1816,150 @@ export function CurationPage() {
                 id="mapModeSatelliteBtn"
                 type="button"
                 className="curation-btn curation-btn--secondary curation-tiny"
-                aria-pressed={mapMode === "satellite"}
-                disabled={mapMode === "satellite"}
-                onClick={() => setMapMode("satellite")}
+                aria-pressed={uiState.mapMode === "satellite"}
+                disabled={uiState.mapMode === "satellite"}
+                onClick={() =>
+                  dispatch({ type: "map_mode", mode: "satellite" })
+                }
               >
                 Sat
               </button>
             </div>
           </div>
           <CurationMap
-            candidates={candidates}
-            selectedIds={selectedIds}
-            onToggleCandidate={handleToggleCandidate}
-            mapMode={mapMode}
+            items={plottedMapItems}
+            selectedRefs={uiState.selectedRefs}
+            onSelectRef={handleSelectRef}
+            mapMode={uiState.mapMode}
           />
-        </div>
+        </section>
 
-        <section className="curation-center__candidates">
-          <div className="curation-candidates-header">
-            <h4>Cluster Candidates</h4>
-            <div className="curation-candidates-actions">
-              <button
-                id="candidateSelectAllBtn"
-                type="button"
-                className="curation-btn curation-btn--secondary curation-tiny"
-                onClick={handleSelectAll}
-              >
-                All
-              </button>
-              <button
-                id="candidateClearBtn"
-                type="button"
-                className="curation-btn curation-btn--secondary curation-tiny"
-                onClick={handleClearSelection}
-              >
-                Clear
-              </button>
-            </div>
-          </div>
-          <p
-            id="selectionSummary"
-            className="curation-muted curation-tiny"
-            style={{ padding: "0 12px" }}
-          >
-            {selectedIds.size === 0
-              ? "No candidates selected."
-              : `Selected: ${selectedIds.size} candidate(s).`}
-          </p>
+        <WorkspacePanel
+          clusterDetail={clusterDetail}
+          saveState={saveState}
+          notice={notice}
+          toolMode={uiState.activeTool}
+          selectedRefs={uiState.selectedRefs}
+          focusedItem={focusedItem}
+          workspace={workspace}
+          candidateMap={candidateMap}
+          onMergeSelection={handleMergeSelection}
+          onCreateGroup={handleCreateGroup}
+          onKeepSeparate={handleKeepSeparate}
+          onSplitFocused={() => handleSplitComposite()}
+          onAddSelectionToGroup={handleAddSelectionToGroup}
+          onUndo={handleUndo}
+          onReset={handleReset}
+          onResolve={() => handleResolveStatus("resolved")}
+          onUnresolve={handleUnresolve}
+          onDismiss={() => handleResolveStatus("dismissed")}
+          onAiScore={handleAiScore}
+          aiResult={aiResult}
+          onRenameRef={(ref, value) =>
+            commitWorkspace(setRenameValue(workspace, ref, value))
+          }
+          onRenameComposite={(ref, value) =>
+            commitWorkspace(updateCompositeName(workspace, ref, value))
+          }
+          onUpdateGroupTransfer={(groupId, fromNodeId, toNodeId, seconds) =>
+            commitWorkspace(
+              updateGroupTransferSeconds(
+                workspace,
+                groupId,
+                fromNodeId,
+                toNodeId,
+                seconds,
+              ),
+            )
+          }
+          onUpdateGroupNodeLabel={(groupId, nodeId, label) =>
+            commitWorkspace(
+              updateGroupNodeLabel(workspace, groupId, nodeId, label),
+            )
+          }
+          onRemoveGroupMember={(groupId, memberRef) =>
+            commitWorkspace(
+              removeMemberFromGroup(workspace, groupId, memberRef),
+              {
+                immediate: true,
+              },
+            )
+          }
+          onToolModeChange={(tool) => dispatch({ type: "tool", tool })}
+        />
 
-          {/* Standalone candidates */}
-          <div className="curation-candidates-scroll">
-            {candidates.length === 0 && (
-              <p className="curation-muted" style={{ padding: "12px" }}>
-                No cluster selected.
-              </p>
-            )}
-            {candidates.map((candidate) => (
-              <CandidateCard
-                key={candidate.global_station_id}
-                candidate={candidate}
-                selected={selectedIds.has(candidate.global_station_id)}
-                renameByRef={draftState.renameByRef}
-                onToggle={handleToggleCandidate}
-                rawCandidates={clusterDetail?.candidates || []}
-              />
-            ))}
-          </div>
-
-          {/* Service context */}
-          {selectedIds.size > 0 && (
-            <details
-              className="curation-service-context"
-              style={{ padding: "8px 12px" }}
-            >
-              <summary
-                className="curation-tiny"
-                style={{ fontWeight: 600, cursor: "pointer" }}
-              >
-                Context & Evidence
-              </summary>
-              <div className="curation-service-grid" style={{ marginTop: 8 }}>
-                <div>
-                  <strong className="curation-tiny">Incoming</strong>
-                  <div
-                    id="selectedServiceIncoming"
-                    className="curation-service-list"
-                  >
-                    {(() => {
-                      const incoming = new Set();
-                      for (const sid of selectedIds) {
-                        const c = candidates.find(
-                          (x) => x.global_station_id === sid,
-                        );
-                        for (const v of c?.service_context?.incoming || [])
-                          incoming.add(v);
-                      }
-                      return incoming.size === 0 ? (
-                        <p className="curation-muted curation-tiny">None</p>
-                      ) : (
-                        Array.from(incoming)
-                          .sort()
-                          .map((v) => (
-                            <div key={v} className="curation-service-item">
-                              {v}
-                            </div>
-                          ))
-                      );
-                    })()}
-                  </div>
-                </div>
-                <div>
-                  <strong className="curation-tiny">Outgoing</strong>
-                  <div
-                    id="selectedServiceOutgoing"
-                    className="curation-service-list"
-                  >
-                    {(() => {
-                      const outgoing = new Set();
-                      for (const sid of selectedIds) {
-                        const c = candidates.find(
-                          (x) => x.global_station_id === sid,
-                        );
-                        for (const v of c?.service_context?.outgoing || [])
-                          outgoing.add(v);
-                      }
-                      return outgoing.size === 0 ? (
-                        <p className="curation-muted curation-tiny">None</p>
-                      ) : (
-                        Array.from(outgoing)
-                          .sort()
-                          .map((v) => (
-                            <div key={v} className="curation-service-item">
-                              {v}
-                            </div>
-                          ))
-                      );
-                    })()}
-                  </div>
-                </div>
-              </div>
-
-              {clusterDetail?.evidence?.length > 0 && (
-                <div id="evidenceList" style={{ marginTop: 12 }}>
-                  {clusterDetail.evidence.slice(0, 20).map((row) => (
-                    <div
-                      key={`${row.evidence_type ?? "evidence"}-${row.source_global_station_id ?? "source"}-${row.target_global_station_id ?? "target"}-${row.score ?? "na"}`}
-                      className="curation-evidence-row"
-                    >
-                      <strong>{row.evidence_type}</strong> ·{" "}
-                      {row.source_global_station_id} ↔{" "}
-                      {row.target_global_station_id} · score{" "}
-                      {row.score ?? "n/a"}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </details>
-          )}
+        <section className="curation-expandable-stack">
+          <ExpandablePanel id="evidencePanel" title="Evidence">
+            <EvidenceTab
+              clusterDetail={clusterDetail}
+              focusedItem={focusedItem}
+              workspace={workspace}
+            />
+          </ExpandablePanel>
+          <ExpandablePanel id="historyPanel" title="History">
+            <HistoryTab clusterDetail={clusterDetail} />
+          </ExpandablePanel>
         </section>
       </main>
 
-      <CurationTools
-        activeTool={activeTool}
-        onSetTool={setActiveTool}
-        draftState={draftState}
-        setDraftState={setDraftState}
-        selectedIds={selectedIds}
-        candidates={candidates}
-        clusterDetail={clusterDetail}
-        onResolve={handleResolve}
-        onAiScore={handleAiScore}
-        aiResult={aiResult}
-        notice={notice}
-      />
+      <aside className="curation-rail">
+        <div className="curation-candidates-header">
+          <div>
+            <h4>Candidate Rail</h4>
+            <p id="selectionSummary" className="curation-muted curation-tiny">
+              {uiState.selectedRefs.size === 0
+                ? "No items selected."
+                : `Selected: ${uiState.selectedRefs.size} item(s).`}
+            </p>
+          </div>
+          <div className="curation-candidates-actions">
+            <button
+              id="candidateSelectAllBtn"
+              type="button"
+              className="curation-btn curation-btn--secondary curation-tiny"
+              onClick={() =>
+                dispatch({
+                  type: "set_selection",
+                  refs: railItems.map((item) => item.ref),
+                  lastSelectedIndex: railItems.length - 1,
+                })
+              }
+            >
+              All
+            </button>
+            <button
+              id="candidateClearBtn"
+              type="button"
+              className="curation-btn curation-btn--secondary curation-tiny"
+              onClick={() => dispatch({ type: "clear_selection" })}
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+
+        <div className="curation-candidates-scroll">
+          {railItems.length === 0 && (
+            <p className="curation-muted" style={{ padding: "12px" }}>
+              No cluster selected.
+            </p>
+          )}
+          {railItems.map((item, index) => (
+            <CandidateRailCard
+              key={item.ref}
+              item={item}
+              index={index}
+              selected={uiState.selectedRefs.has(item.ref)}
+              focused={uiState.focusedRef === item.ref}
+              workspace={workspace}
+              candidateMap={candidateMap}
+              onToggleSelection={handleToggleSelection}
+              onFocus={(ref) => dispatch({ type: "focus", ref })}
+              onSplit={handleSplitComposite}
+            />
+          ))}
+        </div>
+      </aside>
     </div>
   );
 }

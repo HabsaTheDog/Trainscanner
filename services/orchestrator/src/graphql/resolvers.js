@@ -2,6 +2,11 @@ const {
   getGlobalClusters,
   getGlobalClusterDetail,
   postGlobalClusterDecision,
+  reopenGlobalCluster,
+  resetGlobalClusterWorkspace,
+  resolveGlobalCluster,
+  saveGlobalClusterWorkspace,
+  undoGlobalClusterWorkspace,
 } = require("../domains/qa/api");
 
 async function requestAiScoreBridge(clusterId, candidates) {
@@ -40,14 +45,49 @@ async function requestAiScoreBridge(clusterId, candidates) {
 }
 
 function mapClusterCandidate(candidate) {
+  const toInt = (value) => Number.parseInt(String(value ?? 0), 10) || 0;
   const labels = Array.isArray(candidate.provider_labels)
     ? candidate.provider_labels
     : [];
+  const aliases = Array.isArray(candidate.aliases) ? candidate.aliases : [];
+  const serviceContext =
+    candidate.service_context &&
+    typeof candidate.service_context === "object" &&
+    !Array.isArray(candidate.service_context)
+      ? candidate.service_context
+      : {};
+  const contextSummary =
+    candidate.context_summary &&
+    typeof candidate.context_summary === "object" &&
+    !Array.isArray(candidate.context_summary)
+      ? candidate.context_summary
+      : {};
   return {
     ...candidate,
     lat: candidate.latitude,
     lon: candidate.longitude,
     provider_labels: labels.map((item) => String(item)),
+    aliases: aliases.map((item) => String(item)),
+    coord_status: candidate.coord_status || "missing_coordinates",
+    service_context: {
+      lines: Array.isArray(serviceContext.lines) ? serviceContext.lines : [],
+      incoming: Array.isArray(serviceContext.incoming)
+        ? serviceContext.incoming
+        : [],
+      outgoing: Array.isArray(serviceContext.outgoing)
+        ? serviceContext.outgoing
+        : [],
+      transport_modes: Array.isArray(serviceContext.transport_modes)
+        ? serviceContext.transport_modes
+        : [],
+    },
+    context_summary: {
+      route_count: toInt(contextSummary.route_count),
+      incoming_count: toInt(contextSummary.incoming_count),
+      outgoing_count: toInt(contextSummary.outgoing_count),
+      stop_point_count: toInt(contextSummary.stop_point_count),
+      provider_source_count: toInt(contextSummary.provider_source_count),
+    },
   };
 }
 
@@ -93,7 +133,16 @@ const rootValue = {
         evidence_type: row.evidence_type,
         source_global_station_id: row.source_global_station_id,
         target_global_station_id: row.target_global_station_id,
+        status: row.status,
+        raw_value: row.raw_value,
       })),
+      evidence_summary:
+        detail.evidence_summary && typeof detail.evidence_summary === "object"
+          ? detail.evidence_summary
+          : {},
+      pair_summaries: Array.isArray(detail.pair_summaries)
+        ? detail.pair_summaries
+        : [],
       decisions: (detail.decisions || []).map((row) => ({
         ...row,
         members: Array.isArray(row.members) ? row.members : [],
@@ -120,6 +169,21 @@ const rootValue = {
 
   submitGlobalMergeDecision: async ({ clusterId, input }) =>
     postGlobalClusterDecision(clusterId, input),
+
+  saveGlobalClusterWorkspace: async ({ clusterId, input }) =>
+    saveGlobalClusterWorkspace(clusterId, input),
+
+  undoGlobalClusterWorkspace: async ({ clusterId, input }) =>
+    undoGlobalClusterWorkspace(clusterId, input || {}),
+
+  resetGlobalClusterWorkspace: async ({ clusterId, input }) =>
+    resetGlobalClusterWorkspace(clusterId, input || {}),
+
+  reopenGlobalCluster: async ({ clusterId, input }) =>
+    reopenGlobalCluster(clusterId, input || {}),
+
+  resolveGlobalCluster: async ({ clusterId, input }) =>
+    resolveGlobalCluster(clusterId, input),
 };
 
 module.exports = { rootValue };

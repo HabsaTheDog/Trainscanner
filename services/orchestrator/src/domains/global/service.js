@@ -313,7 +313,13 @@ function createGlobalService(deps = {}) {
           const client = createClient({ rootDir });
           await client.ensureReady();
           const queueRepo = createQueueRepo(client);
-          const summary = await queueRepo.rebuildMergeQueue(parsed.scope);
+          const summary = await queueRepo.rebuildMergeQueue(parsed.scope, {
+            onPhase(phase) {
+              process.stdout.write(
+                `[merge-queue] phase=${phase} country=${parsed.scope.country || "ALL"} scope=${parsed.scope.asOf || "latest"}\n`,
+              );
+            },
+          });
           process.stdout.write(`${JSON.stringify(summary)}\n`);
           return {
             ok: true,

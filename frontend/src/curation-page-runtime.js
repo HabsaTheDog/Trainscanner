@@ -1,6 +1,4 @@
-import { graphqlQuery } from "./graphql";
-
-// ─── GraphQL Queries ──────────────────────────────────────────────────────────
+import { graphqlQuery } from "./graphql.js";
 
 const CLUSTERS_QUERY = `
   query GetGlobalClusters($country: String, $status: String) {
@@ -11,6 +9,9 @@ const CLUSTERS_QUERY = `
         cluster_id
         country_tags
         status
+        effective_status
+        has_workspace
+        workspace_version
         display_name
         severity
         candidate_count
@@ -27,15 +28,35 @@ const CLUSTER_DETAIL_QUERY = `
       cluster_id
       country_tags
       status
+      effective_status
+      has_workspace
+      workspace_version
+      workspace
       scope_tag
       severity
       display_name
+      summary
       candidates {
         global_station_id
         display_name
         candidate_rank
         country
         provider_labels
+        aliases
+        coord_status
+        service_context {
+          lines
+          incoming
+          outgoing
+          transport_modes
+        }
+        context_summary {
+          route_count
+          incoming_count
+          outgoing_count
+          stop_point_count
+          provider_source_count
+        }
         lat
         lon
       }
@@ -43,7 +64,22 @@ const CLUSTER_DETAIL_QUERY = `
         evidence_type
         source_global_station_id
         target_global_station_id
+        status
         score
+        raw_value
+        details
+      }
+      evidence_summary
+      pair_summaries {
+        source_global_station_id
+        target_global_station_id
+        supporting_count
+        warning_count
+        missing_count
+        informational_count
+        score
+        summary
+        highlights
       }
       decisions {
         decision_id
@@ -67,12 +103,62 @@ const CLUSTER_DETAIL_QUERY = `
   }
 `;
 
-const SUBMIT_DECISION_MUTATION = `
-  mutation SubmitGlobalMergeDecision($clusterId: ID!, $input: GlobalMergeDecisionInput!) {
-    submitGlobalMergeDecision(clusterId: $clusterId, input: $input) {
+const SAVE_WORKSPACE_MUTATION = `
+  mutation SaveWorkspace($clusterId: ID!, $input: GlobalClusterWorkspaceInput!) {
+    saveGlobalClusterWorkspace(clusterId: $clusterId, input: $input) {
       ok
+      cluster_id
+      workspace_version
+      effective_status
+      workspace
+    }
+  }
+`;
+
+const UNDO_WORKSPACE_MUTATION = `
+  mutation UndoWorkspace($clusterId: ID!, $input: GlobalClusterWorkspaceActorInput) {
+    undoGlobalClusterWorkspace(clusterId: $clusterId, input: $input) {
+      ok
+      cluster_id
+      workspace_version
+      effective_status
+      workspace
+    }
+  }
+`;
+
+const RESET_WORKSPACE_MUTATION = `
+  mutation ResetWorkspace($clusterId: ID!, $input: GlobalClusterWorkspaceActorInput) {
+    resetGlobalClusterWorkspace(clusterId: $clusterId, input: $input) {
+      ok
+      cluster_id
+      workspace_version
+      effective_status
+      workspace
+    }
+  }
+`;
+
+const REOPEN_CLUSTER_MUTATION = `
+  mutation ReopenCluster($clusterId: ID!, $input: GlobalClusterWorkspaceActorInput) {
+    reopenGlobalCluster(clusterId: $clusterId, input: $input) {
+      ok
+      cluster_id
+      workspace_version
+      effective_status
+      workspace
+    }
+  }
+`;
+
+const RESOLVE_CLUSTER_MUTATION = `
+  mutation ResolveCluster($clusterId: ID!, $input: ResolveGlobalClusterInput!) {
+    resolveGlobalCluster(clusterId: $clusterId, input: $input) {
+      ok
+      cluster_id
       decision_id
-      operation
+      status
+      next_cluster_id
     }
   }
 `;
@@ -87,8 +173,6 @@ const AI_SCORE_MUTATION = `
     }
   }
 `;
-
-// ─── API Functions ────────────────────────────────────────────────────────────
 
 export async function fetchClusters(filters = {}) {
   const data = await graphqlQuery(CLUSTERS_QUERY, {
@@ -110,6 +194,11 @@ export async function fetchClusters(filters = {}) {
   };
 }
 
+export function formatResultsLabel(totalCount, locale) {
+  const safeCount = Number.isFinite(totalCount) ? totalCount : 0;
+  return `${safeCount.toLocaleString(locale)} results`;
+}
+
 export async function fetchClusterDetail(clusterId) {
   const data = await graphqlQuery(CLUSTER_DETAIL_QUERY, { id: clusterId });
   if (!data.globalCluster) return null;
@@ -120,15 +209,30 @@ export async function fetchClusterDetail(clusterId) {
       Array.isArray(cluster.country_tags) && cluster.country_tags.length > 0
         ? cluster.country_tags[0]
         : "EU",
+    workspace: normalizeWorkspace(cluster.workspace),
     candidates: (cluster.candidates || []).map((candidate) => ({
       global_station_id: candidate.global_station_id,
       display_name: candidate.display_name,
       candidate_rank: candidate.candidate_rank,
       provider_labels: candidate.provider_labels || [],
+      aliases: candidate.aliases || [],
+      coord_status: candidate.coord_status || "missing_coordinates",
       lat: candidate.lat,
       lon: candidate.lon,
-      aliases: [],
-      service_context: { lines: [], incoming: [], outgoing: [] },
+      service_context: {
+        lines: candidate.service_context?.lines || [],
+        incoming: candidate.service_context?.incoming || [],
+        outgoing: candidate.service_context?.outgoing || [],
+        transport_modes: candidate.service_context?.transport_modes || [],
+      },
+      context_summary: {
+        route_count: candidate.context_summary?.route_count ?? 0,
+        incoming_count: candidate.context_summary?.incoming_count ?? 0,
+        outgoing_count: candidate.context_summary?.outgoing_count ?? 0,
+        stop_point_count: candidate.context_summary?.stop_point_count ?? 0,
+        provider_source_count:
+          candidate.context_summary?.provider_source_count ?? 0,
+      },
       segment_context: {},
       metadata: { country: candidate.country || "" },
     })),
@@ -136,8 +240,28 @@ export async function fetchClusterDetail(clusterId) {
       evidence_type: row.evidence_type,
       source_global_station_id: row.source_global_station_id,
       target_global_station_id: row.target_global_station_id,
+      status: row.status || "informational",
       score: row.score,
+      raw_value: row.raw_value ?? null,
+      details: row.details || {},
     })),
+    evidence_summary:
+      cluster.evidence_summary && typeof cluster.evidence_summary === "object"
+        ? cluster.evidence_summary
+        : {},
+    pair_summaries: Array.isArray(cluster.pair_summaries)
+      ? cluster.pair_summaries.map((row) => ({
+          source_global_station_id: row.source_global_station_id,
+          target_global_station_id: row.target_global_station_id,
+          supporting_count: row.supporting_count ?? 0,
+          warning_count: row.warning_count ?? 0,
+          missing_count: row.missing_count ?? 0,
+          informational_count: row.informational_count ?? 0,
+          score: row.score ?? null,
+          summary: row.summary || "",
+          highlights: row.highlights || {},
+        }))
+      : [],
     decisions: (cluster.decisions || []).map((row) => ({
       ...row,
       members: (row.members || []).map((member) => ({
@@ -147,51 +271,89 @@ export async function fetchClusterDetail(clusterId) {
         metadata: member.metadata || {},
       })),
     })),
+    edit_history: Array.isArray(cluster.edit_history)
+      ? cluster.edit_history
+      : [],
   };
 }
 
-export async function fetchCuratedProjection(clusterId) {
-  void clusterId;
-  return [];
-}
-
-export async function submitDecision(clusterId, payload) {
-  const groups = (Array.isArray(payload.groups) ? payload.groups : []).map(
-    (group, index) => ({
-      group_label:
-        String(
-          group?.group_label || group?.groupLabel || `group-${index + 1}`,
-        ).trim() || `group-${index + 1}`,
-      member_global_station_ids: Array.isArray(group?.member_global_station_ids)
-        ? group.member_global_station_ids
-        : [],
-      rename_to: String(group?.rename_to || group?.renameTo || "").trim(),
-    }),
-  );
-
-  const renameTargets = (
-    Array.isArray(payload.rename_targets) ? payload.rename_targets : []
-  ).map((target) => ({
-    global_station_id: String(
-      target?.global_station_id || target?.globalStationId || "",
-    ).trim(),
-    rename_to: String(target?.rename_to || target?.renameTo || "").trim(),
-  }));
-
-  const data = await graphqlQuery(SUBMIT_DECISION_MUTATION, {
+export async function saveClusterWorkspace(clusterId, workspace) {
+  const data = await graphqlQuery(SAVE_WORKSPACE_MUTATION, {
     clusterId,
     input: {
-      operation: payload.operation,
-      selected_global_station_ids: payload.selected_global_station_ids || [],
-      groups,
-      note: payload.note,
-      rename_targets: renameTargets,
+      workspace: normalizeWorkspace(workspace),
+      updated_by: "qa_operator",
     },
   });
-  if (!data?.submitGlobalMergeDecision?.ok) {
-    throw new Error("Mutation returned false or missing OK status.");
+  const result = data?.saveGlobalClusterWorkspace;
+  if (!result?.ok) {
+    throw new Error("Workspace save failed.");
   }
-  return data.submitGlobalMergeDecision;
+  return {
+    ...result,
+    workspace: normalizeWorkspace(result.workspace),
+  };
+}
+
+export async function undoClusterWorkspace(clusterId) {
+  const data = await graphqlQuery(UNDO_WORKSPACE_MUTATION, {
+    clusterId,
+    input: { updated_by: "qa_operator" },
+  });
+  const result = data?.undoGlobalClusterWorkspace;
+  if (!result?.ok) {
+    throw new Error("Workspace undo failed.");
+  }
+  return {
+    ...result,
+    workspace: normalizeWorkspace(result.workspace),
+  };
+}
+
+export async function resetClusterWorkspace(clusterId) {
+  const data = await graphqlQuery(RESET_WORKSPACE_MUTATION, {
+    clusterId,
+    input: { updated_by: "qa_operator" },
+  });
+  const result = data?.resetGlobalClusterWorkspace;
+  if (!result?.ok) {
+    throw new Error("Workspace reset failed.");
+  }
+  return {
+    ...result,
+    workspace: normalizeWorkspace(result.workspace),
+  };
+}
+
+export async function reopenCluster(clusterId) {
+  const data = await graphqlQuery(REOPEN_CLUSTER_MUTATION, {
+    clusterId,
+    input: { updated_by: "qa_operator" },
+  });
+  const result = data?.reopenGlobalCluster;
+  if (!result?.ok) {
+    throw new Error("Cluster reopen failed.");
+  }
+  return {
+    ...result,
+    workspace: normalizeWorkspace(result.workspace),
+  };
+}
+
+export async function resolveCluster(clusterId, status, note) {
+  const data = await graphqlQuery(RESOLVE_CLUSTER_MUTATION, {
+    clusterId,
+    input: {
+      status,
+      note: note || "",
+      requested_by: "qa_operator",
+    },
+  });
+  const result = data?.resolveGlobalCluster;
+  if (!result?.ok) {
+    throw new Error("Cluster resolve failed.");
+  }
+  return result;
 }
 
 export async function requestAiScore(clusterId) {
@@ -199,8 +361,6 @@ export async function requestAiScore(clusterId) {
   if (!data?.requestAiScore) throw new Error("No response from AI.");
   return data.requestAiScore;
 }
-
-// ─── Pure Utility Functions ───────────────────────────────────────────────────
 
 export function escapeHtml(value) {
   return String(value || "")
@@ -233,49 +393,100 @@ export function createDraftId(prefix) {
   return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
 }
 
-export function createEmptyDraftState() {
+export function createEmptyWorkspace() {
   return {
-    mergeItems: [],
+    entities: [],
+    merges: [],
     groups: [],
-    pairWalkMinutesByKey: {},
-    renameByRef: {},
+    renames: [],
+    keep_separate_sets: [],
     note: "",
   };
 }
 
-// ─── Ref Helpers ──────────────────────────────────────────────────────────────
+export function normalizeWorkspace(workspace) {
+  const base = workspace && typeof workspace === "object" ? workspace : {};
+  return {
+    entities: Array.isArray(base.entities) ? base.entities : [],
+    merges: (Array.isArray(base.merges) ? base.merges : []).map((merge) => ({
+      entity_id: String(merge?.entity_id || merge?.entityId || "").trim(),
+      member_refs: uniqueStrings(merge?.member_refs || merge?.memberRefs || []),
+      display_name: String(
+        merge?.display_name || merge?.displayName || "",
+      ).trim(),
+    })),
+    groups: (Array.isArray(base.groups) ? base.groups : []).map((group) => ({
+      entity_id: String(group?.entity_id || group?.entityId || "").trim(),
+      member_refs: uniqueStrings(group?.member_refs || group?.memberRefs || []),
+      display_name: String(
+        group?.display_name || group?.displayName || "",
+      ).trim(),
+      internal_nodes: (Array.isArray(group?.internal_nodes)
+        ? group.internal_nodes
+        : []
+      ).map((node) => ({
+        node_id: String(node?.node_id || node?.nodeId || "").trim(),
+        source_ref: String(node?.source_ref || node?.sourceRef || "").trim(),
+        member_global_station_ids: uniqueStrings(
+          node?.member_global_station_ids || node?.memberGlobalStationIds || [],
+        ),
+        label: String(node?.label || "").trim(),
+        lat:
+          node?.lat === null || node?.lat === undefined || node?.lat === ""
+            ? null
+            : Number(node.lat),
+        lon:
+          node?.lon === null || node?.lon === undefined || node?.lon === ""
+            ? null
+            : Number(node.lon),
+      })),
+      transfer_matrix: (Array.isArray(group?.transfer_matrix)
+        ? group.transfer_matrix
+        : []
+      ).map((row) => ({
+        from_node_id: String(row?.from_node_id || row?.fromNodeId || "").trim(),
+        to_node_id: String(row?.to_node_id || row?.toNodeId || "").trim(),
+        min_walk_seconds: Number(
+          row?.min_walk_seconds ?? row?.minWalkSeconds ?? 0,
+        ),
+        bidirectional: row?.bidirectional !== false,
+      })),
+    })),
+    renames: (Array.isArray(base.renames) ? base.renames : []).map(
+      (rename) => ({
+        ref: String(rename?.ref || "").trim(),
+        display_name: String(
+          rename?.display_name || rename?.displayName || "",
+        ).trim(),
+      }),
+    ),
+    keep_separate_sets: (Array.isArray(base.keep_separate_sets)
+      ? base.keep_separate_sets
+      : []
+    ).map((row) => ({
+      refs: uniqueStrings(row?.refs || row || []),
+    })),
+    note: String(base.note || "").trim(),
+  };
+}
 
-export const toCandidateRef = (id) => `candidate:${String(id || "").trim()}`;
-export const toMergeRef = (id) => `merge:${String(id || "").trim()}`;
-export const toGroupRef = (id) => `group:${String(id || "").trim()}`;
+export function toRawRef(id) {
+  return `raw:${String(id || "").trim()}`;
+}
+
+export function toMergeRef(id) {
+  return `merge:${String(id || "").trim()}`;
+}
+
+export function toGroupRef(id) {
+  return `group:${String(id || "").trim()}`;
+}
 
 export function parseRef(refKey) {
   const raw = String(refKey || "").trim();
   const idx = raw.indexOf(":");
   if (idx <= 0) return { type: "", id: "" };
   return { type: raw.slice(0, idx), id: raw.slice(idx + 1) };
-}
-
-// ─── Candidate Helpers ────────────────────────────────────────────────────────
-
-export function inferCandidateCategory(candidate) {
-  const segment = candidate?.segment_context || {};
-  const text = normalizeText(
-    [
-      candidate?.display_name,
-      segment.segment_name,
-      segment.segment_type,
-      ...(Array.isArray(candidate?.aliases) ? candidate.aliases : []),
-    ].join(" "),
-  );
-
-  if (!text) return "other";
-  if (text.includes("bus") || text.includes("zob")) return "bus";
-  if (text.includes("tram") || text.includes("streetcar")) return "tram";
-  if (/subway|u-bahn|ubahn|metro/.test(text)) return "subway";
-  if (/north|south|east|west|secondary/.test(text)) return "secondary";
-  if (/main|hbf|hauptbahnhof|rail|platform/.test(text)) return "main";
-  return "other";
 }
 
 export function compareCandidateRank(a, b) {
@@ -291,251 +502,445 @@ export function compareCandidateRank(a, b) {
   );
 }
 
-export function sortStationIdsByRank(stationIds, candidates) {
-  const lookup = new Map(
-    (Array.isArray(candidates) ? candidates : []).map((c) => [
-      c.global_station_id,
-      c,
+export function buildCandidateMap(candidates = []) {
+  return new Map(
+    (candidates || []).map((candidate) => [
+      candidate.global_station_id,
+      candidate,
     ]),
   );
-  return (Array.isArray(stationIds) ? stationIds : []).slice().sort((a, b) => {
-    const ca = lookup.get(a) || {
-      global_station_id: a,
+}
+
+export function sortCandidateIds(stationIds, candidateMap) {
+  return uniqueStrings(stationIds).sort((left, right) => {
+    const candidateLeft = candidateMap.get(left) || {
+      global_station_id: left,
       candidate_rank: Number.MAX_SAFE_INTEGER,
     };
-    const cb = lookup.get(b) || {
-      global_station_id: b,
+    const candidateRight = candidateMap.get(right) || {
+      global_station_id: right,
       candidate_rank: Number.MAX_SAFE_INTEGER,
     };
-    return compareCandidateRank(ca, cb);
+    return compareCandidateRank(candidateLeft, candidateRight);
   });
 }
 
-export function resolveCandidateLabel(candidate, renameByRef) {
-  if (!candidate) return "Unknown candidate";
-  const id = String(candidate.global_station_id || "").trim();
-  const base = String(candidate.display_name || "").trim();
-  const renamed = renameByRef?.[toCandidateRef(id)] || "";
-  const name = renamed || base;
-  if (name && id) return `${name} (${id})`;
-  return name || id || "Unknown candidate";
-}
-
-// ─── Payload Builder ──────────────────────────────────────────────────────────
-
-export function pairKey(a, b) {
-  const vals = [String(a || "").trim(), String(b || "").trim()].sort((x, y) =>
-    x.localeCompare(y),
+export function getRenameValue(workspace, ref) {
+  return (
+    (workspace.renames || []).find((row) => row.ref === ref)?.display_name || ""
   );
-  return `${vals[0]}|${vals[1]}`;
 }
 
-export function buildResolvePayload({
-  draftState,
-  selectedStationIds,
-  activeTool,
-  clusterDetail,
-  curatedItems = [],
-}) {
-  const allCandidates = Array.isArray(clusterDetail?.candidates)
-    ? clusterDetail.candidates
-    : [];
+export function setRenameValue(workspace, ref, displayName) {
+  const clean = String(displayName || "").trim();
+  const next = normalizeWorkspace(workspace);
+  next.renames = next.renames.filter((row) => row.ref !== ref);
+  if (clean) {
+    next.renames.push({ ref, display_name: clean });
+  }
+  return next;
+}
 
-  const getCandidateByStationId = (id) => {
-    const raw = allCandidates.find((c) => c.global_station_id === id);
-    if (raw) return raw;
-    const curated = curatedItems.find((c) => c.curated_station_id === id);
-    if (curated) return { display_name: curated.display_name };
-    return null;
-  };
+export function resolveRefMemberStationIds(ref, workspace) {
+  const parsed = parseRef(ref);
+  if (parsed.type === "raw") return [parsed.id];
+  if (parsed.type === "merge") {
+    const merge = (workspace.merges || []).find(
+      (row) => row.entity_id === parsed.id,
+    );
+    return uniqueStrings(
+      (merge?.member_refs || []).map((memberRef) => parseRef(memberRef).id),
+    );
+  }
+  if (parsed.type === "group") {
+    const group = (workspace.groups || []).find(
+      (row) => row.entity_id === parsed.id,
+    );
+    return uniqueStrings(
+      (group?.internal_nodes || []).flatMap(
+        (node) => node.member_global_station_ids || [],
+      ),
+    );
+  }
+  return [];
+}
 
-  const expandCuratedIds = (ids) => {
-    const rawIds = new Set();
-    for (const id of ids) {
-      const curated = curatedItems.find((c) => c.curated_station_id === id);
-      if (curated && Array.isArray(curated.members)) {
-        for (const m of curated.members) rawIds.add(m.global_station_id);
-      } else {
-        rawIds.add(id);
-      }
+export function computeCompositeCoordinates(ref, workspace, candidateMap) {
+  const stationIds = resolveRefMemberStationIds(ref, workspace);
+  let latSum = 0;
+  let lonSum = 0;
+  let count = 0;
+  for (const stationId of stationIds) {
+    const candidate = candidateMap.get(stationId);
+    if (Number.isFinite(candidate?.lat) && Number.isFinite(candidate?.lon)) {
+      latSum += Number(candidate.lat);
+      lonSum += Number(candidate.lon);
+      count += 1;
     }
-    return Array.from(rawIds);
+  }
+  return {
+    lat: count > 0 ? latSum / count : null,
+    lon: count > 0 ? lonSum / count : null,
   };
+}
 
-  const resolveNameAssumption = (ids = []) => {
-    const sorted = sortStationIdsByRank(ids, allCandidates);
-    const first = sorted[0] ? getCandidateByStationId(sorted[0]) : null;
-    return String(
-      clusterDetail?.display_name || first?.display_name || "",
-    ).trim();
+export function resolveDisplayNameForRef(ref, workspace, candidateMap) {
+  const renamed = getRenameValue(workspace, ref);
+  if (renamed) return renamed;
+
+  const parsed = parseRef(ref);
+  if (parsed.type === "raw") {
+    const candidate = candidateMap.get(parsed.id);
+    return candidate?.display_name || parsed.id;
+  }
+  if (parsed.type === "merge") {
+    return (
+      (workspace.merges || []).find((row) => row.entity_id === parsed.id)
+        ?.display_name || parsed.id
+    );
+  }
+  if (parsed.type === "group") {
+    return (
+      (workspace.groups || []).find((row) => row.entity_id === parsed.id)
+        ?.display_name || parsed.id
+    );
+  }
+  return ref;
+}
+
+function computeDistanceMeters(a, b) {
+  if (!Number.isFinite(a?.lat) || !Number.isFinite(a?.lon)) return 0;
+  if (!Number.isFinite(b?.lat) || !Number.isFinite(b?.lon)) return 0;
+  const earthRadius = 6371000;
+  const lat1 = (a.lat * Math.PI) / 180;
+  const lat2 = (b.lat * Math.PI) / 180;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLon = ((b.lon - a.lon) * Math.PI) / 180;
+  const hav =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return 2 * earthRadius * Math.atan2(Math.sqrt(hav), Math.sqrt(1 - hav));
+}
+
+export function estimateWalkSeconds(nodeA, nodeB) {
+  const distance = computeDistanceMeters(nodeA, nodeB);
+  if (distance <= 0) return 120;
+  return Math.max(30, Math.min(900, Math.round(distance / 1.25)));
+}
+
+export function buildDefaultInternalNode(ref, workspace, candidateMap) {
+  const parsed = parseRef(ref);
+  const memberGlobalStationIds = resolveRefMemberStationIds(ref, workspace);
+  const coordinates =
+    parsed.type === "raw"
+      ? {
+          lat: candidateMap.get(parsed.id)?.lat ?? null,
+          lon: candidateMap.get(parsed.id)?.lon ?? null,
+        }
+      : computeCompositeCoordinates(ref, workspace, candidateMap);
+  return {
+    node_id: createDraftId("node"),
+    source_ref: ref,
+    member_global_station_ids: memberGlobalStationIds,
+    label: resolveDisplayNameForRef(ref, workspace, candidateMap),
+    lat: coordinates.lat,
+    lon: coordinates.lon,
   };
+}
 
-  const buildRenameTargets = () => {
-    const targets = [];
-    for (const [refKey, renameTo] of Object.entries(
-      draftState.renameByRef || {},
-    )) {
-      const parsed = parseRef(refKey);
-      const clean = String(renameTo || "").trim();
-      if (!clean || parsed.type !== "candidate" || !parsed.id) continue;
-      const orig = String(
-        getCandidateByStationId(parsed.id)?.display_name || "",
-      ).trim();
-      if (clean === orig) continue;
-      targets.push({ global_station_id: parsed.id, rename_to: clean });
-    }
-    return targets;
-  };
-
-  const note = String(draftState.note || "").trim();
-  const renameTargets = buildRenameTargets();
-
-  // Groups mode (split/group with sections)
-  if (draftState.groups.length > 0) {
-    const groups = [];
-    for (const dg of draftState.groups) {
-      const rawRefs = uniqueStrings(
-        (dg.member_refs || []).flatMap((refKey) => {
-          const p = parseRef(refKey);
-          if (p.type === "candidate") return p.id ? [p.id] : [];
-          if (p.type === "merge") {
-            const mi = draftState.mergeItems.find((m) => m.merge_id === p.id);
-            return uniqueStrings(mi?.member_global_station_ids || []);
-          }
-          return [];
-        }),
-      );
-      const memberIds = expandCuratedIds(rawRefs);
-      if (memberIds.length === 0) continue;
-
-      const groupName =
-        String(
-          draftState.renameByRef[toGroupRef(dg.group_id)] ||
-            dg.section_name ||
-            `Group ${groups.length + 1}`,
-        ).trim() || `Group ${groups.length + 1}`;
-
-      groups.push({
-        group_label: groupName,
-        section_type: String(dg.section_type || "other").trim() || "other",
-        section_name: groupName,
-        rename_to: groupName,
-        target_global_station_id: memberIds[0],
-        member_global_station_ids: sortStationIdsByRank(
-          memberIds,
-          allCandidates,
-        ),
+export function rebuildTransferMatrix(nodes = []) {
+  const transferMatrix = [];
+  for (let i = 0; i < nodes.length; i += 1) {
+    for (let j = i + 1; j < nodes.length; j += 1) {
+      transferMatrix.push({
+        from_node_id: nodes[i].node_id,
+        to_node_id: nodes[j].node_id,
+        min_walk_seconds: estimateWalkSeconds(nodes[i], nodes[j]),
+        bidirectional: true,
       });
     }
+  }
+  return transferMatrix;
+}
 
-    if (groups.length < 2)
-      throw new Error(
-        "Split/group resolve needs at least two non-empty groups.",
-      );
+export function buildRailItems(clusterDetail, workspace) {
+  const candidates = clusterDetail?.candidates || [];
+  const candidateMap = buildCandidateMap(candidates);
+  const absorbedRefs = new Set();
+  const items = [];
 
-    // Build walk links between groups
-    const stationToSegment = new Map(
-      allCandidates
-        .map((c) => [c.global_station_id, c.segment_context?.segment_id || ""])
-        .filter(([, seg]) => Boolean(seg)),
-    );
-
-    const walkLinks = [];
-    for (let i = 0; i < groups.length; i++) {
-      for (let j = i + 1; j < groups.length; j++) {
-        const segA =
-          stationToSegment.get(groups[i].member_global_station_ids[0]) || "";
-        const segB =
-          stationToSegment.get(groups[j].member_global_station_ids[0]) || "";
-        if (!segA || !segB || segA === segB) continue;
-        // Find matching draft group ids
-        const dgI = draftState.groups[i];
-        const dgJ = draftState.groups[j];
-        const pk = dgI && dgJ ? pairKey(dgI.group_id, dgJ.group_id) : "";
-        walkLinks.push({
-          from_segment_id: segA,
-          to_segment_id: segB,
-          min_walk_minutes:
-            Number.parseInt(
-              String(draftState.pairWalkMinutesByKey[pk] ?? 5),
-              10,
-            ) || 5,
-          bidirectional: true,
-        });
-      }
-    }
-
-    if (groups[0] && walkLinks.length > 0) {
-      groups[0].segment_action = { walk_links: walkLinks };
-    }
-
-    const allIds = uniqueStrings(
-      groups.flatMap((g) => g.member_global_station_ids),
-    );
-    return {
-      operation: "split",
-      selected_global_station_ids: sortStationIdsByRank(allIds, allCandidates),
-      groups,
-      rename_targets: renameTargets,
-      note,
-    };
+  for (const group of workspace.groups || []) {
+    for (const ref of group.member_refs || []) absorbedRefs.add(ref);
   }
 
-  // Simple selection mode
-  const rawSelected = expandCuratedIds(Array.from(selectedStationIds.values()));
-  const selected = uniqueStrings(
-    sortStationIdsByRank(rawSelected, allCandidates),
-  );
-  if (selected.length < 2)
-    throw new Error("Select at least two candidates before resolving.");
-
-  if (activeTool === "split") {
-    // Un-merge: each expanded member becomes its own group
-    const groups = selected.map((id) => {
-      const c = getCandidateByStationId(id);
-      const label = c?.display_name || id;
-      return {
-        group_label: label,
-        section_type: inferCandidateCategory(c),
-        section_name: label,
-        target_global_station_id: id,
-        member_global_station_ids: [id],
-        rename_to: label,
-      };
+  for (const merge of workspace.merges || []) {
+    for (const ref of merge.member_refs || []) absorbedRefs.add(ref);
+    const mergeRef = toMergeRef(merge.entity_id);
+    if (absorbedRefs.has(mergeRef)) continue;
+    const coords = computeCompositeCoordinates(
+      mergeRef,
+      workspace,
+      candidateMap,
+    );
+    items.push({
+      ref: mergeRef,
+      kind: "merge",
+      display_name: merge.display_name || merge.entity_id,
+      member_refs: merge.member_refs || [],
+      station_ids: resolveRefMemberStationIds(mergeRef, workspace),
+      lat: coords.lat,
+      lon: coords.lon,
     });
-    if (groups.length < 2)
-      throw new Error(
-        "Split needs a merged candidate with at least 2 members.",
-      );
-    return {
-      operation: "split",
-      selected_global_station_ids: selected,
-      groups,
-      rename_targets: renameTargets,
-      note,
-    };
   }
 
-  // Default merge
-  const explicitMergeName = draftState.renameByRef.__merge_name?.trim();
-  const renameTo = explicitMergeName || resolveNameAssumption(selected);
+  for (const group of workspace.groups || []) {
+    const groupRef = toGroupRef(group.entity_id);
+    const coords = computeCompositeCoordinates(
+      groupRef,
+      workspace,
+      candidateMap,
+    );
+    items.push({
+      ref: groupRef,
+      kind: "group",
+      display_name: group.display_name || group.entity_id,
+      member_refs: group.member_refs || [],
+      station_ids: resolveRefMemberStationIds(groupRef, workspace),
+      internal_nodes: group.internal_nodes || [],
+      transfer_matrix: group.transfer_matrix || [],
+      lat: coords.lat,
+      lon: coords.lon,
+    });
+  }
+
+  for (const candidate of candidates.slice().sort(compareCandidateRank)) {
+    const ref = toRawRef(candidate.global_station_id);
+    if (absorbedRefs.has(ref)) continue;
+    items.push({
+      ref,
+      kind: "raw",
+      display_name: getRenameValue(workspace, ref) || candidate.display_name,
+      station_ids: [candidate.global_station_id],
+      provider_labels: candidate.provider_labels || [],
+      lat: candidate.lat,
+      lon: candidate.lon,
+      candidate,
+    });
+  }
+
+  return items;
+}
+
+export function createMergeFromSelection(
+  workspace,
+  selectedRefs,
+  candidates = [],
+) {
+  const next = normalizeWorkspace(workspace);
+  const candidateMap = buildCandidateMap(candidates);
+  const rawRefs = uniqueStrings(
+    Array.from(selectedRefs).filter((ref) => parseRef(ref).type === "raw"),
+  );
+  if (rawRefs.length < 2) return next;
+
+  const orderedRawRefs = rawRefs.sort((left, right) => {
+    const candidateLeft = candidateMap.get(parseRef(left).id) || {};
+    const candidateRight = candidateMap.get(parseRef(right).id) || {};
+    return compareCandidateRank(candidateLeft, candidateRight);
+  });
+  const displayName = resolveDisplayNameForRef(
+    orderedRawRefs[0],
+    next,
+    candidateMap,
+  );
+  next.merges.push({
+    entity_id: createDraftId("merge"),
+    member_refs: orderedRawRefs,
+    display_name: displayName,
+  });
+  next.entities = [];
+  return next;
+}
+
+export function createGroupFromSelection(
+  workspace,
+  selectedRefs,
+  candidates = [],
+) {
+  const next = normalizeWorkspace(workspace);
+  const candidateMap = buildCandidateMap(candidates);
+  const eligibleRefs = uniqueStrings(
+    Array.from(selectedRefs).filter((ref) => {
+      const parsed = parseRef(ref);
+      return parsed.type === "raw" || parsed.type === "merge";
+    }),
+  );
+  if (eligibleRefs.length < 2) return next;
+
+  const internalNodes = eligibleRefs.map((ref) =>
+    buildDefaultInternalNode(ref, next, candidateMap),
+  );
+  next.groups.push({
+    entity_id: createDraftId("group"),
+    member_refs: eligibleRefs,
+    display_name: resolveDisplayNameForRef(eligibleRefs[0], next, candidateMap),
+    internal_nodes: internalNodes,
+    transfer_matrix: rebuildTransferMatrix(internalNodes),
+  });
+  next.entities = [];
+  return next;
+}
+
+export function splitComposite(workspace, compositeRef) {
+  const parsed = parseRef(compositeRef);
+  const next = normalizeWorkspace(workspace);
+  if (parsed.type === "merge") {
+    next.merges = next.merges.filter((row) => row.entity_id !== parsed.id);
+  }
+  if (parsed.type === "group") {
+    next.groups = next.groups.filter((row) => row.entity_id !== parsed.id);
+  }
+  next.entities = [];
+  return next;
+}
+
+export function updateCompositeName(workspace, compositeRef, displayName) {
+  const parsed = parseRef(compositeRef);
+  const next = normalizeWorkspace(workspace);
+  if (parsed.type === "merge") {
+    next.merges = next.merges.map((merge) =>
+      merge.entity_id === parsed.id
+        ? { ...merge, display_name: displayName }
+        : merge,
+    );
+  }
+  if (parsed.type === "group") {
+    next.groups = next.groups.map((group) =>
+      group.entity_id === parsed.id
+        ? { ...group, display_name: displayName }
+        : group,
+    );
+  }
+  return next;
+}
+
+export function updateGroupTransferSeconds(
+  workspace,
+  groupId,
+  fromNodeId,
+  toNodeId,
+  minWalkSeconds,
+) {
+  const next = normalizeWorkspace(workspace);
+  next.groups = next.groups.map((group) => {
+    if (group.entity_id !== groupId) return group;
+    return {
+      ...group,
+      transfer_matrix: group.transfer_matrix.map((row) => {
+        const matchesForward =
+          row.from_node_id === fromNodeId && row.to_node_id === toNodeId;
+        const matchesReverse =
+          row.from_node_id === toNodeId && row.to_node_id === fromNodeId;
+        return matchesForward || matchesReverse
+          ? {
+              ...row,
+              min_walk_seconds: Number(minWalkSeconds) || 0,
+            }
+          : row;
+      }),
+    };
+  });
+  return next;
+}
+
+export function addSelectionToGroup(
+  workspace,
+  groupId,
+  selectedRefs,
+  candidates = [],
+) {
+  const next = normalizeWorkspace(workspace);
+  const candidateMap = buildCandidateMap(candidates);
+  next.groups = next.groups.map((group) => {
+    if (group.entity_id !== groupId) return group;
+    const newRefs = uniqueStrings([
+      ...(group.member_refs || []),
+      ...Array.from(selectedRefs).filter((ref) => {
+        const parsed = parseRef(ref);
+        return parsed.type === "raw" || parsed.type === "merge";
+      }),
+    ]);
+    const internalNodes = [...(group.internal_nodes || [])];
+    for (const ref of newRefs) {
+      if (internalNodes.some((node) => node.source_ref === ref)) continue;
+      internalNodes.push(buildDefaultInternalNode(ref, next, candidateMap));
+    }
+    return {
+      ...group,
+      member_refs: newRefs,
+      internal_nodes: internalNodes,
+      transfer_matrix: rebuildTransferMatrix(internalNodes),
+    };
+  });
+  return next;
+}
+
+export function removeMemberFromGroup(workspace, groupId, memberRef) {
+  const next = normalizeWorkspace(workspace);
+  next.groups = next.groups
+    .map((group) => {
+      if (group.entity_id !== groupId) return group;
+      const memberRefs = (group.member_refs || []).filter(
+        (ref) => ref !== memberRef,
+      );
+      const internalNodes = (group.internal_nodes || []).filter(
+        (node) => node.source_ref !== memberRef,
+      );
+      return {
+        ...group,
+        member_refs: memberRefs,
+        internal_nodes: internalNodes,
+        transfer_matrix: rebuildTransferMatrix(internalNodes),
+      };
+    })
+    .filter((group) => group.member_refs.length >= 2);
+  return next;
+}
+
+export function markKeepSeparate(workspace, selectedRefs) {
+  const next = normalizeWorkspace(workspace);
+  const refs = uniqueStrings(Array.from(selectedRefs));
+  if (refs.length >= 2) {
+    next.keep_separate_sets.push({ refs });
+  }
+  return next;
+}
+
+export function updateGroupNodeLabel(workspace, groupId, nodeId, label) {
+  const next = normalizeWorkspace(workspace);
+  next.groups = next.groups.map((group) =>
+    group.entity_id === groupId
+      ? {
+          ...group,
+          internal_nodes: group.internal_nodes.map((node) =>
+            node.node_id === nodeId ? { ...node, label } : node,
+          ),
+        }
+      : group,
+  );
+  return next;
+}
+
+export function updateWorkspaceNote(workspace, note) {
   return {
-    operation: "merge",
-    selected_global_station_ids: selected,
-    groups: [
-      {
-        group_label: "merge-selected",
-        member_global_station_ids: selected,
-        rename_to: renameTo,
-      },
-    ],
-    rename_to: renameTo || null,
-    rename_targets: renameTargets,
+    ...normalizeWorkspace(workspace),
     note,
   };
 }
 
-// ─── Map Helpers ──────────────────────────────────────────────────────────────
+export function serializeWorkspace(workspace) {
+  return JSON.stringify(normalizeWorkspace(workspace));
+}
 
 export function resolveDefaultMapStyle() {
   if (globalThis.MAP_STYLE_URL) return globalThis.MAP_STYLE_URL;
