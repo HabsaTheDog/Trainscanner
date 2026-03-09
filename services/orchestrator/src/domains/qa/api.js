@@ -9,6 +9,7 @@ const {
   normalizeGlobalMergeDecision,
   normalizeIsoCountry,
 } = require("./cluster-decision-contracts");
+const { summarizeEvidenceRows } = require("./evidence-utils");
 const {
   createEmptyWorkspace,
   expandRefMembers,
@@ -75,6 +76,66 @@ function normalizeClusterStatusFilter(raw) {
     });
   }
   return value;
+}
+
+function normalizeTextArray(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item) => String(item || "").trim())
+    .filter((item) => item.length > 0);
+}
+
+function normalizeCandidateMetadata(candidate) {
+  const metadata =
+    candidate && typeof candidate.metadata === "object" && candidate.metadata
+      ? candidate.metadata
+      : {};
+  const serviceContext =
+    metadata.service_context &&
+    typeof metadata.service_context === "object" &&
+    !Array.isArray(metadata.service_context)
+      ? metadata.service_context
+      : {};
+  const contextSummary =
+    metadata.context_summary &&
+    typeof metadata.context_summary === "object" &&
+    !Array.isArray(metadata.context_summary)
+      ? metadata.context_summary
+      : {};
+
+  return {
+    ...candidate,
+    aliases: normalizeTextArray(metadata.aliases),
+    coord_status: String(
+      metadata.coord_status ||
+        (candidate.latitude != null && candidate.longitude != null
+          ? "coordinates_present"
+          : "missing_coordinates"),
+    ).trim(),
+    service_context: {
+      lines: normalizeTextArray(serviceContext.lines),
+      incoming: normalizeTextArray(serviceContext.incoming),
+      outgoing: normalizeTextArray(serviceContext.outgoing),
+      transport_modes: normalizeTextArray(serviceContext.transport_modes),
+    },
+    context_summary: {
+      route_count:
+        Number.parseInt(String(contextSummary.route_count ?? 0), 10) || 0,
+      incoming_count:
+        Number.parseInt(String(contextSummary.incoming_count ?? 0), 10) || 0,
+      outgoing_count:
+        Number.parseInt(String(contextSummary.outgoing_count ?? 0), 10) || 0,
+      stop_point_count:
+        Number.parseInt(String(contextSummary.stop_point_count ?? 0), 10) || 0,
+      provider_source_count:
+        Number.parseInt(
+          String(contextSummary.provider_source_count ?? 0),
+          10,
+        ) || 0,
+    },
+  };
 }
 
 async function requireCluster(client, clusterId) {
@@ -1356,7 +1417,9 @@ async function getGlobalClusterDetail(clusterId) {
         e.source_global_station_id,
         e.target_global_station_id,
         e.evidence_type,
+        e.status,
         e.score,
+        e.raw_value,
         e.details,
         e.created_at
       FROM qa_merge_cluster_evidence e
@@ -1417,11 +1480,33 @@ async function getGlobalClusterDetail(clusterId) {
     ),
   ]);
 
+  const normalizedCandidates = candidates.map(normalizeCandidateMetadata);
+  const normalizedEvidence = evidence.map((row) => ({
+    ...row,
+    status: String(row.status || "informational").trim() || "informational",
+    raw_value:
+      row.raw_value === null || row.raw_value === undefined
+        ? null
+        : Number(row.raw_value),
+    score:
+      row.score === null || row.score === undefined ? null : Number(row.score),
+    details:
+      row.details &&
+      typeof row.details === "object" &&
+      !Array.isArray(row.details)
+        ? row.details
+        : {},
+  }));
+  const { evidenceSummary, pairSummaries } =
+    summarizeEvidenceRows(normalizedEvidence);
+
   return {
     ...cluster,
     workspace: cluster.workspace || null,
-    candidates,
-    evidence,
+    candidates: normalizedCandidates,
+    evidence: normalizedEvidence,
+    evidence_summary: evidenceSummary,
+    pair_summaries: pairSummaries,
     decisions,
     edit_history: editHistory,
   };

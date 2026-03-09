@@ -1,6 +1,8 @@
 \set ON_ERROR_STOP on
 
 CREATE EXTENSION IF NOT EXISTS postgis;
+CREATE EXTENSION IF NOT EXISTS unaccent;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 CREATE OR REPLACE FUNCTION normalize_station_name(input_name text)
 RETURNS text
@@ -8,6 +10,46 @@ LANGUAGE sql
 IMMUTABLE
 AS $$
   SELECT trim(regexp_replace(lower(coalesce(input_name, '')), '[^[:alnum:]]+', ' ', 'g'));
+$$;
+
+CREATE OR REPLACE FUNCTION qa_loose_station_name(input_name text)
+RETURNS text
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT trim(
+    regexp_replace(
+      regexp_replace(
+        regexp_replace(
+          regexp_replace(
+            regexp_replace(
+              regexp_replace(
+                lower(unaccent(coalesce(input_name, ''))),
+                '\b(abzw|abzw\.)\b',
+                ' abzweig ',
+                'g'
+              ),
+              '\b(bhf|bf)\b',
+              ' bahnhof ',
+              'g'
+            ),
+            '\b(hbf)\b',
+            ' hauptbahnhof ',
+            'g'
+          ),
+          '\b(str|str\.)\b',
+          ' strasse ',
+          'g'
+        ),
+        '[^[:alnum:]]+',
+        ' ',
+        'g'
+      ),
+      '\s+',
+      ' ',
+      'g'
+    )
+  );
 $$;
 
 -- Operational runtime tables used by orchestrator job/state services.
@@ -424,11 +466,19 @@ CREATE TABLE IF NOT EXISTS qa_merge_cluster_evidence (
   source_global_station_id text NOT NULL REFERENCES global_stations(global_station_id) ON DELETE CASCADE,
   target_global_station_id text NOT NULL REFERENCES global_stations(global_station_id) ON DELETE CASCADE,
   evidence_type text NOT NULL,
+  status text,
   score numeric(8,4),
+  raw_value numeric(12,4),
   details jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now(),
   CHECK (source_global_station_id <> target_global_station_id)
 );
+
+ALTER TABLE qa_merge_cluster_evidence
+  ADD COLUMN IF NOT EXISTS status text;
+
+ALTER TABLE qa_merge_cluster_evidence
+  ADD COLUMN IF NOT EXISTS raw_value numeric(12,4);
 
 CREATE INDEX IF NOT EXISTS idx_qa_merge_cluster_evidence_cluster
   ON qa_merge_cluster_evidence (merge_cluster_id, evidence_type);

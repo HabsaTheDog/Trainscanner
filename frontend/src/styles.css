@@ -849,6 +849,30 @@ button:disabled {
   border-color: #cbd5e1;
 }
 
+.curation-badge--status-supporting {
+  color: #166534;
+  background: #dcfce7;
+  border-color: #86efac;
+}
+
+.curation-badge--status-warning {
+  color: #9a3412;
+  background: #ffedd5;
+  border-color: #fdba74;
+}
+
+.curation-badge--status-missing {
+  color: #1d4ed8;
+  background: #dbeafe;
+  border-color: #93c5fd;
+}
+
+.curation-badge--status-informational {
+  color: #475569;
+  background: rgba(226, 232, 240, 0.75);
+  border-color: rgba(148, 163, 184, 0.16);
+}
+
 .curation-badge--severity-critical {
   color: #991b1b;
   background: #fee2e2;
@@ -876,6 +900,59 @@ button:disabled {
 .curation-candidate__aliases {
   margin-top: 10px;
   line-height: 1.45;
+}
+
+.curation-candidate__adjacency {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+  font-size: 0.76rem;
+  color: #475569;
+}
+
+.curation-context-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.curation-status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(241, 245, 249, 0.92);
+  color: #334155;
+}
+
+.curation-status-pill--supporting {
+  color: #166534;
+  background: #dcfce7;
+  border-color: #86efac;
+}
+
+.curation-status-pill--warning {
+  color: #9a3412;
+  background: #ffedd5;
+  border-color: #fdba74;
+}
+
+.curation-status-pill--missing {
+  color: #991b1b;
+  background: #fee2e2;
+  border-color: #fca5a5;
+}
+
+.curation-status-pill--informational {
+  color: #334155;
+  background: #e2e8f0;
+  border-color: #cbd5e1;
 }
 
 /* ── Curated / Derived Cards ── */
@@ -992,6 +1069,65 @@ button:disabled {
   margin-bottom: 4px;
   background: rgba(255, 255, 255, 0.88);
   font-size: 0.82rem;
+}
+
+.curation-evidence-row__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.curation-evidence-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.curation-evidence-row__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 4px;
+  color: #475569;
+}
+
+.curation-pair-summary-list {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.curation-pair-summary {
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(248, 250, 252, 0.88);
+}
+
+.curation-pair-summary__header {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.curation-pair-summary__metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 0.76rem;
+  color: #475569;
+}
+
+.curation-pair-summary__counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 6px;
+  font-size: 0.76rem;
+  color: #475569;
 }
 
 /* ── Map Marker ── */

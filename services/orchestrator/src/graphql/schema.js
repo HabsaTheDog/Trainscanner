@@ -113,6 +113,8 @@ const schema = buildSchema(`
     country_tags: [String!]
     candidates: [GlobalClusterCandidate!]
     evidence: [GlobalEvidence!]
+    evidence_summary: JSON
+    pair_summaries: [GlobalPairSummary!]
     decisions: [GlobalDecision!]
     edit_history: [GlobalEditHistory!]
   }
@@ -125,14 +127,47 @@ const schema = buildSchema(`
     lon: Float
     country: String
     provider_labels: [String!]
+    aliases: [String!]
+    coord_status: String
+    service_context: GlobalCandidateServiceContext
+    context_summary: GlobalCandidateContextSummary
+  }
+
+  type GlobalCandidateServiceContext {
+    lines: [String!]
+    incoming: [String!]
+    outgoing: [String!]
+    transport_modes: [String!]
+  }
+
+  type GlobalCandidateContextSummary {
+    route_count: Int
+    incoming_count: Int
+    outgoing_count: Int
+    stop_point_count: Int
+    provider_source_count: Int
   }
 
   type GlobalEvidence {
     evidence_type: String
     source_global_station_id: String
     target_global_station_id: String
+    status: String
     score: Float
+    raw_value: Float
     details: JSON
+  }
+
+  type GlobalPairSummary {
+    source_global_station_id: String
+    target_global_station_id: String
+    supporting_count: Int
+    warning_count: Int
+    missing_count: Int
+    informational_count: Int
+    score: Float
+    summary: String
+    highlights: JSON
   }
 
   type GlobalDecision {

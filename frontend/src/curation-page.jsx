@@ -57,6 +57,127 @@ function formatCountryLabel(countryTags, fallback) {
   return fallback || "EU";
 }
 
+function formatEvidenceTypeLabel(value) {
+  const labels = {
+    name_exact: "Exact Name",
+    name_loose_similarity: "Loose Name Similarity",
+    token_overlap: "Token Overlap",
+    geographic_distance: "Geographic Distance",
+    coordinate_quality: "Coordinate Quality",
+    shared_provider_sources: "Shared Sources",
+    shared_route_context: "Shared Route Context",
+    shared_adjacent_stations: "Shared Adjacent Stations",
+    country_relation: "Country Relation",
+    generic_name_penalty: "Generic Name Penalty",
+  };
+  return labels[value] || formatToneLabel(value || "unknown");
+}
+
+function formatEvidenceStatusLabel(value) {
+  const labels = {
+    supporting: "Supporting",
+    warning: "Warning",
+    missing: "Missing",
+    informational: "Context",
+    same_location: "Same Location",
+    nearby: "Nearby",
+    far_apart: "Far Apart",
+    too_far: "Too Far",
+    missing_coordinates: "Missing Coordinates",
+    coordinates_present: "Coordinates Present",
+  };
+  return labels[value] || formatToneLabel(value || "unknown");
+}
+
+function formatCoordStatus(value) {
+  return formatEvidenceStatusLabel(value || "missing_coordinates");
+}
+
+function formatEvidenceValue(row) {
+  if (!row) return "No data";
+  if (row.evidence_type === "geographic_distance") {
+    const meters = Number(row.raw_value ?? row.details?.distance_meters);
+    if (Number.isFinite(meters)) {
+      return `${Math.round(meters)} m`;
+    }
+    return formatEvidenceStatusLabel(row.details?.distance_status);
+  }
+  if (
+    ["name_loose_similarity", "token_overlap"].includes(row.evidence_type) &&
+    Number.isFinite(Number(row.raw_value))
+  ) {
+    return `${Math.round(Number(row.raw_value) * 100)}%`;
+  }
+  if (
+    [
+      "shared_provider_sources",
+      "shared_route_context",
+      "shared_adjacent_stations",
+      "coordinate_quality",
+      "generic_name_penalty",
+    ].includes(row.evidence_type) &&
+    Number.isFinite(Number(row.raw_value))
+  ) {
+    return String(Number(row.raw_value));
+  }
+  if (row.evidence_type === "country_relation") {
+    if (row.details?.same_country === true) return "Same country";
+    if (row.details?.same_country === false) return "Cross-border";
+    return "Country unknown";
+  }
+  if (Number.isFinite(Number(row.score))) {
+    return `${Math.round(Number(row.score) * 100)}%`;
+  }
+  return "No data";
+}
+
+function formatEvidenceDetails(details) {
+  if (!details || typeof details !== "object") {
+    return "";
+  }
+  if (details.explanation) {
+    return String(details.explanation);
+  }
+  if (details.distance_status) {
+    return formatEvidenceStatusLabel(details.distance_status);
+  }
+  if (details.reason) {
+    return String(details.reason);
+  }
+  const pairs = Object.entries(details)
+    .filter(
+      ([, value]) => value !== null && value !== undefined && value !== "",
+    )
+    .slice(0, 3)
+    .map(([key, value]) => `${formatToneLabel(key)}: ${String(value)}`);
+  return pairs.join(" · ");
+}
+
+function getSummaryCounts(summary, key) {
+  const container =
+    summary && typeof summary === "object"
+      ? summary.status_counts || summary
+      : {};
+  return Number.parseInt(String(container?.[key] ?? 0), 10) || 0;
+}
+
+function getTypeCounts(summary) {
+  const container =
+    summary && typeof summary === "object" && summary.type_counts
+      ? summary.type_counts
+      : {};
+  return Object.entries(container)
+    .map(([type, count]) => ({
+      type,
+      count: Number.parseInt(String(count ?? 0), 10) || 0,
+    }))
+    .filter((entry) => entry.count > 0)
+    .sort(
+      (left, right) =>
+        right.count - left.count || left.type.localeCompare(right.type),
+    );
+}
+
 function createUiState() {
   return {
     selectedRefs: new Set(),
@@ -545,10 +666,26 @@ function CandidateRailCard({
   onFocus,
   onSplit,
 }) {
+  const candidate = item.candidate || {};
   const memberNames =
     item.member_refs?.map((ref) =>
       resolveDisplayNameForRef(ref, workspace, candidateMap),
     ) || [];
+  const aliases = Array.isArray(candidate.aliases)
+    ? candidate.aliases.filter(Boolean)
+    : [];
+  const transportModes = Array.isArray(
+    candidate.service_context?.transport_modes,
+  )
+    ? candidate.service_context.transport_modes
+    : [];
+  const incoming = Array.isArray(candidate.service_context?.incoming)
+    ? candidate.service_context.incoming
+    : [];
+  const outgoing = Array.isArray(candidate.service_context?.outgoing)
+    ? candidate.service_context.outgoing
+    : [];
+  const contextSummary = candidate.context_summary || {};
   return (
     <div
       className={`curation-rail-card curation-rail-card--${item.kind} ${selected ? "curation-rail-card--selected" : ""} ${focused ? "curation-rail-card--focused" : ""}`}
@@ -576,14 +713,41 @@ function CandidateRailCard({
         <span className="curation-tag">{item.kind}</span>
       </div>
       {item.kind === "raw" ? (
-        <div className="curation-candidate__meta">
-          <span className="curation-candidate__meta-item">
-            {formatCountryLabel([item.candidate?.metadata?.country || ""])}
-          </span>
-          <span className="curation-candidate__meta-item">
-            {(item.provider_labels || []).length} feeds
-          </span>
-        </div>
+        <>
+          <div className="curation-candidate__meta">
+            <span className="curation-candidate__meta-item">
+              {formatCountryLabel([candidate.metadata?.country || ""])}
+            </span>
+            <span className="curation-candidate__meta-item">
+              {(item.provider_labels || []).length} feeds
+            </span>
+            <span className="curation-status-pill">
+              {formatCoordStatus(candidate.coord_status)}
+            </span>
+          </div>
+          <div className="curation-context-chips">
+            {transportModes.slice(0, 3).map((mode) => (
+              <span key={`${item.ref}-mode-${mode}`} className="curation-tag">
+                {mode}
+              </span>
+            ))}
+            <span className="curation-tag">
+              {contextSummary.stop_point_count ?? 0} stop points
+            </span>
+            <span className="curation-tag">
+              {contextSummary.route_count ?? 0} routes
+            </span>
+          </div>
+          {aliases.length > 0 && (
+            <p className="curation-muted curation-tiny curation-candidate__aliases">
+              Aliases: {aliases.slice(0, 4).join(", ")}
+            </p>
+          )}
+          <div className="curation-candidate__adjacency">
+            <span>In: {incoming.slice(0, 2).join(", ") || "none"}</span>
+            <span>Out: {outgoing.slice(0, 2).join(", ") || "none"}</span>
+          </div>
+        </>
       ) : (
         <div className="curation-rail-card__summary">
           <span>{item.member_refs?.length || 0} members</span>
@@ -1049,9 +1213,67 @@ function EvidenceTab({ clusterDetail, focusedItem, workspace }) {
       focusedStationIds.includes(row.target_global_station_id)
     );
   });
+  const pairSummaries = (clusterDetail?.pair_summaries || []).filter((row) => {
+    if (focusedStationIds.length === 0) return true;
+    return (
+      focusedStationIds.includes(row.source_global_station_id) ||
+      focusedStationIds.includes(row.target_global_station_id)
+    );
+  });
+  const typeCounts = getTypeCounts(clusterDetail?.evidence_summary);
 
   return (
     <div id="evidenceTabPanel" className="curation-tab-panel">
+      <div className="curation-evidence-summary">
+        {["supporting", "warning", "missing", "informational"].map((status) => (
+          <span
+            key={status}
+            className={`curation-status-pill curation-status-pill--${status}`}
+          >
+            {formatEvidenceStatusLabel(status)}{" "}
+            {getSummaryCounts(clusterDetail?.evidence_summary, status)}
+          </span>
+        ))}
+      </div>
+      {typeCounts.length > 0 && (
+        <div className="curation-context-chips">
+          {typeCounts.slice(0, 6).map((entry) => (
+            <span key={entry.type} className="curation-tag">
+              {formatEvidenceTypeLabel(entry.type)} {entry.count}
+            </span>
+          ))}
+        </div>
+      )}
+      {pairSummaries.length > 0 && (
+        <div className="curation-pair-summary-list">
+          {pairSummaries.slice(0, 8).map((row) => (
+            <div
+              key={`${row.source_global_station_id}-${row.target_global_station_id}`}
+              className="curation-pair-summary"
+            >
+              <div className="curation-pair-summary__header">
+                <strong>
+                  {row.source_global_station_id} ↔{" "}
+                  {row.target_global_station_id}
+                </strong>
+                <span>{row.summary || "Evidence summary"}</span>
+              </div>
+              <div className="curation-pair-summary__metrics">
+                <span>support {row.supporting_count || 0}</span>
+                <span>warn {row.warning_count || 0}</span>
+                <span>missing {row.missing_count || 0}</span>
+                <span>context {row.informational_count || 0}</span>
+                <span>
+                  score{" "}
+                  {Number.isFinite(Number(row.score))
+                    ? Number(row.score).toFixed(2)
+                    : "n/a"}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       {evidenceRows.length === 0 ? (
         <p className="curation-muted">No evidence for the current focus.</p>
       ) : (
@@ -1061,9 +1283,32 @@ function EvidenceTab({ clusterDetail, focusedItem, workspace }) {
               key={`${row.evidence_type}-${row.source_global_station_id}-${row.target_global_station_id}-${row.score ?? "na"}`}
               className="curation-evidence-row"
             >
-              <strong>{row.evidence_type}</strong> ·{" "}
-              {row.source_global_station_id} ↔ {row.target_global_station_id} ·
-              score {row.score ?? "n/a"}
+              <div className="curation-evidence-row__top">
+                <strong>{formatEvidenceTypeLabel(row.evidence_type)}</strong>
+                <span
+                  className={`curation-status-pill curation-status-pill--${row.status || "informational"}`}
+                >
+                  {formatEvidenceStatusLabel(row.status)}
+                </span>
+              </div>
+              <div className="curation-evidence-row__meta">
+                <span>
+                  {row.source_global_station_id} ↔{" "}
+                  {row.target_global_station_id}
+                </span>
+                <span>{formatEvidenceValue(row)}</span>
+                <span>
+                  score{" "}
+                  {Number.isFinite(Number(row.score))
+                    ? Number(row.score).toFixed(2)
+                    : "n/a"}
+                </span>
+              </div>
+              {formatEvidenceDetails(row.details) && (
+                <div className="curation-muted curation-tiny">
+                  {formatEvidenceDetails(row.details)}
+                </div>
+              )}
             </div>
           ))}
         </div>

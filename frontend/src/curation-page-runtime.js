@@ -42,6 +42,21 @@ const CLUSTER_DETAIL_QUERY = `
         candidate_rank
         country
         provider_labels
+        aliases
+        coord_status
+        service_context {
+          lines
+          incoming
+          outgoing
+          transport_modes
+        }
+        context_summary {
+          route_count
+          incoming_count
+          outgoing_count
+          stop_point_count
+          provider_source_count
+        }
         lat
         lon
       }
@@ -49,8 +64,22 @@ const CLUSTER_DETAIL_QUERY = `
         evidence_type
         source_global_station_id
         target_global_station_id
+        status
         score
+        raw_value
         details
+      }
+      evidence_summary
+      pair_summaries {
+        source_global_station_id
+        target_global_station_id
+        supporting_count
+        warning_count
+        missing_count
+        informational_count
+        score
+        summary
+        highlights
       }
       decisions {
         decision_id
@@ -186,10 +215,24 @@ export async function fetchClusterDetail(clusterId) {
       display_name: candidate.display_name,
       candidate_rank: candidate.candidate_rank,
       provider_labels: candidate.provider_labels || [],
+      aliases: candidate.aliases || [],
+      coord_status: candidate.coord_status || "missing_coordinates",
       lat: candidate.lat,
       lon: candidate.lon,
-      aliases: [],
-      service_context: { lines: [], incoming: [], outgoing: [] },
+      service_context: {
+        lines: candidate.service_context?.lines || [],
+        incoming: candidate.service_context?.incoming || [],
+        outgoing: candidate.service_context?.outgoing || [],
+        transport_modes: candidate.service_context?.transport_modes || [],
+      },
+      context_summary: {
+        route_count: candidate.context_summary?.route_count ?? 0,
+        incoming_count: candidate.context_summary?.incoming_count ?? 0,
+        outgoing_count: candidate.context_summary?.outgoing_count ?? 0,
+        stop_point_count: candidate.context_summary?.stop_point_count ?? 0,
+        provider_source_count:
+          candidate.context_summary?.provider_source_count ?? 0,
+      },
       segment_context: {},
       metadata: { country: candidate.country || "" },
     })),
@@ -197,9 +240,28 @@ export async function fetchClusterDetail(clusterId) {
       evidence_type: row.evidence_type,
       source_global_station_id: row.source_global_station_id,
       target_global_station_id: row.target_global_station_id,
+      status: row.status || "informational",
       score: row.score,
+      raw_value: row.raw_value ?? null,
       details: row.details || {},
     })),
+    evidence_summary:
+      cluster.evidence_summary && typeof cluster.evidence_summary === "object"
+        ? cluster.evidence_summary
+        : {},
+    pair_summaries: Array.isArray(cluster.pair_summaries)
+      ? cluster.pair_summaries.map((row) => ({
+          source_global_station_id: row.source_global_station_id,
+          target_global_station_id: row.target_global_station_id,
+          supporting_count: row.supporting_count ?? 0,
+          warning_count: row.warning_count ?? 0,
+          missing_count: row.missing_count ?? 0,
+          informational_count: row.informational_count ?? 0,
+          score: row.score ?? null,
+          summary: row.summary || "",
+          highlights: row.highlights || {},
+        }))
+      : [],
     decisions: (cluster.decisions || []).map((row) => ({
       ...row,
       members: (row.members || []).map((member) => ({

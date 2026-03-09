@@ -255,7 +255,7 @@ function createPostgisClient(options = {}) {
     }
   }
 
-  async function runScript(sql, params = {}) {
+  async function runScript(sql, params = {}, options = {}) {
     const q = String(sql || "").trim();
     if (!q) {
       throw new AppError({
@@ -264,9 +264,15 @@ function createPostgisClient(options = {}) {
       });
     }
     const query = interpolateSqlLiterals(q, params);
+    const onNotice =
+      typeof options.onNotice === "function" ? options.onNotice : null;
+    const client = await pool.connect();
 
     try {
-      const result = await pool.query(query);
+      if (onNotice) {
+        client.on("notice", onNotice);
+      }
+      const result = await client.query(query);
       return {
         stdout: scriptResultToStdout(result),
         stderr: "",
@@ -278,6 +284,11 @@ function createPostgisClient(options = {}) {
         details: { query },
         cause: err,
       });
+    } finally {
+      if (onNotice) {
+        client.removeListener("notice", onNotice);
+      }
+      client.release();
     }
   }
 
