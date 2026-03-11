@@ -9,7 +9,6 @@ on:
 
 jobs:
   sonarcloud:
-    if: ${{ secrets.SONAR_TOKEN != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
