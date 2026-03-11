@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -8,11 +9,14 @@ RUN addgroup --system app \
 
 WORKDIR /app
 
-COPY --chown=app:app --chmod=0444 requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+RUN --mount=type=bind,source=requirements.txt,target=/tmp/requirements.txt \
+  install -o app -g app -m 0444 /tmp/requirements.txt ./requirements.txt \
+  && pip install --no-cache-dir -r requirements.txt
 
-COPY --chown=app:app --chmod=0444 main.py ./main.py
-COPY --chown=app:app --chmod=0444 pyproject.toml ./pyproject.toml
+RUN --mount=type=bind,source=main.py,target=/tmp/main.py \
+  --mount=type=bind,source=pyproject.toml,target=/tmp/pyproject.toml \
+  install -o app -g app -m 0444 /tmp/main.py ./main.py \
+  && install -o app -g app -m 0444 /tmp/pyproject.toml ./pyproject.toml
 
 USER app
 

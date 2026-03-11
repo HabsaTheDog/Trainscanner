@@ -67,12 +67,10 @@ async function runCli() {
   }
 }
 
-async function main() {
-  process.exitCode = await runCli();
-}
-
 if (require.main === module) {
-  void main();
+  void runCli().then((exitCode) => {
+    process.exitCode = exitCode;
+  });
 }
 
 module.exports = {

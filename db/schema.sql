@@ -1,5 +1,4 @@
 \set ON_ERROR_STOP on
-\set STATUS_FAILED failed
 
 CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS unaccent;
@@ -78,7 +77,7 @@ BEGIN
       'running',
       'retry_wait',
       'succeeded',
-      :'STATUS_FAILED'
+      'failed'
     );
   END IF;
 END $$;
@@ -171,7 +170,7 @@ ON CONFLICT (key) DO NOTHING;
 CREATE TABLE IF NOT EXISTS import_runs (
   run_id uuid PRIMARY KEY,
   pipeline text NOT NULL CHECK (pipeline IN ('source_fetch', 'netex_ingest', 'global_build', 'qa_merge_build')),
-  status text NOT NULL CHECK (status IN ('running', 'succeeded', :'STATUS_FAILED')),
+  status pipeline_job_status NOT NULL,
   source_id text,
   country iso_country_code,
   snapshot_date date,
@@ -224,7 +223,7 @@ CREATE TABLE IF NOT EXISTS provider_datasets (
   manifest_sha256 text,
   manifest jsonb NOT NULL DEFAULT jsonb_build_object(),
   raw_archive_path text,
-  ingestion_status text NOT NULL DEFAULT 'pending' CHECK (ingestion_status IN ('pending', 'ingested', :'STATUS_FAILED')),
+  ingestion_status text NOT NULL DEFAULT 'pending' CHECK (ingestion_status IN ('pending', 'ingested', 'failed')),
   ingestion_error text,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),

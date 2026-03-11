@@ -29,9 +29,6 @@ async function runCli() {
   }
 }
 
-async function start() {
-  const exitCode = await runCli();
+void runCli().then((exitCode) => {
   process.exitCode = exitCode;
-}
-
-void start();
+});

@@ -29,8 +29,16 @@ COPY --chmod=0555 db ./db
 
 RUN mkdir -p /app/config /app/data/artifacts /app/services/orchestrator/state \
   && chown -R node:node /app \
-  && find /app -path /app/config -prune -o -path /app/data -prune -o -path /app/services/orchestrator/state -prune -o -type d -exec chmod 0555 {} + \
-  && find /app -path /app/config -prune -o -path /app/data -prune -o -path /app/services/orchestrator/state -prune -o -type f -exec chmod 0444 {} + \
+  && find /app \
+    -path /app/config -prune -o \
+    -path /app/data -prune -o \
+    -path /app/services/orchestrator/state -prune -o \
+    -type d -exec chmod 0555 {} + \
+  && find /app \
+    -path /app/config -prune -o \
+    -path /app/data -prune -o \
+    -path /app/services/orchestrator/state -prune -o \
+    -type f -exec chmod 0444 {} + \
   && chown -R node:node /app/config /app/data /app/services/orchestrator/state \
   && chmod 0755 /app/config /app/data /app/data/artifacts /app/services/orchestrator/state
 

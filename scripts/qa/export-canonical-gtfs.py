@@ -61,6 +61,23 @@ class ExportBatchOptions:
     progress_interval_sec: int
 
 
+@dataclass(frozen=True)
+class BatchedExportSummaryContext:
+    total_runtime_ms: float
+    batch_perf: dict
+    sql_plan_summary: dict
+    benchmark_enabled: bool
+    countries: list[str]
+    agency_rows: list[list[str]]
+    stop_rows: list[list[str]]
+    transfers_rows: list[list[str]]
+    route_rows: list
+    calendar_rows: list[list[str]]
+    source_batches: set[str]
+    batch_count: int
+    counters: dict
+
+
 def fail(msg: str) -> NoReturn:
     print(f"[export-canonical-gtfs] ERROR: {msg}", file=sys.stderr)
     raise SystemExit(1)
@@ -648,6 +665,59 @@ def _extract_batch_trip_ids(rows) -> set[str]:
     }
 
 
+def _process_trip_batch_result(
+    *,
+    sid: str,
+    rows,
+    query_duration_ms: float,
+    total_batches: int,
+    total_trips: int,
+    options: ExportBatchOptions,
+    progress_state: dict,
+):
+    if not rows:
+        log_progress(
+            progress_state,
+            f"Source '{sid}' finished (no more rows)",
+            force=True,
+        )
+        return {
+            "has_rows": False,
+            "rows": rows,
+            "total_batches": total_batches,
+            "total_trips": total_trips,
+            "after_trip": "",
+            "benchmark_stop_reason": "",
+        }
+
+    next_total_batches = total_batches + 1
+    unique_trip_ids = _extract_batch_trip_ids(rows)
+    next_total_trips = total_trips + len(unique_trip_ids)
+    log_progress(
+        progress_state,
+        "Fetched "
+        + f"source='{sid}' batch={next_total_batches} rows={len(rows)} uniqueTrips={len(unique_trip_ids)} "
+        + f"fetchMs={query_duration_ms:.1f} totalTripsSeen={next_total_trips}",
+    )
+    after_trip = str(rows[-1].get("trip_fact_id") or "").strip()
+    benchmark_stop_reason = ""
+    if after_trip:
+        benchmark_stop_reason = _resolve_benchmark_stop_reason(
+            total_batches=next_total_batches,
+            total_trips=next_total_trips,
+            benchmark_max_batches=options.benchmark_max_batches,
+            benchmark_max_trips=options.benchmark_max_trips,
+        )
+    return {
+        "has_rows": True,
+        "rows": rows,
+        "total_batches": next_total_batches,
+        "total_trips": next_total_trips,
+        "after_trip": after_trip,
+        "benchmark_stop_reason": benchmark_stop_reason,
+    }
+
+
 def iter_trip_batches(
     *,
     options: ExportBatchOptions,
@@ -681,32 +751,24 @@ def iter_trip_batches(
                 after_trip,
                 profiling,
             )
-            if not rows:
-                log_progress(
-                    progress_state,
-                    f"Source '{sid}' finished (no more rows)",
-                    force=True,
-                )
-                break
-            total_batches += 1
-            unique_trip_ids = _extract_batch_trip_ids(rows)
-            total_trips += len(unique_trip_ids)
-            log_progress(
-                progress_state,
-                "Fetched "
-                + f"source='{sid}' batch={total_batches} rows={len(rows)} uniqueTrips={len(unique_trip_ids)} "
-                + f"fetchMs={query_duration_ms:.1f} totalTripsSeen={total_trips}",
-            )
-            yield sid, rows, total_batches, total_trips
-            after_trip = str(rows[-1].get("trip_fact_id") or "").strip()
-            if not after_trip:
-                break
-            benchmark_stop_reason = _resolve_benchmark_stop_reason(
+            batch_result = _process_trip_batch_result(
+                sid=sid,
+                rows=rows,
+                query_duration_ms=query_duration_ms,
                 total_batches=total_batches,
                 total_trips=total_trips,
-                benchmark_max_batches=options.benchmark_max_batches,
-                benchmark_max_trips=options.benchmark_max_trips,
+                options=options,
+                progress_state=progress_state,
             )
+            if not batch_result["has_rows"]:
+                break
+            total_batches = batch_result["total_batches"]
+            total_trips = batch_result["total_trips"]
+            yield sid, batch_result["rows"], total_batches, total_trips
+            after_trip = batch_result["after_trip"]
+            if not after_trip:
+                break
+            benchmark_stop_reason = batch_result["benchmark_stop_reason"]
             if benchmark_stop_reason:
                 break
         if benchmark_stop_reason:
@@ -1444,19 +1506,7 @@ def _build_batched_export_summary(
     *,
     options: ExportBatchOptions,
     profiling: dict,
-    total_runtime_ms: float,
-    batch_perf: dict,
-    sql_plan_summary: dict,
-    benchmark_enabled: bool,
-    countries: list[str],
-    agency_rows,
-    stop_rows,
-    transfers_rows,
-    route_rows,
-    calendar_rows,
-    source_batches,
-    batch_count: int,
-    counters: dict,
+    context: BatchedExportSummaryContext,
 ) -> dict:
     return {
         "profile": options.profile,
@@ -1466,42 +1516,47 @@ def _build_batched_export_summary(
         "batching": {
             "enabled": True,
             "batchSizeTrips": options.batch_size_trips,
-            "sourcesProcessed": len(source_batches),
-            "tripBatches": batch_count,
+            "sourcesProcessed": len(context.source_batches),
+            "tripBatches": context.batch_count,
         },
         "counts": {
-            "stops": len(stop_rows),
-            "agencies": len(agency_rows),
-            "routes": len(route_rows),
-            "trips": counters["trip_count"],
-            "stopTimes": counters["stop_time_count"],
-            "services": len(calendar_rows),
-            "transfers": len(transfers_rows),
-            "countries": len(countries),
+            "stops": len(context.stop_rows),
+            "agencies": len(context.agency_rows),
+            "routes": len(context.route_rows),
+            "trips": context.counters["trip_count"],
+            "stopTimes": context.counters["stop_time_count"],
+            "services": len(context.calendar_rows),
+            "transfers": len(context.transfers_rows),
+            "countries": len(context.countries),
         },
         "benchmark": {
-            "enabled": benchmark_enabled,
+            "enabled": context.benchmark_enabled,
             "maxSources": options.benchmark_max_sources,
             "maxBatches": options.benchmark_max_batches,
             "maxTrips": options.benchmark_max_trips,
             "truncated": bool(profiling.get("benchmarkStopReason")),
             "stopReason": profiling.get("benchmarkStopReason") or "",
             "selectedSources": int(
-                profiling.get("benchmarkSourceCount") or len(source_batches)
+                profiling.get("benchmarkSourceCount") or len(context.source_batches)
             ),
         },
         "performance": {
             "progressIntervalSec": max(int(options.progress_interval_sec), 0),
-            "totalRuntimeMs": round(total_runtime_ms, 3),
+            "totalRuntimeMs": round(context.total_runtime_ms, 3),
             "tripsPerMinute": round(
-                (counters["trip_count"] * 60000.0 / total_runtime_ms), 3
+                (context.counters["trip_count"] * 60000.0 / context.total_runtime_ms), 3
             )
-            if total_runtime_ms > 0
+            if context.total_runtime_ms > 0
             else 0.0,
             "stopTimesPerMinute": round(
-                (counters["stop_time_count"] * 60000.0 / total_runtime_ms), 3
+                (
+                    context.counters["stop_time_count"]
+                    * 60000.0
+                    / context.total_runtime_ms
+                ),
+                3,
             )
-            if total_runtime_ms > 0
+            if context.total_runtime_ms > 0
             else 0.0,
             "stagesMs": {
                 "staticLoad": round(profiling["staticLoadMs"], 3),
@@ -1511,8 +1566,8 @@ def _build_batched_export_summary(
                 "csvWrite": round(profiling["csvWriteMs"], 3),
                 "zipWrite": round(profiling["zipMs"], 3),
             },
-            "batchFetchProfile": batch_perf,
-            "sqlSamplePlan": sql_plan_summary,
+            "batchFetchProfile": context.batch_perf,
+            "sqlSamplePlan": context.sql_plan_summary,
         },
     }
 
@@ -1568,12 +1623,9 @@ def export_from_db_batched(options: ExportBatchOptions):
     )
 
     total_runtime_ms = (time.perf_counter() - run_started) * 1000.0
-    batch_perf = _build_batch_perf(profiling)
-    summary = _build_batched_export_summary(
-        options=options,
-        profiling=profiling,
+    summary_context = BatchedExportSummaryContext(
         total_runtime_ms=total_runtime_ms,
-        batch_perf=batch_perf,
+        batch_perf=_build_batch_perf(profiling),
         sql_plan_summary=sql_plan_summary,
         benchmark_enabled=benchmark_enabled,
         countries=countries,
@@ -1585,6 +1637,11 @@ def export_from_db_batched(options: ExportBatchOptions):
         source_batches=artifact_results["source_batches"],
         batch_count=artifact_results["batch_count"],
         counters=artifact_results["counters"],
+    )
+    summary = _build_batched_export_summary(
+        options=options,
+        profiling=profiling,
+        context=summary_context,
     )
     log_progress(
         progress_state,
