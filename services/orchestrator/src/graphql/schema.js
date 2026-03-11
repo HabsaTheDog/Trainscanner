@@ -152,6 +152,9 @@ const schema = buildSchema(`
     evidence_type: String
     source_global_station_id: String
     target_global_station_id: String
+    category: String
+    is_seed_rule: Boolean
+    seed_reasons: [String!]
     status: String
     score: Float
     raw_value: Float
@@ -167,6 +170,8 @@ const schema = buildSchema(`
     informational_count: Int
     score: Float
     summary: String
+    categories: [String!]
+    seed_reasons: [String!]
     highlights: JSON
   }
 

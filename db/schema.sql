@@ -173,6 +173,7 @@ CREATE TABLE IF NOT EXISTS raw_provider_stop_places (
     END
   ) STORED,
   parent_stop_place_ref text,
+  topographic_place_ref text,
   public_code text,
   private_code text,
   hard_id text,
@@ -218,6 +219,7 @@ CREATE TABLE IF NOT EXISTS raw_provider_stop_points (
       ELSE NULL
     END
   ) STORED,
+  topographic_place_ref text,
   platform_code text,
   track_code text,
   raw_payload jsonb NOT NULL DEFAULT '{}'::jsonb,

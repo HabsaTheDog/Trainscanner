@@ -16,6 +16,10 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
+    // MapLibre's CSP-safe worker ships as a large prebuilt bundle. It is
+    // already isolated into its own asset, so the default 500 kB warning only
+    // adds noise in this project.
+    chunkSizeWarningLimit: 1100,
     rollupOptions: {
       input: {
         home: path.resolve(__dirname, "index.html"),

@@ -54,6 +54,7 @@ function readRequiredTokenValue(tokens, index, flagName) {
 function parseBuildGlobalStationsArgs(args = []) {
   const parsed = {
     helpRequested: false,
+    reportLowConfidence: false,
     scope: {
       country: "",
       asOf: "",
@@ -88,6 +89,9 @@ function parseBuildGlobalStationsArgs(args = []) {
           "--source-id",
         );
         i += 1;
+        break;
+      case "--report-low-confidence":
+        parsed.reportLowConfidence = true;
         break;
       default:
         throw new AppError({
@@ -156,6 +160,9 @@ function printGlobalBuildUsage() {
   process.stdout.write("  --as-of YYYY-MM-DD    Use latest datasets <= date\n");
   process.stdout.write(
     "  --source-id ID        Restrict build scope to one source id\n",
+  );
+  process.stdout.write(
+    "  --report-low-confidence  Print low-confidence/conflicting coordinate rows after build\n",
   );
   process.stdout.write("  -h, --help            Show this help\n");
 }
@@ -326,6 +333,15 @@ function createGlobalService(deps = {}) {
               parsed.scope,
             );
             process.stdout.write(`${JSON.stringify(summary)}\n`);
+            if (parsed.reportLowConfidence) {
+              const rows = await stationsRepo.listCoordinateAlerts(
+                parsed.scope,
+                { limit: 50 },
+              );
+              process.stdout.write(
+                `${JSON.stringify({ lowConfidenceStations: rows })}\n`,
+              );
+            }
             return {
               ok: true,
               summary,

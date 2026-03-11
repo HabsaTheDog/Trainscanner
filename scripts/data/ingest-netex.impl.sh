@@ -237,6 +237,7 @@ place_header = [
     "latitude",
     "longitude",
     "parent_stop_place_ref",
+    "topographic_place_ref",
     "public_code",
     "private_code",
     "hard_id",
@@ -254,6 +255,7 @@ point_header = [
     "stop_name",
     "latitude",
     "longitude",
+    "topographic_place_ref",
     "platform_code",
     "track_code",
     "raw_payload",
@@ -274,7 +276,7 @@ def to_json_map(raw_text: str, source_file: str) -> dict:
     payload["source_file"] = source_file
     return payload
 
-def build_place_row(*, provider_stop_place_ref: str, stop_name: str, latitude: str, longitude: str, parent_ref: str, public_code: str, private_code: str, hard_id: str, raw_payload: dict) -> dict:
+def build_place_row(*, provider_stop_place_ref: str, stop_name: str, latitude: str, longitude: str, parent_ref: str, topographic_ref: str, public_code: str, private_code: str, hard_id: str, raw_payload: dict) -> dict:
     stop_place_id = stable_id(
         "rsp", f"{dataset_id}|{source_id}|{provider_stop_place_ref}"
     )
@@ -288,13 +290,14 @@ def build_place_row(*, provider_stop_place_ref: str, stop_name: str, latitude: s
         "latitude": latitude,
         "longitude": longitude,
         "parent_stop_place_ref": parent_ref,
+        "topographic_place_ref": topographic_ref,
         "public_code": public_code,
         "private_code": private_code,
         "hard_id": hard_id,
         "raw_payload": json.dumps(raw_payload, ensure_ascii=True, separators=(",", ":")),
     }
 
-def build_point_row(*, provider_stop_point_ref: str, provider_stop_place_ref: str, stop_name: str, latitude: str, longitude: str, raw_payload: dict, platform_code: str = "", track_code: str = "") -> dict:
+def build_point_row(*, provider_stop_point_ref: str, provider_stop_place_ref: str, stop_name: str, latitude: str, longitude: str, topographic_ref: str, raw_payload: dict, platform_code: str = "", track_code: str = "") -> dict:
     stop_point_id = stable_id(
         "rpp", f"{dataset_id}|{source_id}|{provider_stop_point_ref}"
     )
@@ -312,6 +315,7 @@ def build_point_row(*, provider_stop_point_ref: str, provider_stop_place_ref: st
         "stop_name": stop_name,
         "latitude": latitude,
         "longitude": longitude,
+        "topographic_place_ref": topographic_ref,
         "platform_code": platform_code,
         "track_code": track_code,
         "raw_payload": json.dumps(raw_payload, ensure_ascii=True, separators=(",", ":")),
@@ -351,6 +355,7 @@ with raw_csv_path.open("r", encoding="utf-8", newline="") as rf, \
         latitude = str(row.get("latitude", "")).strip()
         longitude = str(row.get("longitude", "")).strip()
         parent_ref = str(row.get("source_parent_stop_id", "")).strip()
+        topographic_ref = str(row.get("topographic_place_ref", "")).strip()
         public_code = str(row.get("public_code", "")).strip()
         private_code = str(row.get("private_code", "")).strip()
         hard_id = str(row.get("hard_id", "")).strip()
@@ -363,6 +368,7 @@ with raw_csv_path.open("r", encoding="utf-8", newline="") as rf, \
             latitude=latitude,
             longitude=longitude,
             parent_ref=parent_ref,
+            topographic_ref=topographic_ref,
             public_code=public_code,
             private_code=private_code,
             hard_id=hard_id,
@@ -379,6 +385,7 @@ with raw_csv_path.open("r", encoding="utf-8", newline="") as rf, \
                 stop_name=stop_name,
                 latitude=latitude,
                 longitude=longitude,
+                topographic_ref=topographic_ref,
                 raw_payload=point_payload,
                 platform_code=public_code,
                 track_code=private_code,
@@ -403,6 +410,7 @@ with raw_csv_path.open("r", encoding="utf-8", newline="") as rf, \
             stop_name=place_row["stop_name"],
             latitude=place_row["latitude"],
             longitude=place_row["longitude"],
+            topographic_ref=place_row["topographic_place_ref"],
             raw_payload=payload,
         )
 
@@ -707,6 +715,7 @@ ingest_source() {
     latitude,
     longitude,
     parent_stop_place_ref,
+    topographic_place_ref,
     public_code,
     private_code,
     hard_id,
@@ -724,6 +733,7 @@ ingest_source() {
     stop_name,
     latitude,
     longitude,
+    topographic_place_ref,
     platform_code,
     track_code,
     raw_payload

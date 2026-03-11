@@ -79,6 +79,52 @@ function classifyDistanceEvidence(distanceMeters) {
   return { status: "warning", distance_status: "too_far", score: 0.05 };
 }
 
+const EVIDENCE_CATEGORY_BY_TYPE = {
+  name_exact: "core_match",
+  name_loose_similarity: "core_match",
+  token_overlap: "core_match",
+  geographic_distance: "core_match",
+  shared_provider_sources: "network_context",
+  shared_route_context: "network_context",
+  shared_adjacent_stations: "network_context",
+  country_relation: "network_context",
+  coordinate_quality: "risk_conflict",
+  generic_name_penalty: "risk_conflict",
+};
+
+const SEED_EVIDENCE_TYPE_BY_REASON = {
+  exact_name: "name_exact",
+  loose_name_geo: "name_loose_similarity",
+  loose_name_missing_coords: "name_loose_similarity",
+  shared_route: "shared_route_context",
+  shared_adjacent: "shared_adjacent_stations",
+};
+
+function normalizeSeedReasons(value) {
+  return Array.from(
+    new Set(
+      (Array.isArray(value) ? value : [])
+        .map((seedReason) => String(seedReason || "").trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function classifyEvidenceRow(row = {}) {
+  const evidenceType =
+    String(row?.evidence_type || "unknown").trim() || "unknown";
+  const seedReasons = normalizeSeedReasons(
+    row?.seed_reasons || row?.details?.seed_reasons,
+  );
+  return {
+    category: EVIDENCE_CATEGORY_BY_TYPE[evidenceType] || "risk_conflict",
+    is_seed_rule: seedReasons.some(
+      (seedReason) => SEED_EVIDENCE_TYPE_BY_REASON[seedReason] === evidenceType,
+    ),
+    seed_reasons: seedReasons,
+  };
+}
+
 function summarizeEvidenceRows(rows = []) {
   const statusCounts = {
     supporting: 0,
@@ -87,6 +133,12 @@ function summarizeEvidenceRows(rows = []) {
     informational: 0,
   };
   const typeCounts = {};
+  const categoryCounts = {
+    core_match: 0,
+    network_context: 0,
+    risk_conflict: 0,
+  };
+  const seedRuleCounts = {};
   const pairMap = new Map();
 
   for (const row of Array.isArray(rows) ? rows : []) {
@@ -99,6 +151,22 @@ function summarizeEvidenceRows(rows = []) {
     const evidenceType =
       String(row?.evidence_type || "unknown").trim() || "unknown";
     typeCounts[evidenceType] = (typeCounts[evidenceType] || 0) + 1;
+    const classification = classifyEvidenceRow(row);
+    const category =
+      String(row?.category || classification.category).trim() ||
+      "risk_conflict";
+    if (category in categoryCounts) {
+      categoryCounts[category] += 1;
+    } else {
+      categoryCounts.risk_conflict += 1;
+    }
+    const seedReasons =
+      Array.isArray(row?.seed_reasons) && row.seed_reasons.length > 0
+        ? normalizeSeedReasons(row.seed_reasons)
+        : classification.seed_reasons;
+    for (const seedReason of seedReasons) {
+      seedRuleCounts[seedReason] = (seedRuleCounts[seedReason] || 0) + 1;
+    }
 
     const sourceId = String(row?.source_global_station_id || "").trim();
     const targetId = String(row?.target_global_station_id || "").trim();
@@ -116,7 +184,10 @@ function summarizeEvidenceRows(rows = []) {
         evidence_types: [],
         distance_status: "",
         shared_signal_count: 0,
+        seed_reasons: [],
       },
+      categories: [],
+      seed_reasons: [],
     };
 
     if (status === "supporting") entry.supporting_count += 1;
@@ -153,6 +224,17 @@ function summarizeEvidenceRows(rows = []) {
     ) {
       entry.highlights.shared_signal_count += Number(row.raw_value);
     }
+    if (!entry.categories.includes(category)) {
+      entry.categories.push(category);
+    }
+    for (const seedReason of seedReasons) {
+      if (!entry.highlights.seed_reasons.includes(seedReason)) {
+        entry.highlights.seed_reasons.push(seedReason);
+      }
+      if (!entry.seed_reasons.includes(seedReason)) {
+        entry.seed_reasons.push(seedReason);
+      }
+    }
 
     pairMap.set(pairKey, entry);
   }
@@ -161,6 +243,8 @@ function summarizeEvidenceRows(rows = []) {
     ...statusCounts,
     status_counts: statusCounts,
     type_counts: typeCounts,
+    category_counts: categoryCounts,
+    seed_rule_counts: seedRuleCounts,
   };
 
   const pairSummaries = Array.from(pairMap.values())
@@ -184,6 +268,8 @@ function summarizeEvidenceRows(rows = []) {
         informational_count: entry.informational_count,
         score: Number(score.toFixed(3)),
         summary,
+        categories: entry.categories,
+        seed_reasons: entry.seed_reasons,
         highlights: entry.highlights,
       };
     })
@@ -204,6 +290,7 @@ function summarizeEvidenceRows(rows = []) {
 
 module.exports = {
   classifyDistanceEvidence,
+  classifyEvidenceRow,
   isGenericStationName,
   normalizeLooseStationName,
   summarizeEvidenceRows,

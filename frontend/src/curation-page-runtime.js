@@ -64,6 +64,9 @@ const CLUSTER_DETAIL_QUERY = `
         evidence_type
         source_global_station_id
         target_global_station_id
+        category
+        is_seed_rule
+        seed_reasons
         status
         score
         raw_value
@@ -79,6 +82,8 @@ const CLUSTER_DETAIL_QUERY = `
         informational_count
         score
         summary
+        categories
+        seed_reasons
         highlights
       }
       decisions {
@@ -202,7 +207,11 @@ export function formatResultsLabel(totalCount, locale) {
 export async function fetchClusterDetail(clusterId) {
   const data = await graphqlQuery(CLUSTER_DETAIL_QUERY, { id: clusterId });
   if (!data.globalCluster) return null;
-  const cluster = data.globalCluster;
+  return normalizeClusterDetail(data.globalCluster);
+}
+
+export function normalizeClusterDetail(cluster) {
+  if (!cluster || typeof cluster !== "object") return null;
   return {
     ...cluster,
     country:
@@ -240,6 +249,9 @@ export async function fetchClusterDetail(clusterId) {
       evidence_type: row.evidence_type,
       source_global_station_id: row.source_global_station_id,
       target_global_station_id: row.target_global_station_id,
+      category: row.category || "risk_conflict",
+      is_seed_rule: row.is_seed_rule === true,
+      seed_reasons: Array.isArray(row.seed_reasons) ? row.seed_reasons : [],
       status: row.status || "informational",
       score: row.score,
       raw_value: row.raw_value ?? null,
@@ -259,6 +271,8 @@ export async function fetchClusterDetail(clusterId) {
           informational_count: row.informational_count ?? 0,
           score: row.score ?? null,
           summary: row.summary || "",
+          categories: Array.isArray(row.categories) ? row.categories : [],
+          seed_reasons: Array.isArray(row.seed_reasons) ? row.seed_reasons : [],
           highlights: row.highlights || {},
         }))
       : [],
@@ -738,8 +752,20 @@ export function createMergeFromSelection(
 ) {
   const next = normalizeWorkspace(workspace);
   const candidateMap = buildCandidateMap(candidates);
+  const selectedMergeIds = new Set();
   const rawRefs = uniqueStrings(
-    Array.from(selectedRefs).filter((ref) => parseRef(ref).type === "raw"),
+    Array.from(selectedRefs).flatMap((ref) => {
+      const parsed = parseRef(ref);
+      if (parsed.type === "raw") {
+        return [ref];
+      }
+      if (parsed.type === "merge") {
+        selectedMergeIds.add(parsed.id);
+        const merge = next.merges.find((row) => row.entity_id === parsed.id);
+        return merge?.member_refs || [];
+      }
+      return [];
+    }),
   );
   if (rawRefs.length < 2) return next;
 
@@ -748,6 +774,9 @@ export function createMergeFromSelection(
     const candidateRight = candidateMap.get(parseRef(right).id) || {};
     return compareCandidateRank(candidateLeft, candidateRight);
   });
+  next.merges = next.merges.filter(
+    (merge) => !selectedMergeIds.has(merge.entity_id),
+  );
   const displayName = resolveDisplayNameForRef(
     orderedRawRefs[0],
     next,
@@ -904,6 +933,22 @@ export function removeMemberFromGroup(workspace, groupId, memberRef) {
       };
     })
     .filter((group) => group.member_refs.length >= 2);
+  return next;
+}
+
+export function removeMemberFromMerge(workspace, mergeId, memberRef) {
+  const next = normalizeWorkspace(workspace);
+  next.merges = next.merges
+    .map((merge) => {
+      if (merge.entity_id !== mergeId) return merge;
+      return {
+        ...merge,
+        member_refs: (merge.member_refs || []).filter(
+          (ref) => ref !== memberRef,
+        ),
+      };
+    })
+    .filter((merge) => (merge.member_refs || []).length >= 2);
   return next;
 }
 

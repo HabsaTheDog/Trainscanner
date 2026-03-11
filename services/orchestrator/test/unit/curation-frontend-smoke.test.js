@@ -38,9 +38,7 @@ test("curation frontend includes required component structure and runtime utilit
   // JSX has critical UI element IDs
   assert.match(pageJsx, /id="countryFilter"/);
   assert.match(pageJsx, /<option value="">All<\/option>/);
-  assert.match(pageJsx, /<option value="DE">DE<\/option>/);
-  assert.match(pageJsx, /<option value="AT">AT<\/option>/);
-  assert.match(pageJsx, /<option value="CH">CH<\/option>/);
+  assert.match(pageJsx, /\["DE","AT","CH","FR","IT","NL","BE","CZ","PL"\]/);
   assert.match(pageJsx, /id="statusFilter"/);
   assert.match(pageJsx, /id="contextualActionBar"/);
   assert.match(pageJsx, /id="mergeSelectedActionBtn"/);
@@ -57,11 +55,17 @@ test("curation frontend includes required component structure and runtime utilit
   assert.match(pageJsx, /id="saveStateIndicator"/);
   assert.match(pageJsx, /id="evidencePanel"/);
   assert.match(pageJsx, /id="historyPanel"/);
+  assert.match(pageJsx, /Seed Rules/);
+  assert.match(pageJsx, /Core Match/);
+  assert.match(pageJsx, /Network Context/);
+  assert.match(pageJsx, /Risk \/ Conflict/);
   assert.match(pageJsx, /formatEvidenceTypeLabel/);
   assert.match(pageJsx, /formatEvidenceStatusLabel/);
   assert.match(pageJsx, /function Badge/);
   assert.match(pageJsx, /function StatusPill/);
   assert.match(pageJsx, /function Tag/);
+  assert.match(pageJsx, /category==="core_match"/);
+  assert.match(pageJsx, /is_seed_rule===true/);
   assert.match(pageJsx, /type="checkbox"/);
   assert.match(pageJsx, /checked=\{selected\}/);
   assert.match(pageJsx, /data-station-id=\{item\.ref\}/);
@@ -92,6 +96,9 @@ test("curation frontend includes required component structure and runtime utilit
   assert.match(runtimeJs, /fetchClusterDetail/);
   assert.match(runtimeJs, /details/);
   assert.match(runtimeJs, /raw_value/);
+  assert.match(runtimeJs, /category/);
+  assert.match(runtimeJs, /is_seed_rule/);
+  assert.match(runtimeJs, /seed_reasons/);
   assert.match(runtimeJs, /pair_summaries/);
   assert.match(runtimeJs, /evidence_summary/);
   assert.match(runtimeJs, /createMergeFromSelection/);
@@ -106,7 +113,6 @@ test("curation frontend includes required component structure and runtime utilit
   assert.match(pageJsx, /useEffect/);
   assert.match(pageJsx, /useCallback/);
   assert.match(pageJsx, /bg-surface-0/);
-  assert.match(pageJsx, /animate-fade-in/);
   assert.match(pageJsx, /map\.setStyle\(nextStyle\)/);
   assert.match(pageJsx, /dispatch\(\{ type: "map_mode", mode: "default" \}\)/);
   assert.match(

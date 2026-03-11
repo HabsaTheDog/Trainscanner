@@ -62,6 +62,9 @@ test("global evidence type exposes status and raw values", () => {
   const evidenceType = schema.getType("GlobalEvidence");
   assert.ok(evidenceType, "GlobalEvidence should exist");
   const fields = evidenceType.getFields();
+  assert.ok(fields.category, "evidence should expose category");
+  assert.ok(fields.is_seed_rule, "evidence should expose is_seed_rule");
+  assert.ok(fields.seed_reasons, "evidence should expose seed_reasons");
   assert.ok(fields.status, "evidence should expose status");
   assert.ok(fields.raw_value, "evidence should expose raw_value");
   assert.ok(fields.details, "evidence should expose details");
@@ -77,6 +80,10 @@ test("cluster detail exposes workspace metadata and additive evidence summary fi
   assert.ok(fields.workspace, "detail should expose workspace JSON");
   assert.ok(fields.evidence_summary, "detail should expose evidence_summary");
   assert.ok(fields.pair_summaries, "detail should expose pair_summaries");
+  const pairType = schema.getType("GlobalPairSummary");
+  const pairFields = pairType.getFields();
+  assert.ok(pairFields.categories, "pair summary should expose categories");
+  assert.ok(pairFields.seed_reasons, "pair summary should expose seed_reasons");
 });
 
 test("globalClusters query returns connection metadata", () => {

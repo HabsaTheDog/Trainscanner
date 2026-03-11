@@ -133,6 +133,9 @@ const rootValue = {
         evidence_type: row.evidence_type,
         source_global_station_id: row.source_global_station_id,
         target_global_station_id: row.target_global_station_id,
+        category: row.category,
+        is_seed_rule: row.is_seed_rule,
+        seed_reasons: Array.isArray(row.seed_reasons) ? row.seed_reasons : [],
         status: row.status,
         raw_value: row.raw_value,
       })),
@@ -141,7 +144,13 @@ const rootValue = {
           ? detail.evidence_summary
           : {},
       pair_summaries: Array.isArray(detail.pair_summaries)
-        ? detail.pair_summaries
+        ? detail.pair_summaries.map((row) => ({
+            ...row,
+            categories: Array.isArray(row.categories) ? row.categories : [],
+            seed_reasons: Array.isArray(row.seed_reasons)
+              ? row.seed_reasons
+              : [],
+          }))
         : [],
       decisions: (detail.decisions || []).map((row) => ({
         ...row,

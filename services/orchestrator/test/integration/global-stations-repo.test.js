@@ -347,3 +347,202 @@ test(
     assert.equal(latestStopPoint.rows[0].display_name, "Platform Current");
   },
 );
+
+test(
+  "buildGlobalStations derives child stop place coordinates from child stop points and records provenance",
+  { skip: !shouldRun },
+  async () => {
+    const servicesRoot = path.resolve(__dirname, "../../..");
+    const repoRoot = path.resolve(servicesRoot, "..");
+    const dbName = `itest_global_station_coords_${Date.now()}`;
+    const dbEnv = createDbEnv(dbName);
+    let client;
+
+    await createDatabase(dbEnv);
+    test.after(async () => {
+      if (client) {
+        await client.end();
+      }
+      await dropDatabase(dbEnv);
+    });
+    await ensureBootstrapped(repoRoot, dbEnv);
+
+    client = createPostgisClient({
+      rootDir: repoRoot,
+      env: dbEnv,
+    });
+    await client.ensureReady();
+
+    const repo = createGlobalStationsRepo(client);
+    const sourceId = `integration_coords_${Date.now()}`;
+
+    const dataset = await client.runSql(
+      `
+      INSERT INTO provider_datasets (
+        source_id,
+        provider_slug,
+        country,
+        format,
+        snapshot_date,
+        ingestion_status
+      )
+      VALUES (
+        :'source_id',
+        'integration-provider',
+        'DE',
+        'netex',
+        DATE '2026-03-09',
+        'ingested'
+      )
+      RETURNING dataset_id
+      `,
+      { source_id: sourceId },
+    );
+
+    const datasetId = dataset.rows[0].dataset_id;
+
+    await client.runSql(
+      `
+      INSERT INTO raw_provider_stop_places (
+        stop_place_id,
+        dataset_id,
+        source_id,
+        provider_stop_place_ref,
+        country,
+        stop_name,
+        latitude,
+        longitude,
+        parent_stop_place_ref,
+        topographic_place_ref,
+        hard_id,
+        raw_payload,
+        updated_at
+      )
+      VALUES
+        (
+          'parent_place_' || :'source_id',
+          :'dataset_id',
+          :'source_id',
+          'parent_place',
+          'DE',
+          'Bruchhausen',
+          51.302085,
+          7.930336,
+          NULL,
+          'topo-main',
+          'de:05958:32194',
+          '{}'::jsonb,
+          TIMESTAMPTZ '2026-03-09 09:00:00+00'
+        ),
+        (
+          'child_place_' || :'source_id',
+          :'dataset_id',
+          :'source_id',
+          'child_place',
+          'DE',
+          'Bruchhausen',
+          NULL,
+          NULL,
+          'parent_place',
+          'topo-main',
+          'de:05958:32194:0',
+          '{}'::jsonb,
+          TIMESTAMPTZ '2026-03-09 09:05:00+00'
+        )
+      `,
+      {
+        source_id: sourceId,
+        dataset_id: datasetId,
+      },
+    );
+
+    await client.runSql(
+      `
+      INSERT INTO raw_provider_stop_points (
+        stop_point_id,
+        dataset_id,
+        source_id,
+        provider_stop_point_ref,
+        provider_stop_place_ref,
+        stop_place_id,
+        country,
+        stop_name,
+        latitude,
+        longitude,
+        topographic_place_ref,
+        raw_payload,
+        updated_at
+      )
+      VALUES
+        (
+          'child_point_1_' || :'source_id',
+          :'dataset_id',
+          :'source_id',
+          'child_point_1',
+          'child_place',
+          'child_place_' || :'source_id',
+          'DE',
+          'Bruchhausen',
+          51.302152,
+          7.930273,
+          'topo-main',
+          '{}'::jsonb,
+          TIMESTAMPTZ '2026-03-09 09:10:00+00'
+        ),
+        (
+          'child_point_2_' || :'source_id',
+          :'dataset_id',
+          :'source_id',
+          'child_point_2',
+          'child_place',
+          'child_place_' || :'source_id',
+          'DE',
+          'Bruchhausen',
+          51.302017,
+          7.930426,
+          'topo-main',
+          '{}'::jsonb,
+          TIMESTAMPTZ '2026-03-09 09:11:00+00'
+        )
+      `,
+      {
+        source_id: sourceId,
+        dataset_id: datasetId,
+      },
+    );
+
+    const summary = await repo.buildGlobalStations({
+      country: "DE",
+      asOf: "2026-03-09",
+      sourceId,
+    });
+
+    assert.equal(summary.coordSourceChildStopPoints, 1);
+
+    const childStation = await client.runSql(
+      `
+      SELECT
+        gs.latitude,
+        gs.longitude,
+        gs.metadata ->> 'coord_source' AS coord_source,
+        gs.metadata ->> 'coord_confidence' AS coord_confidence,
+        gs.metadata ->> 'hierarchy_role' AS hierarchy_role,
+        gs.metadata -> 'coord_validation' -> 'warning_codes' AS warning_codes
+      FROM provider_global_station_mappings m
+      JOIN global_stations gs
+        ON gs.global_station_id = m.global_station_id
+      WHERE m.source_id = :'source_id'
+        AND m.provider_stop_place_ref = 'child_place'
+        AND m.is_active = true
+      `,
+      { source_id: sourceId },
+    );
+
+    assert.equal(childStation.rows.length, 1);
+    assert.ok(Number(childStation.rows[0].latitude) > 0);
+    assert.ok(Number(childStation.rows[0].longitude) > 0);
+    assert.equal(childStation.rows[0].coord_source, "child_stop_points");
+    assert.equal(childStation.rows[0].coord_confidence, "high");
+    assert.equal(childStation.rows[0].hierarchy_role, "child");
+  },
+);

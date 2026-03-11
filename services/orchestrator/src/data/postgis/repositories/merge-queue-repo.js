@@ -1217,7 +1217,8 @@ FROM (
     pm.token_overlap,
     jsonb_build_object(
       'left', pm.source_display_name,
-      'right', pm.target_display_name
+      'right', pm.target_display_name,
+      'seed_reasons', to_jsonb(pm.seed_reasons)
     ) AS details
   FROM _cluster_pair_metrics pm
 
@@ -1245,7 +1246,8 @@ FROM (
     ROUND(COALESCE(pm.distance_meters, 0)::numeric, 2) AS raw_value,
     jsonb_build_object(
       'distance_meters', pm.distance_meters,
-      'distance_status', pm.distance_status
+      'distance_status', pm.distance_status,
+      'seed_reasons', to_jsonb(pm.seed_reasons)
     ) AS details
   FROM _cluster_pair_metrics pm
 
@@ -1268,7 +1270,8 @@ FROM (
     END AS score,
     pm.coordinate_points_present::numeric AS raw_value,
     jsonb_build_object(
-      'coordinate_points_present', pm.coordinate_points_present
+      'coordinate_points_present', pm.coordinate_points_present,
+      'seed_reasons', to_jsonb(pm.seed_reasons)
     ) AS details
   FROM _cluster_pair_metrics pm
 
@@ -1290,7 +1293,8 @@ FROM (
     END AS score,
     pm.provider_overlap_count::numeric AS raw_value,
     jsonb_build_object(
-      'shared_provider_source_count', pm.provider_overlap_count
+      'shared_provider_source_count', pm.provider_overlap_count,
+      'seed_reasons', to_jsonb(pm.seed_reasons)
     ) AS details
   FROM _cluster_pair_metrics pm
 
@@ -1308,7 +1312,8 @@ FROM (
     LEAST(1.0::numeric, (pm.route_overlap_count::numeric / 3.0::numeric)) AS score,
     pm.route_overlap_count::numeric AS raw_value,
     jsonb_build_object(
-      'shared_route_count', pm.route_overlap_count
+      'shared_route_count', pm.route_overlap_count,
+      'seed_reasons', to_jsonb(pm.seed_reasons)
     ) AS details
   FROM _cluster_pair_metrics pm
 
@@ -1326,7 +1331,8 @@ FROM (
     LEAST(1.0::numeric, (pm.adjacent_overlap_count::numeric / 3.0::numeric)) AS score,
     pm.adjacent_overlap_count::numeric AS raw_value,
     jsonb_build_object(
-      'shared_adjacent_station_count', pm.adjacent_overlap_count
+      'shared_adjacent_station_count', pm.adjacent_overlap_count,
+      'seed_reasons', to_jsonb(pm.seed_reasons)
     ) AS details
   FROM _cluster_pair_metrics pm
 
@@ -1353,7 +1359,8 @@ FROM (
       ELSE NULL::numeric
     END AS raw_value,
     jsonb_build_object(
-      'same_country', pm.same_country
+      'same_country', pm.same_country,
+      'seed_reasons', to_jsonb(pm.seed_reasons)
     ) AS details
   FROM _cluster_pair_metrics pm
 
@@ -1375,7 +1382,8 @@ FROM (
     pm.generic_name_frequency::numeric AS raw_value,
     jsonb_build_object(
       'generic_name_pair', pm.generic_name_pair,
-      'name_frequency', pm.generic_name_frequency
+      'name_frequency', pm.generic_name_frequency,
+      'seed_reasons', to_jsonb(pm.seed_reasons)
     ) AS details
   FROM _cluster_pair_metrics pm
 ) rows;

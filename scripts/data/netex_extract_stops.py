@@ -72,6 +72,10 @@ def child_ref(elem: etree._Element, name: str) -> str | None:
     return None
 
 
+def topographic_place_ref(elem: etree._Element) -> str | None:
+    return child_ref(elem, "TopographicPlaceRef")
+
+
 def _parse_coordinate_value(raw: str | None) -> float | None:
     text = clean_text(raw)
     if not text:
@@ -367,6 +371,7 @@ def _write_stop_place_row(
     public_code: str | None,
     private_code: str | None,
     hard_id: str | None,
+    topographic_ref: str | None,
 ) -> None:
     payload = {
         "xmlEntry": entry,
@@ -391,6 +396,7 @@ def _write_stop_place_row(
             "latitude": "" if lat is None else f"{lat:.8f}",
             "longitude": "" if lon is None else f"{lon:.8f}",
             "grid_id": compute_grid_id(args.country, lat, lon),
+            "topographic_place_ref": topographic_ref or "",
             "public_code": public_code or "",
             "private_code": private_code or "",
             "hard_id": hard_id or "",
@@ -459,6 +465,7 @@ def _write_stop_point_row(
     public_code: str | None,
     private_code: str | None,
     hard_id: str | None,
+    topographic_ref: str | None,
 ) -> None:
     payload = {
         "xmlEntry": entry,
@@ -483,6 +490,7 @@ def _write_stop_point_row(
             "latitude": "" if lat is None else f"{lat:.8f}",
             "longitude": "" if lon is None else f"{lon:.8f}",
             "grid_id": compute_grid_id(args.country, lat, lon),
+            "topographic_place_ref": topographic_ref or "",
             "public_code": public_code or "",
             "private_code": private_code or "",
             "hard_id": hard_id or "",
@@ -524,6 +532,7 @@ def _process_stop_place(
     public_code = first_direct_child_text(elem, {"PublicCode"})
     private_code = first_direct_child_text(elem, {"PrivateCode"})
     hard_id = _pick_hard_id(public_code, private_code, key_values(elem))
+    topo_ref = topographic_place_ref(elem)
     _write_stop_place_row(
         writer,
         args,
@@ -536,6 +545,7 @@ def _process_stop_place(
         public_code,
         private_code,
         hard_id,
+        topo_ref,
     )
     stop_place_lookup[source_stop_id] = {
         "stop_name": stop_name,
@@ -602,6 +612,7 @@ def _process_stop_point(
     public_code = first_direct_child_text(elem, {"PublicCode", "PlatformCode"})
     private_code = first_direct_child_text(elem, {"PrivateCode", "Track"})
     hard_id = _pick_hard_id(public_code, private_code, key_values(elem))
+    topo_ref = topographic_place_ref(elem)
 
     _write_stop_point_row(
         writer,
@@ -616,6 +627,7 @@ def _process_stop_point(
         public_code,
         private_code,
         hard_id,
+        topo_ref,
     )
     seen_stop_point_ids.add(source_stop_point_id)
     summary.stop_points_written += 1
@@ -834,6 +846,7 @@ def main() -> int:
                 "latitude",
                 "longitude",
                 "grid_id",
+                "topographic_place_ref",
                 "public_code",
                 "private_code",
                 "hard_id",

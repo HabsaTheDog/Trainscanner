@@ -58,6 +58,7 @@ function createNetexStopsRepo(client) {
           latitude,
           longitude,
           parent_stop_place_ref,
+          topographic_place_ref,
           public_code,
           private_code,
           hard_id,
@@ -80,6 +81,7 @@ function createNetexStopsRepo(client) {
           stop_name,
           latitude,
           longitude,
+          topographic_place_ref,
           platform_code,
           track_code,
           raw_payload

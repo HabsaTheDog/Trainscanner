@@ -12,7 +12,10 @@ const {
   normalizeGlobalMergeDecision,
   normalizeIsoCountry,
 } = require("./cluster-decision-contracts");
-const { summarizeEvidenceRows } = require("./evidence-utils");
+const {
+  classifyEvidenceRow,
+  summarizeEvidenceRows,
+} = require("./evidence-utils");
 const {
   createEmptyWorkspace,
   expandRefMembers,
@@ -1485,22 +1488,29 @@ async function getGlobalClusterDetail(clusterId) {
   ]);
 
   const normalizedCandidates = candidates.map(normalizeCandidateMetadata);
-  const normalizedEvidence = evidence.map((row) => ({
-    ...row,
-    status: String(row.status || "informational").trim() || "informational",
-    raw_value:
-      row.raw_value === null || row.raw_value === undefined
-        ? null
-        : Number(row.raw_value),
-    score:
-      row.score === null || row.score === undefined ? null : Number(row.score),
-    details:
-      row.details &&
-      typeof row.details === "object" &&
-      !Array.isArray(row.details)
-        ? row.details
-        : {},
-  }));
+  const normalizedEvidence = evidence
+    .map((row) => ({
+      ...row,
+      status: String(row.status || "informational").trim() || "informational",
+      raw_value:
+        row.raw_value === null || row.raw_value === undefined
+          ? null
+          : Number(row.raw_value),
+      score:
+        row.score === null || row.score === undefined
+          ? null
+          : Number(row.score),
+      details:
+        row.details &&
+        typeof row.details === "object" &&
+        !Array.isArray(row.details)
+          ? row.details
+          : {},
+    }))
+    .map((row) => ({
+      ...row,
+      ...classifyEvidenceRow(row),
+    }));
   const { evidenceSummary, pairSummaries } =
     summarizeEvidenceRows(normalizedEvidence);
 
