@@ -8,11 +8,11 @@ RUN addgroup --system app \
 
 WORKDIR /app
 
-COPY --chown=app:app requirements.txt ./requirements.txt
+COPY --chown=app:app --chmod=0444 requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY --chown=app:app main.py ./main.py
-COPY --chown=app:app pyproject.toml ./pyproject.toml
+COPY --chown=app:app --chmod=0444 main.py ./main.py
+COPY --chown=app:app --chmod=0444 pyproject.toml ./pyproject.toml
 
 USER app
 

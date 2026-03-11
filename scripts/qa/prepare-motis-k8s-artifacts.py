@@ -1054,6 +1054,28 @@ def _consume_macro_stop_time_row(state: MacroTripState, row: dict[str, str]) -> 
     state.stop_count += 1
 
 
+def _advance_macro_query_state(
+    trip_id: str,
+    current_state: MacroTripState | None,
+    queries: list[dict[str, object]],
+    seen_pairs: set[tuple[str, str]],
+    target_date: str,
+    active_trip_ids: set[str],
+) -> tuple[MacroTripState, bool]:
+    if current_state is None or trip_id == current_state.trip_id:
+        return (
+            current_state or _create_macro_trip_state(trip_id, active_trip_ids),
+            False,
+        )
+
+    appended = _append_macro_query_from_state(
+        queries, seen_pairs, target_date, current_state
+    )
+    next_state = _create_macro_trip_state(trip_id, active_trip_ids)
+    should_stop = appended and len(queries) >= 2
+    return next_state, should_stop
+
+
 def _build_macro_queries_from_streams(
     zf: zipfile.ZipFile,
     calendar_rows: list[dict[str, str]],
@@ -1082,14 +1104,16 @@ def _build_macro_queries_from_streams(
             trip_id = _row_value(row, "trip_id")
             if not trip_id:
                 continue
-            if current_state is None or trip_id != current_state.trip_id:
-                if current_state is not None:
-                    appended = _append_macro_query_from_state(
-                        queries, seen_pairs, target_date, current_state
-                    )
-                    if appended and len(queries) >= 2:
-                        break
-                current_state = _create_macro_trip_state(trip_id, active_trip_ids)
+            current_state, should_stop = _advance_macro_query_state(
+                trip_id,
+                current_state,
+                queries,
+                seen_pairs,
+                target_date,
+                active_trip_ids,
+            )
+            if should_stop:
+                break
             if not current_state.is_active:
                 continue
             _consume_macro_stop_time_row(current_state, row)

@@ -17,6 +17,8 @@ async function runCli() {
   return 0;
 }
 
-void (async () => {
+async function main() {
   process.exitCode = await runCli();
-})();
+}
+
+void main();

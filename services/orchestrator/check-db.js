@@ -19,11 +19,19 @@ async function main() {
   await client.end();
 }
 
-void (async () => {
+async function runCli() {
   try {
     await main();
+    return 0;
   } catch (error) {
     console.error(error);
-    process.exitCode = 1;
+    return 1;
   }
-})();
+}
+
+async function start() {
+  const exitCode = await runCli();
+  process.exitCode = exitCode;
+}
+
+void start();

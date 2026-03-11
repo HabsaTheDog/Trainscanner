@@ -17,6 +17,7 @@ FETCH_PROGRESS_DOWNLOADED_BYTES=0
 FETCH_PROGRESS_TOTAL_BYTES=0
 VERSION_HINT_LONG_PATTERN='[0-9]{12}'
 VERSION_HINT_SHORT_PATTERN='[0-9]{8}'
+DELFI_NETEX_FILE_PATTERN="^${VERSION_HINT_SHORT_PATTERN}_fahrplaene_gesamtdeutschland\\.zip$"
 
 cleanup_temp_files() {
   local f
@@ -374,9 +375,9 @@ resolve_de_delfi_netex() {
     [[ -n "$fallback_url" ]] || fallback_url="$abs_u"
 
     name="${abs_u##*/}"
-    ts="$(printf '%s' "$name" | grep -oE '[0-9]{12}' | head -1 || true)"
+    ts="$(printf '%s' "$name" | grep -oE "$VERSION_HINT_LONG_PATTERN" | head -1 || true)"
     if [[ -z "$ts" ]]; then
-      ts="$(printf '%s' "$name" | grep -oE '[0-9]{8}' | head -1 || true)"
+      ts="$(printf '%s' "$name" | grep -oE "$VERSION_HINT_SHORT_PATTERN" | head -1 || true)"
       [[ -n "$ts" ]] && ts="${ts}0000"
     fi
     [[ -n "$ts" ]] || continue
@@ -455,9 +456,9 @@ resolve_ch_netex() {
   local u name ts
   for u in "${urls[@]}"; do
     name="${u##*/}"
-    ts="$(printf '%s' "$name" | grep -oE '[0-9]{12}' | head -1 || true)"
+    ts="$(printf '%s' "$name" | grep -oE "$VERSION_HINT_LONG_PATTERN" | head -1 || true)"
     if [[ -z "$ts" ]]; then
-      ts="$(printf '%s' "$name" | grep -oE '[0-9]{8}' | head -1 || true)"
+      ts="$(printf '%s' "$name" | grep -oE "$VERSION_HINT_SHORT_PATTERN" | head -1 || true)"
       [[ -n "$ts" ]] && ts="${ts}0000"
     fi
     [[ -n "$ts" ]] || continue
@@ -494,17 +495,15 @@ resolve_generic_manual_redirect() {
   fi
 
   local best_url="" best_ts="0" fallback_url="" u abs_u name ts
-  local ts_12_pattern='[0-9]{12}'
-  local ts_8_pattern='[0-9]{8}'
   for u in "${raw_urls[@]}"; do
     abs_u="$(normalize_url "$endpoint" "$u")"
     [[ -n "$fallback_url" ]] || fallback_url="$abs_u"
     name="${abs_u##*/}"
     name="${name%%\?*}"
 
-    ts="$(printf '%s' "$name" | grep -oE "$ts_12_pattern" | head -1 || true)"
+    ts="$(printf '%s' "$name" | grep -oE "$VERSION_HINT_LONG_PATTERN" | head -1 || true)"
     if [[ -z "$ts" ]]; then
-      ts="$(printf '%s' "$name" | grep -oE "$ts_8_pattern" | head -1 || true)"
+      ts="$(printf '%s' "$name" | grep -oE "$VERSION_HINT_SHORT_PATTERN" | head -1 || true)"
       [[ -n "$ts" ]] && ts="${ts}0000"
     fi
     [[ -n "$ts" ]] || continue
@@ -580,7 +579,7 @@ check_format_match() {
       fi
       # DELFI's official NeTEx export uses a generic zip name without "netex".
       if [[ "$source_id" == "de_delfi_sollfahrplandaten_netex" ]] \
-        && printf '%s\n' "$file_name" | grep -Eiq '^[0-9]{8}_fahrplaene_gesamtdeutschland\.zip$'; then
+        && printf '%s\n' "$file_name" | grep -Eiq "$DELFI_NETEX_FILE_PATTERN"; then
         return 0
       fi
       if command -v unzip >/dev/null 2>&1 \

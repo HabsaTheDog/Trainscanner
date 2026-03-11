@@ -210,9 +210,12 @@ def _run_command(cmd, *, env=None, cwd=None):
     )
 
 
-def _parse_psql_csv(content: str):
+def _parse_psql_csv(content: str) -> list[dict[str, str]]:
     reader = csv.DictReader(io.StringIO(content))
-    return list(reader)
+    return [
+        {str(key): str(value or "") for key, value in row.items() if key is not None}
+        for row in reader
+    ]
 
 
 def _build_psql_cmd(
@@ -355,7 +358,7 @@ def _run_psql_with_safe_parallel_retry(query: str, *, csv_mode: bool) -> str:
         return str(retry_result.stdout or "")
 
 
-def run_psql_csv(query: str):
+def run_psql_csv(query: str) -> list[dict[str, str]]:
     return _parse_psql_csv(_run_psql_with_safe_parallel_retry(query, csv_mode=True))
 
 
@@ -623,6 +626,28 @@ def _resolve_benchmark_stop_reason(
     return ""
 
 
+def _fetch_trip_batch(
+    options: ExportBatchOptions,
+    source_id: str,
+    after_trip: str,
+    profiling: dict,
+) -> tuple[list[dict[str, str]], float]:
+    query = _build_trip_query(options, source_id, after_trip)
+    query_started = time.perf_counter()
+    rows = run_psql_csv(query)
+    query_duration_ms = (time.perf_counter() - query_started) * 1000.0
+    _record_batch_profile(profiling, rows, query_duration_ms)
+    return rows, query_duration_ms
+
+
+def _extract_batch_trip_ids(rows) -> set[str]:
+    return {
+        str(row.get("trip_fact_id") or "").strip()
+        for row in rows
+        if str(row.get("trip_fact_id") or "").strip()
+    }
+
+
 def iter_trip_batches(
     *,
     options: ExportBatchOptions,
@@ -650,11 +675,12 @@ def iter_trip_batches(
         )
         after_trip = ""
         while True:
-            query = _build_trip_query(options, sid, after_trip)
-            query_started = time.perf_counter()
-            rows = run_psql_csv(query)
-            query_duration_ms = (time.perf_counter() - query_started) * 1000.0
-            _record_batch_profile(profiling, rows, query_duration_ms)
+            rows, query_duration_ms = _fetch_trip_batch(
+                options,
+                sid,
+                after_trip,
+                profiling,
+            )
             if not rows:
                 log_progress(
                     progress_state,
@@ -663,11 +689,7 @@ def iter_trip_batches(
                 )
                 break
             total_batches += 1
-            unique_trip_ids = {
-                str(row.get("trip_fact_id") or "").strip()
-                for row in rows
-                if str(row.get("trip_fact_id") or "").strip()
-            }
+            unique_trip_ids = _extract_batch_trip_ids(rows)
             total_trips += len(unique_trip_ids)
             log_progress(
                 progress_state,
@@ -994,46 +1016,370 @@ def _build_batch_perf(profiling: dict) -> dict:
     }
 
 
-def export_from_db_batched(options: ExportBatchOptions):
-    run_started = time.perf_counter()
-    profiling = _create_profiling_state()
-    progress_state = _create_progress_state(run_started, options.progress_interval_sec)
-    log_progress(
-        progress_state,
-        "Starting export "
-        + f"profile='{options.profile}' as-of='{options.as_of}' tier='{options.requested_tier}' query-mode='{options.query_mode}' "
-        + f"batch-size='{options.batch_size_trips}'",
-        force=True,
-    )
+def _build_batched_stop_rows(stops) -> list[list[str]]:
+    stop_rows = []
+    for row in sorted(stops, key=lambda item: str(item.get("stop_id") or "")):
+        stop_id = str(row.get("stop_id") or "").strip()
+        if not stop_id:
+            continue
+        stop_rows.append(
+            [
+                stop_id,
+                str(row.get("stop_name") or stop_id).strip() or stop_id,
+                str(row.get("stop_lat") or "").strip(),
+                str(row.get("stop_lon") or "").strip(),
+                str(row.get("location_type") or "").strip(),
+                str(row.get("parent_station") or "").strip(),
+            ]
+        )
+    return stop_rows
 
-    static_started = time.perf_counter()
-    stops, transfers = load_rows_from_db_static(
-        options.as_of,
-        options.country,
-        options.source_id,
-    )
-    profiling["staticLoadMs"] = (time.perf_counter() - static_started) * 1000.0
-    if not stops:
-        fail("export scope produced no stops")
-    log_progress(
-        progress_state,
-        f"Loaded static scope stops={len(stops)} transfers={len(transfers)}",
-        force=True,
-    )
 
-    sql_plan_summary = _collect_sql_plan_summary(options, profiling)
+def _build_transfer_rows(transfers) -> list[list[str]]:
+    transfers_rows = []
+    for row in transfers:
+        from_id = str(row.get("from_stop_id") or "").strip()
+        to_id = str(row.get("to_stop_id") or "").strip()
+        if not from_id or not to_id or from_id == to_id:
+            continue
+        transfers_rows.append(
+            [
+                from_id,
+                to_id,
+                str(row.get("transfer_type") or "2"),
+                str(int(row.get("min_transfer_seconds") or 0)),
+            ]
+        )
+    transfers_rows.sort(key=lambda item: (item[0], item[1], int(item[3])))
+    return transfers_rows
 
-    countries = _resolve_scope_countries(stops)
-    agency_rows = _build_agency_rows(countries, options.agency_url)
-    benchmark_enabled = any(
-        value > 0
-        for value in [
-            options.benchmark_max_sources,
-            options.benchmark_max_batches,
-            options.benchmark_max_trips,
+
+def _write_static_export_files(
+    *,
+    agency_path: Path,
+    stops_path: Path,
+    transfers_path: Path,
+    agency_rows,
+    stop_rows,
+    transfers_rows,
+    profiling: dict,
+) -> None:
+    csv_started = time.perf_counter()
+    write_csv_file(
+        agency_path,
+        [
+            "agency_id",
+            "agency_name",
+            "agency_url",
+            "agency_timezone",
+            "agency_lang",
+        ],
+        agency_rows,
+    )
+    write_csv_file(
+        stops_path,
+        [
+            "stop_id",
+            "stop_name",
+            "stop_lat",
+            "stop_lon",
+            "location_type",
+            "parent_station",
+        ],
+        stop_rows,
+    )
+    profiling["csvWriteMs"] += (time.perf_counter() - csv_started) * 1000.0
+    if not transfers_rows:
+        return
+    transfers_started = time.perf_counter()
+    write_csv_file(
+        transfers_path,
+        ["from_stop_id", "to_stop_id", "transfer_type", "min_transfer_time"],
+        transfers_rows,
+    )
+    profiling["csvWriteMs"] += (time.perf_counter() - transfers_started) * 1000.0
+
+
+def _create_export_sqlite_db(db: sqlite3.Connection) -> None:
+    db.execute("PRAGMA journal_mode=OFF")
+    db.execute("PRAGMA synchronous=OFF")
+    db.execute("PRAGMA temp_store=MEMORY")
+    db.execute(
+        "CREATE TABLE routes (route_id TEXT PRIMARY KEY, agency_id TEXT, route_short_name TEXT, route_long_name TEXT, route_type TEXT, route_desc TEXT)"
+    )
+    db.execute("CREATE TABLE service_ids (service_id TEXT PRIMARY KEY)")
+
+
+def _create_batched_csv_writers(trips_handle, stop_times_handle):
+    trips_writer = csv.writer(trips_handle, lineterminator="\n")
+    stop_times_writer = csv.writer(stop_times_handle, lineterminator="\n")
+    trips_writer.writerow(["route_id", "service_id", "trip_id", "trip_headsign"])
+    stop_times_writer.writerow(
+        [
+            "trip_id",
+            "arrival_time",
+            "departure_time",
+            "stop_id",
+            "stop_sequence",
         ]
     )
+    return trips_writer, stop_times_writer
 
+
+def _flush_batch_trip_rows(
+    batch_rows,
+    *,
+    options: ExportBatchOptions,
+    countries: list[str],
+    stop_country_by_id,
+    trips_writer,
+    stop_times_writer,
+    counters: dict,
+) -> tuple[dict[str, list[str]], set[str]]:
+    batch_routes = {}
+    batch_services = set()
+    current_trip_id = ""
+    current_trip_rows = []
+    for row in batch_rows:
+        trip_id = str(row.get("trip_fact_id") or "").strip()
+        if not trip_id:
+            continue
+        if current_trip_id and trip_id != current_trip_id:
+            _flush_trip_rows_for_batch(
+                current_trip_rows,
+                options=options,
+                countries=countries,
+                stop_country_by_id=stop_country_by_id,
+                batch_routes=batch_routes,
+                batch_services=batch_services,
+                trips_writer=trips_writer,
+                stop_times_writer=stop_times_writer,
+                counters=counters,
+            )
+            current_trip_rows = []
+        current_trip_id = trip_id
+        current_trip_rows.append(row)
+    if current_trip_rows:
+        _flush_trip_rows_for_batch(
+            current_trip_rows,
+            options=options,
+            countries=countries,
+            stop_country_by_id=stop_country_by_id,
+            batch_routes=batch_routes,
+            batch_services=batch_services,
+            trips_writer=trips_writer,
+            stop_times_writer=stop_times_writer,
+            counters=counters,
+        )
+    return batch_routes, batch_services
+
+
+def _persist_batch_sqlite_rows(
+    db: sqlite3.Connection,
+    batch_routes,
+    batch_services: set[str],
+) -> None:
+    if batch_routes:
+        db.executemany(
+            "INSERT OR REPLACE INTO routes (route_id, agency_id, route_short_name, route_long_name, route_type, route_desc) VALUES (?, ?, ?, ?, ?, ?)",
+            [batch_routes[route_id] for route_id in sorted(batch_routes.keys())],
+        )
+    if batch_services:
+        db.executemany(
+            "INSERT OR IGNORE INTO service_ids (service_id) VALUES (?)",
+            [(service_id,) for service_id in sorted(batch_services)],
+        )
+    db.commit()
+
+
+def _log_batch_apply_progress(
+    progress_state: dict,
+    run_started: float,
+    batch_count: int,
+    batch_source_id: str,
+    batch_rows,
+    counters: dict,
+) -> None:
+    elapsed_ms = (time.perf_counter() - run_started) * 1000.0
+    trips_per_minute = (
+        (counters["trip_count"] * 60000.0 / elapsed_ms) if elapsed_ms > 0 else 0.0
+    )
+    log_progress(
+        progress_state,
+        "Applied "
+        + f"batch={batch_count} source='{batch_source_id}' rows={len(batch_rows)} "
+        + f"tripsWritten={counters['trip_count']} stopTimesWritten={counters['stop_time_count']} "
+        + f"tripsPerMinute={trips_per_minute:.1f}",
+    )
+
+
+def _finalize_batched_route_files(
+    db: sqlite3.Connection,
+    routes_path: Path,
+    calendar_path: Path,
+    profiling: dict,
+) -> tuple[list[tuple], list[list[str]]]:
+    routes_csv_started = time.perf_counter()
+    route_rows = list(
+        db.execute(
+            "SELECT route_id, agency_id, route_short_name, route_long_name, route_type, route_desc FROM routes ORDER BY route_id"
+        )
+    )
+    write_csv_file(
+        routes_path,
+        [
+            "route_id",
+            "agency_id",
+            "route_short_name",
+            "route_long_name",
+            "route_type",
+            "route_desc",
+        ],
+        route_rows,
+    )
+    profiling["csvWriteMs"] += (time.perf_counter() - routes_csv_started) * 1000.0
+
+    calendar_started = time.perf_counter()
+    calendar_rows = [
+        [
+            service_id,
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "20240101",
+            "20351231",
+        ]
+        for (service_id,) in db.execute(
+            "SELECT service_id FROM service_ids ORDER BY service_id"
+        )
+    ]
+    write_csv_file(
+        calendar_path,
+        [
+            "service_id",
+            "monday",
+            "tuesday",
+            "wednesday",
+            "thursday",
+            "friday",
+            "saturday",
+            "sunday",
+            "start_date",
+            "end_date",
+        ],
+        calendar_rows,
+    )
+    profiling["csvWriteMs"] += (time.perf_counter() - calendar_started) * 1000.0
+    return route_rows, calendar_rows
+
+
+def _run_batched_export_sqlite_pass(
+    *,
+    options: ExportBatchOptions,
+    profiling: dict,
+    progress_state: dict,
+    run_started: float,
+    sqlite_path: Path,
+    trips_path: Path,
+    stop_times_path: Path,
+    routes_path: Path,
+    calendar_path: Path,
+    countries: list[str],
+    stops,
+) -> dict:
+    batch_count = 0
+    source_batches = set()
+    counters = {"trip_count": 0, "stop_time_count": 0}
+    stop_country_by_id = {
+        str(row.get("stop_id") or "").strip(): str(row.get("country") or "").strip()
+        for row in stops
+        if str(row.get("stop_id") or "").strip()
+    }
+
+    with (
+        sqlite3.connect(str(sqlite_path)) as db,
+        trips_path.open("w", encoding="utf-8", newline="") as trips_handle,
+        stop_times_path.open("w", encoding="utf-8", newline="") as stop_times_handle,
+    ):
+        _create_export_sqlite_db(db)
+        trips_writer, stop_times_writer = _create_batched_csv_writers(
+            trips_handle,
+            stop_times_handle,
+        )
+
+        for batch_source_id, batch_rows, seen_batches, _ in iter_trip_batches(
+            options=options,
+            profiling=profiling,
+            progress_state=progress_state,
+        ):
+            batch_count = seen_batches
+            source_batches.add(batch_source_id)
+
+            process_started = time.perf_counter()
+            batch_routes, batch_services = _flush_batch_trip_rows(
+                batch_rows,
+                options=options,
+                countries=countries,
+                stop_country_by_id=stop_country_by_id,
+                trips_writer=trips_writer,
+                stop_times_writer=stop_times_writer,
+                counters=counters,
+            )
+            profiling["pythonProcessMs"] += (
+                time.perf_counter() - process_started
+            ) * 1000.0
+
+            sqlite_started = time.perf_counter()
+            _persist_batch_sqlite_rows(db, batch_routes, batch_services)
+            profiling["sqliteWriteMs"] += (
+                time.perf_counter() - sqlite_started
+            ) * 1000.0
+            _log_batch_apply_progress(
+                progress_state,
+                run_started,
+                batch_count,
+                batch_source_id,
+                batch_rows,
+                counters,
+            )
+
+        if counters["stop_time_count"] == 0:
+            fail(
+                "export scope produced no timetable rows after stop-point resolution; "
+                "check provider_global_stop_point_mappings coverage for the selected source scope"
+            )
+
+        route_rows, calendar_rows = _finalize_batched_route_files(
+            db,
+            routes_path,
+            calendar_path,
+            profiling,
+        )
+
+    return {
+        "route_rows": route_rows,
+        "calendar_rows": calendar_rows,
+        "batch_count": batch_count,
+        "source_batches": source_batches,
+        "counters": counters,
+    }
+
+
+def _write_batched_export_artifacts(
+    *,
+    options: ExportBatchOptions,
+    profiling: dict,
+    progress_state: dict,
+    run_started: float,
+    stops,
+    transfers,
+    countries: list[str],
+    agency_rows,
+) -> dict:
     with tempfile.TemporaryDirectory(prefix="export-gtfs-batch-") as tmp_dir_raw:
         tmp_dir = Path(tmp_dir_raw)
         agency_path = tmp_dir / AGENCY_FILE
@@ -1045,263 +1391,30 @@ def export_from_db_batched(options: ExportBatchOptions):
         transfers_path = tmp_dir / TRANSFERS_FILE
         sqlite_path = tmp_dir / "gtfs-build.sqlite3"
 
-        stop_rows = []
-        for row in sorted(stops, key=lambda r: str(r.get("stop_id") or "")):
-            stop_id = str(row.get("stop_id") or "").strip()
-            if not stop_id:
-                continue
-            stop_rows.append(
-                [
-                    stop_id,
-                    str(row.get("stop_name") or stop_id).strip() or stop_id,
-                    str(row.get("stop_lat") or "").strip(),
-                    str(row.get("stop_lon") or "").strip(),
-                    str(row.get("location_type") or "").strip(),
-                    str(row.get("parent_station") or "").strip(),
-                ]
-            )
-
-        csv_started = time.perf_counter()
-        write_csv_file(
-            agency_path,
-            [
-                "agency_id",
-                "agency_name",
-                "agency_url",
-                "agency_timezone",
-                "agency_lang",
-            ],
-            agency_rows,
+        stop_rows = _build_batched_stop_rows(stops)
+        transfers_rows = _build_transfer_rows(transfers)
+        _write_static_export_files(
+            agency_path=agency_path,
+            stops_path=stops_path,
+            transfers_path=transfers_path,
+            agency_rows=agency_rows,
+            stop_rows=stop_rows,
+            transfers_rows=transfers_rows,
+            profiling=profiling,
         )
-        write_csv_file(
-            stops_path,
-            [
-                "stop_id",
-                "stop_name",
-                "stop_lat",
-                "stop_lon",
-                "location_type",
-                "parent_station",
-            ],
-            stop_rows,
+        sqlite_results = _run_batched_export_sqlite_pass(
+            options=options,
+            profiling=profiling,
+            progress_state=progress_state,
+            run_started=run_started,
+            sqlite_path=sqlite_path,
+            trips_path=trips_path,
+            stop_times_path=stop_times_path,
+            routes_path=routes_path,
+            calendar_path=calendar_path,
+            countries=countries,
+            stops=stops,
         )
-        profiling["csvWriteMs"] += (time.perf_counter() - csv_started) * 1000.0
-
-        transfers_rows = []
-        for row in transfers:
-            from_id = str(row.get("from_stop_id") or "").strip()
-            to_id = str(row.get("to_stop_id") or "").strip()
-            if not from_id or not to_id or from_id == to_id:
-                continue
-            transfers_rows.append(
-                [
-                    from_id,
-                    to_id,
-                    str(row.get("transfer_type") or "2"),
-                    str(int(row.get("min_transfer_seconds") or 0)),
-                ]
-            )
-        transfers_rows.sort(key=lambda r: (r[0], r[1], int(r[3])))
-        if transfers_rows:
-            transfers_started = time.perf_counter()
-            write_csv_file(
-                transfers_path,
-                ["from_stop_id", "to_stop_id", "transfer_type", "min_transfer_time"],
-                transfers_rows,
-            )
-            profiling["csvWriteMs"] += (
-                time.perf_counter() - transfers_started
-            ) * 1000.0
-
-        route_count = 0
-        batch_count = 0
-        source_batches = set()
-        counters = {"trip_count": 0, "stop_time_count": 0}
-        stop_country_by_id = {
-            str(row.get("stop_id") or "").strip(): str(row.get("country") or "").strip()
-            for row in stops
-            if str(row.get("stop_id") or "").strip()
-        }
-
-        with (
-            sqlite3.connect(str(sqlite_path)) as db,
-            trips_path.open("w", encoding="utf-8", newline="") as trips_handle,
-            stop_times_path.open(
-                "w", encoding="utf-8", newline=""
-            ) as stop_times_handle,
-        ):
-            db.execute("PRAGMA journal_mode=OFF")
-            db.execute("PRAGMA synchronous=OFF")
-            db.execute("PRAGMA temp_store=MEMORY")
-            db.execute(
-                "CREATE TABLE routes (route_id TEXT PRIMARY KEY, agency_id TEXT, route_short_name TEXT, route_long_name TEXT, route_type TEXT, route_desc TEXT)"
-            )
-            db.execute("CREATE TABLE service_ids (service_id TEXT PRIMARY KEY)")
-
-            trips_writer = csv.writer(trips_handle, lineterminator="\n")
-            stop_times_writer = csv.writer(stop_times_handle, lineterminator="\n")
-            trips_writer.writerow(
-                ["route_id", "service_id", "trip_id", "trip_headsign"]
-            )
-            stop_times_writer.writerow(
-                [
-                    "trip_id",
-                    "arrival_time",
-                    "departure_time",
-                    "stop_id",
-                    "stop_sequence",
-                ]
-            )
-
-            for (
-                batch_source_id,
-                batch_rows,
-                seen_batches,
-                _seen_trips,
-            ) in iter_trip_batches(
-                options=options,
-                profiling=profiling,
-                progress_state=progress_state,
-            ):
-                batch_count = seen_batches
-                source_batches.add(batch_source_id)
-
-                process_started = time.perf_counter()
-                batch_routes = {}
-                batch_services = set()
-                current_trip_id = ""
-                current_trip_rows = []
-                for row in batch_rows:
-                    trip_id = str(row.get("trip_fact_id") or "").strip()
-                    if not trip_id:
-                        continue
-                    if current_trip_id and trip_id != current_trip_id:
-                        _flush_trip_rows_for_batch(
-                            current_trip_rows,
-                            options=options,
-                            countries=countries,
-                            stop_country_by_id=stop_country_by_id,
-                            batch_routes=batch_routes,
-                            batch_services=batch_services,
-                            trips_writer=trips_writer,
-                            stop_times_writer=stop_times_writer,
-                            counters=counters,
-                        )
-                        current_trip_rows = []
-                    current_trip_id = trip_id
-                    current_trip_rows.append(row)
-                if current_trip_rows:
-                    _flush_trip_rows_for_batch(
-                        current_trip_rows,
-                        options=options,
-                        countries=countries,
-                        stop_country_by_id=stop_country_by_id,
-                        batch_routes=batch_routes,
-                        batch_services=batch_services,
-                        trips_writer=trips_writer,
-                        stop_times_writer=stop_times_writer,
-                        counters=counters,
-                    )
-                profiling["pythonProcessMs"] += (
-                    time.perf_counter() - process_started
-                ) * 1000.0
-
-                sqlite_started = time.perf_counter()
-                if batch_routes:
-                    db.executemany(
-                        "INSERT OR REPLACE INTO routes (route_id, agency_id, route_short_name, route_long_name, route_type, route_desc) VALUES (?, ?, ?, ?, ?, ?)",
-                        [
-                            batch_routes[route_id]
-                            for route_id in sorted(batch_routes.keys())
-                        ],
-                    )
-                if batch_services:
-                    db.executemany(
-                        "INSERT OR IGNORE INTO service_ids (service_id) VALUES (?)",
-                        [(service_id,) for service_id in sorted(batch_services)],
-                    )
-                db.commit()
-                profiling["sqliteWriteMs"] += (
-                    time.perf_counter() - sqlite_started
-                ) * 1000.0
-                elapsed_ms = (time.perf_counter() - run_started) * 1000.0
-                trips_per_minute = (
-                    (counters["trip_count"] * 60000.0 / elapsed_ms)
-                    if elapsed_ms > 0
-                    else 0.0
-                )
-                log_progress(
-                    progress_state,
-                    "Applied "
-                    + f"batch={batch_count} source='{batch_source_id}' rows={len(batch_rows)} "
-                    + f"tripsWritten={counters['trip_count']} stopTimesWritten={counters['stop_time_count']} "
-                    + f"tripsPerMinute={trips_per_minute:.1f}",
-                )
-
-            if counters["stop_time_count"] == 0:
-                fail(
-                    "export scope produced no timetable rows after stop-point resolution; "
-                    "check provider_global_stop_point_mappings coverage for the selected source scope"
-                )
-
-            routes_csv_started = time.perf_counter()
-            route_rows = list(
-                db.execute(
-                    "SELECT route_id, agency_id, route_short_name, route_long_name, route_type, route_desc FROM routes ORDER BY route_id"
-                )
-            )
-            route_count = len(route_rows)
-            write_csv_file(
-                routes_path,
-                [
-                    "route_id",
-                    "agency_id",
-                    "route_short_name",
-                    "route_long_name",
-                    "route_type",
-                    "route_desc",
-                ],
-                route_rows,
-            )
-            profiling["csvWriteMs"] += (
-                time.perf_counter() - routes_csv_started
-            ) * 1000.0
-
-            calendar_started = time.perf_counter()
-            calendar_rows = [
-                [
-                    service_id,
-                    "1",
-                    "1",
-                    "1",
-                    "1",
-                    "1",
-                    "1",
-                    "1",
-                    "20240101",
-                    "20351231",
-                ]
-                for (service_id,) in db.execute(
-                    "SELECT service_id FROM service_ids ORDER BY service_id"
-                )
-            ]
-            write_csv_file(
-                calendar_path,
-                [
-                    "service_id",
-                    "monday",
-                    "tuesday",
-                    "wednesday",
-                    "thursday",
-                    "friday",
-                    "saturday",
-                    "sunday",
-                    "start_date",
-                    "end_date",
-                ],
-                calendar_rows,
-            )
-            profiling["csvWriteMs"] += (time.perf_counter() - calendar_started) * 1000.0
 
         file_paths = {
             AGENCY_FILE: agency_path,
@@ -1320,10 +1433,32 @@ def export_from_db_batched(options: ExportBatchOptions):
         )
         profiling["zipMs"] = (time.perf_counter() - zip_started) * 1000.0
 
-    total_runtime_ms = (time.perf_counter() - run_started) * 1000.0
-    batch_perf = _build_batch_perf(profiling)
+    return {
+        "stop_rows": stop_rows,
+        "transfers_rows": transfers_rows,
+        **sqlite_results,
+    }
 
-    summary = {
+
+def _build_batched_export_summary(
+    *,
+    options: ExportBatchOptions,
+    profiling: dict,
+    total_runtime_ms: float,
+    batch_perf: dict,
+    sql_plan_summary: dict,
+    benchmark_enabled: bool,
+    countries: list[str],
+    agency_rows,
+    stop_rows,
+    transfers_rows,
+    route_rows,
+    calendar_rows,
+    source_batches,
+    batch_count: int,
+    counters: dict,
+) -> dict:
+    return {
         "profile": options.profile,
         "tier": options.requested_tier,
         "bridgeMode": "timetable-preserving-pan-europe",
@@ -1337,7 +1472,7 @@ def export_from_db_batched(options: ExportBatchOptions):
         "counts": {
             "stops": len(stop_rows),
             "agencies": len(agency_rows),
-            "routes": route_count,
+            "routes": len(route_rows),
             "trips": counters["trip_count"],
             "stopTimes": counters["stop_time_count"],
             "services": len(calendar_rows),
@@ -1380,9 +1515,80 @@ def export_from_db_batched(options: ExportBatchOptions):
             "sqlSamplePlan": sql_plan_summary,
         },
     }
+
+
+def export_from_db_batched(options: ExportBatchOptions):
+    run_started = time.perf_counter()
+    profiling = _create_profiling_state()
+    progress_state = _create_progress_state(run_started, options.progress_interval_sec)
     log_progress(
         progress_state,
-        f"Finished export trips={counters['trip_count']} stopTimes={counters['stop_time_count']} runtimeMs={total_runtime_ms:.1f}",
+        "Starting export "
+        + f"profile='{options.profile}' as-of='{options.as_of}' tier='{options.requested_tier}' query-mode='{options.query_mode}' "
+        + f"batch-size='{options.batch_size_trips}'",
+        force=True,
+    )
+
+    static_started = time.perf_counter()
+    stops, transfers = load_rows_from_db_static(
+        options.as_of,
+        options.country,
+        options.source_id,
+    )
+    profiling["staticLoadMs"] = (time.perf_counter() - static_started) * 1000.0
+    if not stops:
+        fail("export scope produced no stops")
+    log_progress(
+        progress_state,
+        f"Loaded static scope stops={len(stops)} transfers={len(transfers)}",
+        force=True,
+    )
+
+    sql_plan_summary = _collect_sql_plan_summary(options, profiling)
+
+    countries = _resolve_scope_countries(stops)
+    agency_rows = _build_agency_rows(countries, options.agency_url)
+    benchmark_enabled = any(
+        value > 0
+        for value in [
+            options.benchmark_max_sources,
+            options.benchmark_max_batches,
+            options.benchmark_max_trips,
+        ]
+    )
+    artifact_results = _write_batched_export_artifacts(
+        options=options,
+        profiling=profiling,
+        progress_state=progress_state,
+        run_started=run_started,
+        stops=stops,
+        transfers=transfers,
+        countries=countries,
+        agency_rows=agency_rows,
+    )
+
+    total_runtime_ms = (time.perf_counter() - run_started) * 1000.0
+    batch_perf = _build_batch_perf(profiling)
+    summary = _build_batched_export_summary(
+        options=options,
+        profiling=profiling,
+        total_runtime_ms=total_runtime_ms,
+        batch_perf=batch_perf,
+        sql_plan_summary=sql_plan_summary,
+        benchmark_enabled=benchmark_enabled,
+        countries=countries,
+        agency_rows=agency_rows,
+        stop_rows=artifact_results["stop_rows"],
+        transfers_rows=artifact_results["transfers_rows"],
+        route_rows=artifact_results["route_rows"],
+        calendar_rows=artifact_results["calendar_rows"],
+        source_batches=artifact_results["source_batches"],
+        batch_count=artifact_results["batch_count"],
+        counters=artifact_results["counters"],
+    )
+    log_progress(
+        progress_state,
+        f"Finished export trips={artifact_results['counters']['trip_count']} stopTimes={artifact_results['counters']['stop_time_count']} runtimeMs={total_runtime_ms:.1f}",
         force=True,
     )
     return summary
@@ -1531,17 +1737,20 @@ def _collect_trip_table_rows(
         route_defs[route_id] = route_row
         trip_defs[trip_id] = trip_row
         service_ids.add(service_id)
-
-        for idx, stop in enumerate(trip_rows, start=1):
-            stop_id = str(stop.get("stop_id") or "").strip()
-            if stop_id not in stop_map:
-                continue
-            fallback = 6 * 3600 + (idx - 1) * 300
-            arrival = ensure_time(stop.get("arrival_time") or "", fallback)
-            departure = ensure_time(stop.get("departure_time") or "", fallback)
-            stop_time_rows.append([trip_id, arrival, departure, stop_id, str(idx)])
+        _append_trip_stop_times(stop_time_rows, trip_id, trip_rows, stop_map)
 
     return route_defs, trip_defs, stop_time_rows, service_ids
+
+
+def _append_trip_stop_times(stop_time_rows, trip_id: str, trip_rows, stop_map) -> None:
+    for idx, stop in enumerate(trip_rows, start=1):
+        stop_id = str(stop.get("stop_id") or "").strip()
+        if stop_id not in stop_map:
+            continue
+        fallback = 6 * 3600 + (idx - 1) * 300
+        arrival = ensure_time(stop.get("arrival_time") or "", fallback)
+        departure = ensure_time(stop.get("departure_time") or "", fallback)
+        stop_time_rows.append([trip_id, arrival, departure, stop_id, str(idx)])
 
 
 def _build_table_files(
