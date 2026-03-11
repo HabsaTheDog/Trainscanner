@@ -113,7 +113,7 @@ test("curation frontend includes required component structure and runtime utilit
   assert.match(pageJsx, /useEffect/);
   assert.match(pageJsx, /useCallback/);
   assert.match(pageJsx, /bg-surface-0/);
-  assert.match(pageJsx, /map\.setStyle\(nextStyle\)/);
+  assert.match(pageJsx, /map\.setStyle\(resolveMapStyle\(mapMode\)\)/);
   assert.match(pageJsx, /dispatch\(\{ type: "map_mode", mode: "default" \}\)/);
   assert.match(
     pageJsx,

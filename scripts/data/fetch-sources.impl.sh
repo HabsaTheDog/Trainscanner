@@ -15,6 +15,8 @@ FETCH_PROGRESS_TOTAL_SOURCES=0
 FETCH_PROGRESS_FILE_NAME=""
 FETCH_PROGRESS_DOWNLOADED_BYTES=0
 FETCH_PROGRESS_TOTAL_BYTES=0
+VERSION_HINT_LONG_PATTERN='[0-9]{12}'
+VERSION_HINT_SHORT_PATTERN='[0-9]{8}'
 
 cleanup_temp_files() {
   local f
@@ -611,9 +613,9 @@ detect_version_hint() {
   file_name="${resolved_url##*/}"
   file_name="${file_name%%\?*}"
 
-  hint="$(printf '%s' "$file_name" | grep -oE '[0-9]{12}' | head -1 || true)"
+  hint="$(printf '%s' "$file_name" | grep -oE "${VERSION_HINT_LONG_PATTERN}" | head -1 || true)"
   if [[ -z "$hint" ]]; then
-    hint="$(printf '%s' "$file_name" | grep -oE '[0-9]{8}' | head -1 || true)"
+    hint="$(printf '%s' "$file_name" | grep -oE "${VERSION_HINT_SHORT_PATTERN}" | head -1 || true)"
   fi
   if [[ -z "$hint" ]]; then
     hint="$(printf '%s\n' "$headers" | awk -F': ' 'tolower($1)=="last-modified"{print $2; exit}' | tr -d '\r' || true)"

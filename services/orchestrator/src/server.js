@@ -28,6 +28,7 @@ const {
   validateCompileGtfsRequest,
 } = require("./domains/export/compile-contracts");
 const { MetricsCollector } = require("./core/metrics");
+const { resolveTemporalAddress } = require("./core/runtime");
 
 const execFileAsync = promisify(execFile);
 
@@ -85,6 +86,68 @@ function sendError(res, err, options = {}) {
 
 const stationIndexCache = new Map();
 
+function isFreshStationCacheEntry(cached, signature, ttlMs, now = Date.now()) {
+  return Boolean(
+    cached?.signature === signature && now - (cached.cachedAt || 0) <= ttlMs,
+  );
+}
+
+function pruneCacheEntries(
+  cache,
+  { ttlMs, maxEntries, now = Date.now() } = {},
+) {
+  for (const [key, value] of cache.entries()) {
+    if (now - (value.cachedAt || 0) > ttlMs) {
+      cache.delete(key);
+    }
+  }
+
+  if (cache.size <= maxEntries) {
+    return cache;
+  }
+
+  const ordered = Array.from(cache.entries()).sort(
+    (a, b) => (a[1].lastAccessAt || 0) - (b[1].lastAccessAt || 0),
+  );
+  const removeCount = cache.size - maxEntries;
+  for (let i = 0; i < removeCount; i += 1) {
+    cache.delete(ordered[i][0]);
+  }
+  return cache;
+}
+
+function resolveStaticAssetPath(frontendDir, urlPath) {
+  const cleanPath = urlPath === "/" ? "/index.html" : urlPath;
+  const frontendBase = path.resolve(frontendDir);
+  const filePath = path.resolve(frontendBase, `.${cleanPath}`);
+  const relativeToBase = path.relative(frontendBase, filePath);
+
+  return {
+    filePath,
+    forbidden:
+      relativeToBase.startsWith("..") || path.isAbsolute(relativeToBase),
+  };
+}
+
+async function readOptionalFileStat(filePath) {
+  try {
+    return await fs.stat(filePath);
+  } catch (err) {
+    if (err && err.code === "ENOENT") {
+      return null;
+    }
+    throw err;
+  }
+}
+
+async function readOptionalActiveProfile() {
+  try {
+    return await switcher.readActiveProfile();
+  } catch {
+    return null;
+  }
+}
+
 function touchStationCache(profileName, entry) {
   stationIndexCache.delete(profileName);
   stationIndexCache.set(profileName, {
@@ -95,27 +158,10 @@ function touchStationCache(profileName, entry) {
 }
 
 function pruneStationCache() {
-  const ttlMs = config.stationIndexCacheTtlMs;
-  const maxEntries = config.stationIndexCacheMaxEntries;
-  const now = Date.now();
-
-  for (const [key, value] of stationIndexCache.entries()) {
-    if (now - (value.cachedAt || 0) > ttlMs) {
-      stationIndexCache.delete(key);
-    }
-  }
-
-  if (stationIndexCache.size <= maxEntries) {
-    return;
-  }
-
-  const ordered = Array.from(stationIndexCache.entries()).sort(
-    (a, b) => (a[1].lastAccessAt || 0) - (b[1].lastAccessAt || 0),
-  );
-  const removeCount = stationIndexCache.size - maxEntries;
-  for (let i = 0; i < removeCount; i += 1) {
-    stationIndexCache.delete(ordered[i][0]);
-  }
+  pruneCacheEntries(stationIndexCache, {
+    ttlMs: config.stationIndexCacheTtlMs,
+    maxEntries: config.stationIndexCacheMaxEntries,
+  });
 }
 
 async function loadProfilesMap() {
@@ -124,7 +170,7 @@ async function loadProfilesMap() {
 }
 
 async function resolveProfileZipForQuery(profileName) {
-  const active = await switcher.readActiveProfile().catch(() => null);
+  const active = await readOptionalActiveProfile();
   if (
     active &&
     active.activeProfile === profileName &&
@@ -134,7 +180,7 @@ async function resolveProfileZipForQuery(profileName) {
     const absolutePath = path.isAbsolute(active.zipPath)
       ? active.zipPath
       : path.resolve(config.dataDir, "..", active.zipPath);
-    const stat = await fs.stat(absolutePath).catch(() => null);
+    const stat = await readOptionalFileStat(absolutePath);
     if (stat?.isFile()) {
       return {
         zipPath: active.zipPath,
@@ -198,7 +244,7 @@ async function getStationIndexForProfile(profileName) {
 }
 
 async function readZipStatOrThrow(profileName, zipPath) {
-  const stat = await fs.stat(zipPath).catch(() => null);
+  const stat = await readOptionalFileStat(zipPath);
   if (stat?.isFile()) {
     return stat;
   }
@@ -212,8 +258,7 @@ async function readZipStatOrThrow(profileName, zipPath) {
 function readCachedStationIndex(profileName, signature) {
   const cached = stationIndexCache.get(profileName);
   if (
-    cached?.signature === signature &&
-    Date.now() - (cached.cachedAt || 0) <= config.stationIndexCacheTtlMs
+    isFreshStationCacheEntry(cached, signature, config.stationIndexCacheTtlMs)
   ) {
     touchStationCache(profileName, cached);
     return cached;
@@ -468,14 +513,12 @@ function validateGraphqlRequestBody(body) {
 }
 
 async function serveStatic(_req, res, urlPath) {
-  const cleanPath = urlPath === "/" ? "/index.html" : urlPath;
-  const normalized = path.normalize(cleanPath).replace(/^(\.\.[/\\])+/, "");
-  const relativePath = normalized.replace(/^[/\\]+/, "");
-  const filePath = path.resolve(config.frontendDir, relativePath);
-  const frontendBase = path.resolve(config.frontendDir);
-  const relativeToBase = path.relative(frontendBase, filePath);
+  const { filePath, forbidden } = resolveStaticAssetPath(
+    config.frontendDir,
+    urlPath,
+  );
 
-  if (relativeToBase.startsWith("..") || path.isAbsolute(relativeToBase)) {
+  if (forbidden) {
     sendJson(res, 403, { error: "Forbidden path" });
     return;
   }
@@ -582,7 +625,7 @@ function buildRefreshArgs(body = {}) {
 async function startTemporalWorkflow(workflowType, workflowId, args) {
   const { Connection, Client } = require("@temporalio/client");
   const connection = await Connection.connect({
-    address: process.env.TEMPORAL_ADDRESS || "localhost:7233",
+    address: resolveTemporalAddress(),
   });
   const client = new Client({ connection });
   return client.workflow.start(workflowType, {
@@ -734,19 +777,14 @@ async function handleGtfsStationsRequest(res, url) {
 
 async function readMotisDataStatus() {
   const motisDataDir = path.dirname(config.motisActiveGtfsPath);
-  const motisData = {
-    configExists: false,
-    activeGtfsExists: false,
+  const [configStat, gtfsStat] = await Promise.all([
+    readOptionalFileStat(path.join(motisDataDir, "config.yml")),
+    readOptionalFileStat(config.motisActiveGtfsPath),
+  ]);
+  return {
+    configExists: configStat?.isFile() === true,
+    activeGtfsExists: gtfsStat?.isFile() === true,
   };
-  try {
-    const configStat = await fs.stat(path.join(motisDataDir, "config.yml"));
-    motisData.configExists = configStat.isFile();
-  } catch {}
-  try {
-    const gtfsStat = await fs.stat(config.motisActiveGtfsPath);
-    motisData.activeGtfsExists = gtfsStat.isFile();
-  } catch {}
-  return motisData;
 }
 
 async function handleHealthRequest(req, res, url) {
@@ -1084,4 +1122,19 @@ function startServer() {
     });
 }
 
-void startServer();
+if (require.main === module) {
+  void startServer();
+}
+
+module.exports = {
+  buildFilteredStationRows,
+  buildRefreshArgs,
+  isFreshStationCacheEntry,
+  pruneCacheEntries,
+  readCachedStationIndex,
+  readZipStatOrThrow,
+  resolveLookupProfileName,
+  resolveStaticAssetPath,
+  sendError,
+  startServer,
+};

@@ -16,6 +16,10 @@ const {
   createMergeQueueRepo,
 } = require("../../data/postgis/repositories/merge-queue-repo");
 const { isStrictIsoDate } = require("../../core/date");
+const {
+  parseIntegerEnv,
+  readJobExecutionConfig,
+} = require("../../core/runtime");
 
 function parseCountryScope(value) {
   const normalized = String(value || "")
@@ -191,8 +195,7 @@ async function closeClient(client) {
 }
 
 function parsePositiveInt(value, fallback) {
-  const parsed = Number.parseInt(String(value || ""), 10);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+  return parseIntegerEnv(value, fallback, { min: 1 });
 }
 
 async function runWithConcurrency(items, limit, worker) {
@@ -230,13 +233,10 @@ function createGlobalService(deps = {}) {
     const rootDir = options.rootDir || process.cwd();
     const args = Array.isArray(options.args) ? options.args : [];
     const runId = options.runId || "";
-    const defaultJobOrchestrationEnabled =
-      String(
-        process.env.PIPELINE_JOB_ORCHESTRATION_ENABLED || "true",
-      ).toLowerCase() !== "false";
+    const jobExecutionConfig = readJobExecutionConfig(options.env);
     const jobOrchestrationEnabled =
       options.jobOrchestrationEnabled === undefined
-        ? defaultJobOrchestrationEnabled
+        ? jobExecutionConfig.jobOrchestrationEnabled
         : Boolean(options.jobOrchestrationEnabled);
     const helpRequested = args.includes("--help") || args.includes("-h");
 
@@ -286,14 +286,8 @@ function createGlobalService(deps = {}) {
         runContext: {
           args,
         },
-        maxAttempts: Number.parseInt(
-          process.env.PIPELINE_JOB_MAX_ATTEMPTS || "3",
-          10,
-        ),
-        maxConcurrent: Number.parseInt(
-          process.env.PIPELINE_JOB_MAX_CONCURRENT || "1",
-          10,
-        ),
+        maxAttempts: jobExecutionConfig.maxAttempts,
+        maxConcurrent: jobExecutionConfig.maxConcurrent,
         execute: async ({ updateCheckpoint }) => {
           const result = await runCall();
           await updateCheckpoint({
@@ -442,7 +436,9 @@ function createGlobalService(deps = {}) {
           }
 
           const concurrency = parsePositiveInt(
-            process.env.GLOBAL_MERGE_QUEUE_COUNTRY_CONCURRENCY || "1",
+            options.env?.GLOBAL_MERGE_QUEUE_COUNTRY_CONCURRENCY ||
+              process.env.GLOBAL_MERGE_QUEUE_COUNTRY_CONCURRENCY ||
+              "1",
             1,
           );
           process.stdout.write(

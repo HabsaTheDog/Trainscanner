@@ -1,3 +1,4 @@
+import PropTypes from "prop-types";
 import {
   useCallback,
   useEffect,
@@ -6,6 +7,36 @@ import {
   useRef,
   useState,
 } from "react";
+import {
+  formatCoordinateStatusLabel,
+  formatEvidenceCategoryLabel,
+  formatEvidenceDetails,
+  formatEvidenceStatusLabel,
+  formatEvidenceTypeLabel,
+  formatEvidenceValue,
+  formatLabel,
+  formatSeedReasonLabel,
+  getEvidenceCategoryCounts,
+  getEvidenceTypeCounts,
+  getRowSeedReasons,
+  getSeedRuleCounts,
+  getSummaryCount,
+} from "./curation-page-formatters";
+import {
+  BASE_MARKER_SIZE,
+  buildMappableItems,
+  buildMarkerOverlapLayout,
+  MARKER_SELECTION_RING_SIZE,
+} from "./curation-page-map-utils";
+import {
+  clusterDetailShape,
+  clusterListItemShape,
+  evidenceRowShape,
+  filtersShape,
+  railItemShape,
+  refSetShape,
+  workspaceShape,
+} from "./curation-page-prop-types";
 import {
   addSelectionToGroup,
   fetchClusterDetail as apiFetchClusterDetail,
@@ -41,167 +72,146 @@ import {
   updateGroupNodeLabel,
   updateGroupTransferSeconds,
 } from "./curation-page-runtime";
+import { createUiState, uiReducer } from "./curation-page-ui-state";
 import maplibregl from "./maplibre";
 import "./styles.css";
 
-/* ── Formatters ── */
-function fmt(v) {
-  return String(v || "")
-    .replaceAll("_", " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-}
-const evLabels = {
-  name_exact: "Exact Name",
-  name_loose_similarity: "Loose Similarity",
-  token_overlap: "Token Overlap",
-  geographic_distance: "Distance",
-  coordinate_quality: "Coord Quality",
-  shared_provider_sources: "Shared Sources",
-  shared_route_context: "Route Context",
-  shared_adjacent_stations: "Adjacent Stations",
-  country_relation: "Country",
-  generic_name_penalty: "Generic Penalty",
-};
-const stLabels = {
-  supporting: "Supporting",
-  warning: "Warning",
-  missing: "Missing",
-  informational: "Context",
-  same_location: "Same Loc",
-  nearby: "Nearby",
-  far_apart: "Far",
-  too_far: "Too Far",
-  missing_coordinates: "No Coords",
-  coordinates_present: "Coords",
-};
-const catLabels = {
-  core_match: "Core Match",
-  network_context: "Network Context",
-  risk_conflict: "Risk / Conflict",
-};
-const seedLabels = {
-  exact_name: "Exact Name",
-  loose_name_geo: "Loose Name + Geo",
-  loose_name_missing_coords: "Loose Name + Missing Coords",
-  shared_route: "Shared Route",
-  shared_adjacent: "Shared Adjacent",
-};
-function fmtEvType(v) {
-  return evLabels[v] || fmt(v || "unknown");
-}
-function fmtEvStatus(v) {
-  return stLabels[v] || fmt(v || "unknown");
-}
-function formatEvidenceTypeLabel(v) {
-  return fmtEvType(v);
-}
-function formatEvidenceStatusLabel(v) {
-  return fmtEvStatus(v);
-}
-function fmtEvCategory(v) {
-  return catLabels[v] || fmt(v || "unknown");
-}
-function fmtSeedReason(v) {
-  return seedLabels[v] || fmt(v || "seed");
-}
-function fmtCoord(v) {
-  return fmtEvStatus(v || "missing_coordinates");
-}
-function fmtEvValue(r) {
-  if (!r) return "—";
-  if (r.evidence_type === "geographic_distance") {
-    const m = Number(r.raw_value ?? r.details?.distance_meters);
-    if (Number.isFinite(m)) return `${Math.round(m)}m`;
-    return fmtEvStatus(r.details?.distance_status);
+function resolveSectionToneClass(tone) {
+  if (tone === "risk") {
+    return "border-red/15 bg-red-dim/10";
   }
-  if (
-    ["name_loose_similarity", "token_overlap"].includes(r.evidence_type) &&
-    Number.isFinite(Number(r.raw_value))
-  )
-    return `${Math.round(Number(r.raw_value) * 100)}%`;
-  if (
-    [
-      "shared_provider_sources",
-      "shared_route_context",
-      "shared_adjacent_stations",
-      "coordinate_quality",
-      "generic_name_penalty",
-    ].includes(r.evidence_type) &&
-    Number.isFinite(Number(r.raw_value))
-  )
-    return String(Number(r.raw_value));
-  if (r.evidence_type === "country_relation") {
-    if (r.details?.same_country === true) return "Same";
-    if (r.details?.same_country === false) return "Cross";
-    return "?";
+  return "border-border bg-surface-1/40";
+}
+
+function resolveMapStyle(mode) {
+  if (mode === "satellite") {
+    return resolveSatelliteMapStyle();
   }
-  if (Number.isFinite(Number(r.score)))
-    return `${Math.round(Number(r.score) * 100)}%`;
+  return resolveDefaultMapStyle();
+}
+
+function clearMarkers(markers) {
+  for (const marker of markers) {
+    marker.remove();
+  }
+}
+
+function resolveClusterCount(totalCount, clusters) {
+  if (Number.isFinite(totalCount) && totalCount > 0) {
+    return totalCount;
+  }
+  return clusters.length;
+}
+
+function resolveKindAccent(kind) {
+  if (kind === "merge") {
+    return "border-l-[3px] border-l-teal";
+  }
+  if (kind === "group") {
+    return "border-l-[3px] border-l-orange";
+  }
+  return "";
+}
+
+function resolveNoticeToneClass(tone) {
+  if (tone === "error") {
+    return "bg-red-dim text-red";
+  }
+  if (tone === "success") {
+    return "bg-green-dim text-green";
+  }
+  if (tone === "warning") {
+    return "bg-yellow-dim text-yellow";
+  }
+  return "bg-blue-dim text-blue";
+}
+
+function resolveClusterHeading(clusterDetail) {
+  if (!clusterDetail) {
+    return "No cluster";
+  }
+  return clusterDetail.display_name || clusterDetail.cluster_id;
+}
+
+function resolveResolveButtonLabel(canReopen) {
+  return canReopen ? "Reopen" : "Resolve";
+}
+
+function isMergeableRef(ref) {
+  const type = parseRef(ref).type;
+  return type === "raw" || type === "merge";
+}
+
+function resolveSelectedIndex(railIndex, refs) {
+  if (refs.length === 0) {
+    return -1;
+  }
+  return railIndex.get(refs.at(-1)) || 0;
+}
+
+function resolveMapModeHandler(mode, handlers) {
+  if (mode === "default") {
+    handlers.setDefault();
+    return;
+  }
+  if (mode === "satellite") {
+    handlers.setSatellite();
+    return;
+  }
+  handlers.setCustom(mode);
+}
+
+function getCompositeMembers(item, workspace, candidateMap) {
+  return item.member_refs?.map((ref) =>
+    resolveDisplayNameForRef(ref, workspace, candidateMap),
+  );
+}
+
+function resolveEvidenceCardClassName(tone) {
+  if (tone === "risk") {
+    return "border border-red/15 rounded-xl px-3 py-2 bg-surface-2 text-sm";
+  }
+  return "border border-border rounded-xl px-3 py-2 bg-surface-2 text-sm";
+}
+
+function resolveMapModeButtonClassName(active, currentMode) {
+  const isActive = currentMode === active;
+  const activeClassName = "bg-amber/90 border-amber text-surface-0";
+  const inactiveClassName =
+    "bg-surface-0/50 border-white/10 text-white/80 hover:bg-surface-0/70";
+  return `px-2.5 py-1 rounded-md text-xs font-bold font-display border backdrop-blur-md cursor-pointer transition-all ${isActive ? activeClassName : inactiveClassName}`;
+}
+
+function findWorkspaceEntity(kind, workspace, ref) {
+  const entityId = parseRef(ref).id;
+  const collection = kind === "group" ? workspace.groups : workspace.merges;
+  return (collection || []).find((item) => item.entity_id === entityId) || null;
+}
+
+function resolveSeedScore(score) {
+  const numericScore = Number(score);
+  if (Number.isFinite(numericScore)) {
+    return numericScore.toFixed(2);
+  }
   return "—";
 }
-function fmtEvDetails(d) {
-  if (!d || typeof d !== "object") return "";
-  if (d.explanation) return String(d.explanation);
-  if (d.distance_status) return fmtEvStatus(d.distance_status);
-  if (d.reason) return String(d.reason);
-  return Object.entries(d)
-    .filter(([k, v]) => k !== "seed_reasons" && v != null && v !== "")
-    .slice(0, 3)
-    .map(([k, v]) => `${fmt(k)}: ${v}`)
-    .join(" · ");
+
+function resolveSelectionLabel(selectedRefs) {
+  if (selectedRefs.size > 0) {
+    return `${selectedRefs.size} sel.`;
+  }
+  return "Select";
 }
-function getSumC(s, k) {
-  const c = s && typeof s === "object" ? s.status_counts || s : {};
-  return parseInt(String(c?.[k] ?? 0), 10) || 0;
+
+function canSplitFocusedItem(focused) {
+  return focused?.kind === "group" || focused?.kind === "merge";
 }
-function getTypeC(s) {
-  const c = s && typeof s === "object" && s.type_counts ? s.type_counts : {};
-  return Object.entries(c)
-    .map(([t, n]) => ({ type: t, count: parseInt(String(n ?? 0), 10) || 0 }))
-    .filter((e) => e.count > 0)
-    .sort((a, b) => b.count - a.count || a.type.localeCompare(b.type));
-}
-function getCategoryC(summary) {
-  const c =
-    summary && typeof summary === "object" && summary.category_counts
-      ? summary.category_counts
-      : {};
-  return ["core_match", "network_context", "risk_conflict"]
-    .map((category) => ({
-      category,
-      count: parseInt(String(c?.[category] ?? 0), 10) || 0,
-    }))
-    .filter((e) => e.count > 0);
-}
-function getSeedRuleC(summary) {
-  const c =
-    summary && typeof summary === "object" && summary.seed_rule_counts
-      ? summary.seed_rule_counts
-      : {};
-  return Object.entries(c)
-    .map(([reason, count]) => ({
-      reason,
-      count: parseInt(String(count ?? 0), 10) || 0,
-    }))
-    .filter((e) => e.count > 0)
-    .sort((a, b) => b.count - a.count || a.reason.localeCompare(b.reason));
-}
-function getRowSeedReasons(row) {
-  return Array.isArray(row?.seed_reasons)
-    ? row.seed_reasons.map((v) => String(v || "").trim()).filter(Boolean)
-    : Array.isArray(row?.details?.seed_reasons)
-      ? row.details.seed_reasons
-          .map((v) => String(v || "").trim())
-          .filter(Boolean)
-      : [];
-}
+
 function EvidenceSection({ title, tone = "default", children }) {
-  const toneClass =
-    tone === "risk"
-      ? "border-red/15 bg-red-dim/10"
-      : "border-border bg-surface-1/40";
   return (
-    <section className={`rounded-2xl border p-3 space-y-2 ${toneClass}`}>
+    <section
+      className={`rounded-2xl border p-3 space-y-2 ${resolveSectionToneClass(tone)}`}
+    >
       <div className="flex items-center justify-between gap-2">
         <h3 className="m-0 text-sm font-bold text-text-primary font-display uppercase tracking-wider">
           {title}
@@ -212,172 +222,59 @@ function EvidenceSection({ title, tone = "default", children }) {
   );
 }
 
-/* ── State ── */
-function createUiState() {
-  return {
-    selectedRefs: new Set(),
-    focusedRef: "",
-    activeTool: "merge",
-    mapMode: "default",
-    lastSelectedIndex: -1,
-    bottomTab: "candidates",
-  };
-}
-function uiReducer(state, action) {
-  switch (action.type) {
-    case "clear_selection":
-      return { ...state, selectedRefs: new Set(), lastSelectedIndex: -1 };
-    case "set_selection":
-      return {
-        ...state,
-        selectedRefs: new Set(action.refs || []),
-        lastSelectedIndex: Number.isFinite(action.lastSelectedIndex)
-          ? action.lastSelectedIndex
-          : state.lastSelectedIndex,
-      };
-    case "toggle_selection": {
-      const n = new Set(state.selectedRefs);
-      if (n.has(action.ref)) n.delete(action.ref);
-      else n.add(action.ref);
-      return {
-        ...state,
-        selectedRefs: n,
-        lastSelectedIndex: Number.isFinite(action.index)
-          ? action.index
-          : state.lastSelectedIndex,
-      };
-    }
-    case "focus":
-      return {
-        ...state,
-        focusedRef: action.ref || "",
-        activeTool:
-          action.tool ||
-          (parseRef(action.ref).type === "group"
-            ? "group"
-            : parseRef(action.ref).type === "merge"
-              ? "merge"
-              : state.activeTool),
-      };
-    case "tool":
-      return { ...state, activeTool: action.tool };
-    case "map_mode":
-      return { ...state, mapMode: action.mode };
-    case "bottom_tab":
-      return { ...state, bottomTab: action.tab };
-    default:
-      return state;
-  }
-}
+function EvidenceRows({ rows, tone = "default" }) {
+  const cardClassName = resolveEvidenceCardClassName(tone);
 
-/* ── Map markers (DOM-imperative, unchanged logic) ── */
-const OCP = 7,
-  OBM = 24,
-  OSR = 3,
-  OSD = 24;
-function bck(a, b) {
-  return `${Number(a).toFixed(OCP)}:${Number(b).toFixed(OCP)}`;
-}
-function bmog(items) {
-  const g = new Map();
-  for (const i of items) {
-    const k = bck(i.lat, i.lon);
-    const e = g.get(k);
-    if (e) e.items.push(i);
-    else g.set(k, { key: k, lat: i.lat, lon: i.lon, items: [i] });
-  }
-  return Array.from(g.values());
-}
-function bmol(map, items) {
-  if (!map) return new Map();
-  const layout = new Map(),
-    sg = [];
-  for (const g of bmog(items)) {
-    for (const i of g.items) {
-      const p = map.project([i.lon, i.lat]);
-      let tg = null;
-      for (const c of sg) {
-        if (Math.hypot(c.sx - p.x, c.sy - p.y) <= OSD) {
-          tg = c;
-          break;
-        }
-      }
-      if (!tg) {
-        tg = { items: [], sx: p.x, sy: p.y, aLat: i.lat, aLon: i.lon };
-        sg.push(tg);
-      }
-      tg.items.push(i);
-      const n = tg.items.length;
-      tg.sx = (tg.sx * (n - 1) + p.x) / n;
-      tg.sy = (tg.sy * (n - 1) + p.y) / n;
-      tg.aLat = (tg.aLat * (n - 1) + i.lat) / n;
-      tg.aLon = (tg.aLon * (n - 1) + i.lon) / n;
-    }
-  }
-  for (const g of sg) {
-    for (const [idx, i] of g.items.entries()) {
-      const sm = Math.max(1, g.items.length - idx);
-      layout.set(i.ref, {
-        stackIndex: idx,
-        stackSize: g.items.length,
-        sizeMultiplier: sm,
-        markerSize: OBM * sm,
-        zIndex: 2000 + idx,
-        aLat: g.aLat,
-        aLon: g.aLon,
-      });
-    }
-  }
-  return layout;
-}
-function buildMarkerOverlapLayout(map, items) {
-  return bmol(map, items);
-}
-function buildMappableItems(items) {
-  const rows = Array.isArray(items) ? items : [];
-  return rows
-    .map((item) => {
-      if (Number.isFinite(item.lat) && Number.isFinite(item.lon))
-        return { ...item, approx: false };
-      const dn = String(item.display_name || "")
-        .trim()
-        .toLowerCase();
-      const peers = rows
-        .filter(
-          (c) =>
-            c.ref !== item.ref &&
-            Number.isFinite(c.lat) &&
-            Number.isFinite(c.lon) &&
-            String(c.display_name || "")
-              .trim()
-              .toLowerCase() === dn,
-        )
-        .sort(
-          (a, b) =>
-            Math.abs(
-              Number(a.candidate?.candidate_rank || 9999) -
-                Number(item.candidate?.candidate_rank || 9999),
-            ) -
-            Math.abs(
-              Number(b.candidate?.candidate_rank || 9999) -
-                Number(item.candidate?.candidate_rank || 9999),
-            ),
+  return (
+    <div className="space-y-2">
+      {rows.map((row) => {
+        const rowSeedReasons = getRowSeedReasons(row);
+        const details = formatEvidenceDetails(row.details);
+        return (
+          <div
+            key={`${row.evidence_type}-${row.source_global_station_id}-${row.target_global_station_id}-${row.score ?? ""}`}
+            className={cardClassName}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <strong className="font-display text-text-primary">
+                  {formatEvidenceTypeLabel(row.evidence_type)}
+                </strong>
+                {row.is_seed_rule === true && (
+                  <Tag className="border-blue/20 bg-blue-dim text-blue">
+                    Seed
+                  </Tag>
+                )}
+              </div>
+              <StatusPill v={row.status || "informational"}>
+                {formatEvidenceStatusLabel(row.status)}
+              </StatusPill>
+            </div>
+            <div className="flex gap-3 text-text-secondary mt-1">
+              <span>
+                {row.source_global_station_id} ↔ {row.target_global_station_id}
+              </span>
+              <span>{formatEvidenceValue(row)}</span>
+            </div>
+            {row.is_seed_rule === true && rowSeedReasons.length > 0 && (
+              <div className="text-blue text-xs mt-1">
+                Seeded by:{" "}
+                {rowSeedReasons.map(formatSeedReasonLabel).join(", ")}
+              </div>
+            )}
+            {details && (
+              <div className="text-text-muted text-xs mt-1">{details}</div>
+            )}
+          </div>
         );
-      if (peers.length === 0) return { ...item, approx: false };
-      const sp = peers.slice(0, 2);
-      return {
-        ...item,
-        lat: sp.reduce((s, c) => s + Number(c.lat), 0) / sp.length,
-        lon: sp.reduce((s, c) => s + Number(c.lon), 0) / sp.length,
-        approx: true,
-      };
-    })
-    .filter((i) => Number.isFinite(i.lat) && Number.isFinite(i.lon));
+      })}
+    </div>
+  );
 }
 function createMarkerEl(item, sel, om, onSelect) {
   const {
     stackSize: ss = 1,
-    markerSize: ms = OBM,
+    markerSize: ms = BASE_MARKER_SIZE,
     zIndex: z = 2000,
   } = om || {};
   const sh = document.createElement("button");
@@ -398,7 +295,10 @@ function createMarkerEl(item, sel, om, onSelect) {
   if (sel) {
     const r = document.createElement("span");
     r.className = "curation-marker__selection-ring";
-    r.style.setProperty("--selection-ring-size", `${ms + OSR * 2}px`);
+    r.style.setProperty(
+      "--selection-ring-size",
+      `${ms + MARKER_SELECTION_RING_SIZE * 2}px`,
+    );
     sh.appendChild(r);
   }
   return sh;
@@ -433,17 +333,13 @@ function CurationMap({
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    const nextStyle =
-      mapMode === "satellite"
-        ? resolveSatelliteMapStyle()
-        : resolveDefaultMapStyle();
-    map.setStyle(nextStyle);
+    map.setStyle(resolveMapStyle(mapMode));
   }, [mapMode]);
   useEffect(() => {
     const m = mapRef.current;
     if (!m) return;
     let fid = 0;
-    for (const mk of mkRef.current) mk.remove();
+    clearMarkers(mkRef.current);
     mkRef.current = [];
     const valid = (items || []).filter(
       (i) => Number.isFinite(i.lat) && Number.isFinite(i.lon),
@@ -475,7 +371,7 @@ function CurationMap({
           id="mapModeDefaultBtn"
           type="button"
           onClick={() => onToggleMapMode("default")}
-          className={`px-2.5 py-1 rounded-md text-xs font-bold font-display border backdrop-blur-md cursor-pointer transition-all ${mapMode === "default" ? "bg-amber/90 border-amber text-surface-0" : "bg-surface-0/50 border-white/10 text-white/80 hover:bg-surface-0/70"}`}
+          className={resolveMapModeButtonClassName("default", mapMode)}
         >
           Map
         </button>
@@ -483,7 +379,7 @@ function CurationMap({
           id="mapModeSatelliteBtn"
           type="button"
           onClick={() => onToggleMapMode("satellite")}
-          className={`px-2.5 py-1 rounded-md text-xs font-bold font-display border backdrop-blur-md cursor-pointer transition-all ${mapMode === "satellite" ? "bg-amber/90 border-amber text-surface-0" : "bg-surface-0/50 border-white/10 text-white/80 hover:bg-surface-0/70"}`}
+          className={resolveMapModeButtonClassName("satellite", mapMode)}
         >
           Sat
         </button>
@@ -565,10 +461,7 @@ function ClusterSidebar({
   onRefresh,
   loading,
 }) {
-  const ct =
-    Number.isFinite(totalCount) && totalCount > 0
-      ? totalCount
-      : clusters.length;
+  const ct = resolveClusterCount(totalCount, clusters);
   return (
     <aside className="bg-surface-1 border-r border-border flex flex-col overflow-hidden">
       <div className="flex items-center justify-between px-4 pt-4 pb-2">
@@ -644,14 +537,14 @@ function ClusterSidebar({
                 {c.display_name || c.cluster_id}
               </span>
               <Pill v={String(c.severity || "").toLowerCase()}>
-                {fmt(c.severity || "?")}
+                {formatLabel(c.severity || "?")}
               </Pill>
             </div>
             <div className="flex gap-1.5 flex-wrap items-center">
               <Pill
                 v={String(c.effective_status || c.status || "").toLowerCase()}
               >
-                {fmt(c.effective_status || c.status || "?")}
+                {formatLabel(c.effective_status || c.status || "?")}
               </Pill>
               <span className="text-text-muted text-xs font-display">
                 {c.candidate_count} cand.
@@ -690,31 +583,19 @@ function CandidateCard({
   onToggleExpand,
 }) {
   const c = item.candidate || {};
-  const memberNames =
-    item.member_refs?.map((r) =>
-      resolveDisplayNameForRef(r, workspace, candidateMap),
-    ) || [];
+  const memberNames = getCompositeMembers(item, workspace, candidateMap) || [];
   const modes = Array.isArray(c.service_context?.transport_modes)
     ? c.service_context.transport_modes
     : [];
   const ctx = c.context_summary || {};
-  const kB =
-    item.kind === "merge"
-      ? "border-l-[3px] border-l-teal"
-      : item.kind === "group"
-        ? "border-l-[3px] border-l-orange"
-        : "";
+  const kB = resolveKindAccent(item.kind);
   const ref = item.ref;
   const fg =
-    item.kind === "group"
-      ? (workspace.groups || []).find((g) => g.entity_id === parseRef(ref).id)
-      : null;
+    item.kind === "group" ? findWorkspaceEntity("group", workspace, ref) : null;
   const fm =
-    item.kind === "merge"
-      ? (workspace.merges || []).find((m) => m.entity_id === parseRef(ref).id)
-      : null;
+    item.kind === "merge" ? findWorkspaceEntity("merge", workspace, ref) : null;
   const isComposite = item.kind === "merge" || item.kind === "group";
-  const inputIdBase = ref.replace(/[^a-zA-Z0-9_-]/g, "-");
+  const inputIdBase = ref.replaceAll(/[^a-zA-Z0-9_-]/g, "-");
   const rawRenameInputId = `rename-${inputIdBase}`;
   const mergeNameInputId = `merge-name-${inputIdBase}`;
   const groupNameInputId = `group-name-${inputIdBase}`;
@@ -755,7 +636,7 @@ function CandidateCard({
               ))}
               <Tag>{ctx.stop_point_count ?? 0} stops</Tag>
               <Tag>{ctx.route_count ?? 0} routes</Tag>
-              <Tag>{fmtCoord(c.coord_status)}</Tag>
+              <Tag>{formatCoordinateStatusLabel(c.coord_status)}</Tag>
               <Tag>{(item.provider_labels || []).length} feeds</Tag>
             </div>
           )}
@@ -854,7 +735,7 @@ function CandidateCard({
                       {resolveDisplayNameForRef(r, workspace, candidateMap)}
                     </div>
                     <div className="text-[0.65rem] font-mono text-text-muted truncate">
-                      {r.replace("node:", "")}
+                      {r.replaceAll("node:", "")}
                     </div>
                   </div>
                   <button
@@ -947,7 +828,7 @@ function CandidateCard({
                       className="text-[0.65rem] font-mono text-text-muted/70 truncate"
                       title={n.source_ref}
                     >
-                      {n.source_ref.replace("node:", "")}
+                      {n.source_ref.replaceAll("node:", "")}
                     </span>
                   </div>
                   <button
@@ -1038,9 +919,9 @@ function EvidencePanel({ clusterDetail, focusedItem, workspace }) {
       ids.includes(r.source_global_station_id) ||
       ids.includes(r.target_global_station_id),
   );
-  const tcs = getTypeC(clusterDetail?.evidence_summary);
-  const ccs = getCategoryC(clusterDetail?.evidence_summary);
-  const scs = getSeedRuleC(clusterDetail?.evidence_summary);
+  const tcs = getEvidenceTypeCounts(clusterDetail?.evidence_summary);
+  const ccs = getEvidenceCategoryCounts(clusterDetail?.evidence_summary);
+  const scs = getSeedRuleCounts(clusterDetail?.evidence_summary);
   const seedPairs = pairs.filter(
     (r) => Array.isArray(r.seed_reasons) && r.seed_reasons.length > 0,
   );
@@ -1054,7 +935,7 @@ function EvidencePanel({ clusterDetail, focusedItem, workspace }) {
           {["supporting", "warning", "missing", "informational"].map((s) => (
             <StatusPill key={s} v={s}>
               {formatEvidenceStatusLabel(s)}{" "}
-              {getSumC(clusterDetail?.evidence_summary, s)}
+              {getSummaryCount(clusterDetail?.evidence_summary, s)}
             </StatusPill>
           ))}
         </div>
@@ -1062,7 +943,7 @@ function EvidencePanel({ clusterDetail, focusedItem, workspace }) {
           <div className="flex flex-wrap gap-1.5">
             {ccs.map((e) => (
               <Tag key={e.category}>
-                {fmtEvCategory(e.category)} {e.count}
+                {formatEvidenceCategoryLabel(e.category)} {e.count}
               </Tag>
             ))}
           </div>
@@ -1074,7 +955,7 @@ function EvidencePanel({ clusterDetail, focusedItem, workspace }) {
                 key={e.reason}
                 className="border-blue/20 bg-blue-dim text-blue"
               >
-                Seed {fmtSeedReason(e.reason)} {e.count}
+                Seed {formatSeedReasonLabel(e.reason)} {e.count}
               </Tag>
             ))}
           </div>
@@ -1110,11 +991,13 @@ function EvidencePanel({ clusterDetail, focusedItem, workspace }) {
                       key={seed}
                       className="border-blue/20 bg-blue-dim text-blue"
                     >
-                      Seed {fmtSeedReason(seed)}
+                      Seed {formatSeedReasonLabel(seed)}
                     </Tag>
                   ))}
                   {(r.categories || []).map((category) => (
-                    <Tag key={category}>{fmtEvCategory(category)}</Tag>
+                    <Tag key={category}>
+                      {formatEvidenceCategoryLabel(category)}
+                    </Tag>
                   ))}
                 </div>
                 <div className="flex gap-3 mt-1.5 text-xs font-display">
@@ -1122,9 +1005,7 @@ function EvidencePanel({ clusterDetail, focusedItem, workspace }) {
                   <span className="text-orange">⚠{r.warning_count || 0}</span>
                   <span className="text-red">✗{r.missing_count || 0}</span>
                   <span className="text-text-primary font-bold">
-                    {Number.isFinite(Number(r.score))
-                      ? Number(r.score).toFixed(2)
-                      : "—"}
+                    {resolveSeedScore(r.score)}
                   </span>
                 </div>
               </div>
@@ -1135,148 +1016,19 @@ function EvidencePanel({ clusterDetail, focusedItem, workspace }) {
 
       {coreRows.length > 0 && (
         <EvidenceSection title="Core Match">
-          <div className="space-y-2">
-            {coreRows.map((r) => {
-              const rowSeedReasons = getRowSeedReasons(r);
-              return (
-                <div
-                  key={`${r.evidence_type}-${r.source_global_station_id}-${r.target_global_station_id}-${r.score ?? ""}`}
-                  className="border border-border rounded-xl px-3 py-2 bg-surface-2 text-sm"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <strong className="font-display text-text-primary">
-                        {formatEvidenceTypeLabel(r.evidence_type)}
-                      </strong>
-                      {r.is_seed_rule === true && (
-                        <Tag className="border-blue/20 bg-blue-dim text-blue">
-                          Seed
-                        </Tag>
-                      )}
-                    </div>
-                    <StatusPill v={r.status || "informational"}>
-                      {formatEvidenceStatusLabel(r.status)}
-                    </StatusPill>
-                  </div>
-                  <div className="flex gap-3 text-text-secondary mt-1">
-                    <span>
-                      {r.source_global_station_id} ↔{" "}
-                      {r.target_global_station_id}
-                    </span>
-                    <span>{fmtEvValue(r)}</span>
-                  </div>
-                  {r.is_seed_rule === true && rowSeedReasons.length > 0 && (
-                    <div className="text-blue text-xs mt-1">
-                      Seeded by: {rowSeedReasons.map(fmtSeedReason).join(", ")}
-                    </div>
-                  )}
-                  {fmtEvDetails(r.details) && (
-                    <div className="text-text-muted text-xs mt-1">
-                      {fmtEvDetails(r.details)}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+          <EvidenceRows rows={coreRows} />
         </EvidenceSection>
       )}
 
       {contextRows.length > 0 && (
         <EvidenceSection title="Network Context">
-          <div className="space-y-2">
-            {contextRows.map((r) => {
-              const rowSeedReasons = getRowSeedReasons(r);
-              return (
-                <div
-                  key={`${r.evidence_type}-${r.source_global_station_id}-${r.target_global_station_id}-${r.score ?? ""}`}
-                  className="border border-border rounded-xl px-3 py-2 bg-surface-2 text-sm"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <strong className="font-display text-text-primary">
-                        {formatEvidenceTypeLabel(r.evidence_type)}
-                      </strong>
-                      {r.is_seed_rule === true && (
-                        <Tag className="border-blue/20 bg-blue-dim text-blue">
-                          Seed
-                        </Tag>
-                      )}
-                    </div>
-                    <StatusPill v={r.status || "informational"}>
-                      {formatEvidenceStatusLabel(r.status)}
-                    </StatusPill>
-                  </div>
-                  <div className="flex gap-3 text-text-secondary mt-1">
-                    <span>
-                      {r.source_global_station_id} ↔{" "}
-                      {r.target_global_station_id}
-                    </span>
-                    <span>{fmtEvValue(r)}</span>
-                  </div>
-                  {r.is_seed_rule === true && rowSeedReasons.length > 0 && (
-                    <div className="text-blue text-xs mt-1">
-                      Seeded by: {rowSeedReasons.map(fmtSeedReason).join(", ")}
-                    </div>
-                  )}
-                  {fmtEvDetails(r.details) && (
-                    <div className="text-text-muted text-xs mt-1">
-                      {fmtEvDetails(r.details)}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+          <EvidenceRows rows={contextRows} />
         </EvidenceSection>
       )}
 
       {riskRows.length > 0 && (
         <EvidenceSection title="Risk / Conflict" tone="risk">
-          <div className="space-y-2">
-            {riskRows.map((r) => {
-              const rowSeedReasons = getRowSeedReasons(r);
-              return (
-                <div
-                  key={`${r.evidence_type}-${r.source_global_station_id}-${r.target_global_station_id}-${r.score ?? ""}`}
-                  className="border border-red/15 rounded-xl px-3 py-2 bg-surface-2 text-sm"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <strong className="font-display text-text-primary">
-                        {formatEvidenceTypeLabel(r.evidence_type)}
-                      </strong>
-                      {r.is_seed_rule === true && (
-                        <Tag className="border-blue/20 bg-blue-dim text-blue">
-                          Seed
-                        </Tag>
-                      )}
-                    </div>
-                    <StatusPill v={r.status || "informational"}>
-                      {formatEvidenceStatusLabel(r.status)}
-                    </StatusPill>
-                  </div>
-                  <div className="flex gap-3 text-text-secondary mt-1">
-                    <span>
-                      {r.source_global_station_id} ↔{" "}
-                      {r.target_global_station_id}
-                    </span>
-                    <span>{fmtEvValue(r)}</span>
-                  </div>
-                  {r.is_seed_rule === true && rowSeedReasons.length > 0 && (
-                    <div className="text-blue text-xs mt-1">
-                      Seeded by: {rowSeedReasons.map(fmtSeedReason).join(", ")}
-                    </div>
-                  )}
-                  {fmtEvDetails(r.details) && (
-                    <div className="text-text-muted text-xs mt-1">
-                      {fmtEvDetails(r.details)}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+          <EvidenceRows rows={riskRows} tone="risk" />
         </EvidenceSection>
       )}
 
@@ -1318,7 +1070,7 @@ export function CurationPage() {
   const [activeClusterId, setActiveClusterId] = useState(null);
   const [clusterDetail, setClusterDetail] = useState(null);
   const [workspace, setWorkspace] = useState(createEmptyWorkspace());
-  const [, setWorkspaceVersion] = useState(0);
+  const [workspaceVersion, setWorkspaceVersion] = useState(0);
   const [filters, setFilters] = useState({ country: "", status: "" });
   const [uiState, dispatch] = useReducer(uiReducer, undefined, createUiState);
   const [loading, setLoading] = useState(true);
@@ -1477,8 +1229,8 @@ export function CurationPage() {
       }
       if (e.key === "Escape") dispatch({ type: "clear_selection" });
     };
-    window.addEventListener("keydown", h);
-    return () => window.removeEventListener("keydown", h);
+    globalThis.addEventListener("keydown", h);
+    return () => globalThis.removeEventListener("keydown", h);
   }, [activeClusterId, showNotice]);
 
   const commit = useCallback((w, o = {}) => {
@@ -1635,7 +1387,7 @@ export function CurationPage() {
       if (!activeClusterId) return;
       try {
         const r = await resolveCluster(activeClusterId, st, workspace.note);
-        showNotice(`${fmt(st)} done.`, "success");
+        showNotice(`${formatLabel(st)} done.`, "success");
         await loadClusters();
         await loadDetail(r.next_cluster_id || activeClusterId);
       } catch (e) {
@@ -1659,7 +1411,7 @@ export function CurationPage() {
         dispatch({
           type: "set_selection",
           refs: rr,
-          lastSelectedIndex: rr.length > 0 ? railIdx.get(rr.at(-1)) || 0 : -1,
+          lastSelectedIndex: resolveSelectedIndex(railIdx, rr),
         });
       }
     } catch (e) {
@@ -1681,8 +1433,7 @@ export function CurationPage() {
       Array.from(
         new Set(
           selArr.flatMap((ref) => {
-            const parsed = parseRef(ref);
-            if (parsed.type !== "raw" && parsed.type !== "merge") return [];
+            if (!isMergeableRef(ref)) return [];
             return resolveRefMemberStationIds(ref, workspace);
           }),
         ),
@@ -1691,19 +1442,13 @@ export function CurationPage() {
   );
   const canMrg =
     mergeableStationIds.length >= 2 &&
-    selArr.some((r) => {
-      const t = parseRef(r).type;
-      return t === "raw" || t === "merge";
-    });
-  const canGrp =
-    selArr.filter((r) => {
-      const t = parseRef(r).type;
-      return t === "raw" || t === "merge";
-    }).length >= 2;
+    selArr.some((ref) => isMergeableRef(ref));
+  const canGrp = selArr.filter((ref) => isMergeableRef(ref)).length >= 2;
   const clSt = String(
     clusterDetail?.effective_status || clusterDetail?.status || "",
   ).toLowerCase();
   const canUn = clSt === "resolved" || clSt === "dismissed";
+  const clusterHeading = resolveClusterHeading(clusterDetail);
 
   return (
     <div className="h-screen grid grid-cols-[260px_1fr] bg-surface-0 overflow-hidden">
@@ -1727,15 +1472,9 @@ export function CurationPage() {
             <div className="flex items-center gap-2 px-4 py-2 bg-surface-1 border-b border-border shrink-0">
               <strong
                 className="text-text-primary font-display text-sm truncate max-w-[200px]"
-                title={
-                  clusterDetail
-                    ? clusterDetail.display_name || clusterDetail.cluster_id
-                    : "No cluster"
-                }
+                title={clusterHeading}
               >
-                {clusterDetail
-                  ? clusterDetail.display_name || clusterDetail.cluster_id
-                  : "No cluster"}
+                {clusterHeading}
               </strong>
               <span
                 id="saveStateIndicator"
@@ -1743,6 +1482,11 @@ export function CurationPage() {
               >
                 {saveState}
               </span>
+              {workspaceVersion > 0 && (
+                <span className="text-text-muted text-xs font-display">
+                  v{workspaceVersion}
+                </span>
+              )}
 
               <div className="flex items-center gap-1.5 ml-auto">
                 <button
@@ -1767,7 +1511,7 @@ export function CurationPage() {
                   onClick={canUn ? hUnresolve : () => hResolve("resolved")}
                   className="px-3 py-1.5 rounded-lg text-xs font-bold bg-green-dim border border-green/20 text-green cursor-pointer hover:bg-green/20 transition-colors"
                 >
-                  {canUn ? "Reopen" : "Resolve"}
+                  {resolveResolveButtonLabel(canUn)}
                 </button>
               </div>
             </div>
@@ -1775,7 +1519,7 @@ export function CurationPage() {
             {/* Notices */}
             {notice && (
               <div
-                className={`px-4 py-2 text-sm shrink-0 ${notice.tone === "error" ? "bg-red-dim text-red" : notice.tone === "success" ? "bg-green-dim text-green" : notice.tone === "warning" ? "bg-yellow-dim text-yellow" : "bg-blue-dim text-blue"}`}
+                className={`px-4 py-2 text-sm shrink-0 ${resolveNoticeToneClass(notice.tone)}`}
               >
                 {notice.message}
               </div>
@@ -1818,9 +1562,7 @@ export function CurationPage() {
                 className="flex items-center gap-2 px-4 py-2 bg-surface-1/80 border-b border-border shrink-0 flex-wrap"
               >
                 <span className="text-text-muted text-xs font-display mr-1">
-                  {uiState.selectedRefs.size > 0
-                    ? `${uiState.selectedRefs.size} sel.`
-                    : "Select"}
+                  {resolveSelectionLabel(uiState.selectedRefs)}
                 </span>
 
                 <button
@@ -1852,9 +1594,7 @@ export function CurationPage() {
                 </button>
                 <button
                   type="button"
-                  disabled={
-                    focused?.kind !== "group" && focused?.kind !== "merge"
-                  }
+                  disabled={!canSplitFocusedItem(focused)}
                   onClick={() => hSplit()}
                   className="px-2 py-1 rounded-lg text-xs font-bold bg-surface-3 border border-border text-text-secondary cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed hover:text-text-primary transition-colors"
                 >
@@ -1956,17 +1696,14 @@ export function CurationPage() {
               selectedRefs={uiState.selectedRefs}
               onSelectRef={hSelectRef}
               mapMode={uiState.mapMode}
-              onToggleMapMode={(m) => {
-                if (m === "default") {
-                  setDefaultMapMode();
-                  return;
-                }
-                if (m === "satellite") {
-                  setSatelliteMapMode();
-                  return;
-                }
-                dispatch({ type: "map_mode", mode: m });
-              }}
+              onToggleMapMode={(mode) =>
+                resolveMapModeHandler(mode, {
+                  setDefault: setDefaultMapMode,
+                  setSatellite: setSatelliteMapMode,
+                  setCustom: (nextMode) =>
+                    dispatch({ type: "map_mode", mode: nextMode }),
+                })
+              }
             />
           </div>
         </div>
@@ -1974,3 +1711,80 @@ export function CurationPage() {
     </div>
   );
 }
+
+EvidenceSection.propTypes = {
+  title: PropTypes.string.isRequired,
+  tone: PropTypes.string,
+  children: PropTypes.node,
+};
+
+EvidenceRows.propTypes = {
+  rows: PropTypes.arrayOf(evidenceRowShape).isRequired,
+  tone: PropTypes.string,
+};
+
+CurationMap.propTypes = {
+  items: PropTypes.arrayOf(railItemShape).isRequired,
+  selectedRefs: refSetShape.isRequired,
+  onSelectRef: PropTypes.func.isRequired,
+  mapMode: PropTypes.string.isRequired,
+  onToggleMapMode: PropTypes.func.isRequired,
+};
+
+Pill.propTypes = {
+  children: PropTypes.node,
+  v: PropTypes.string,
+  className: PropTypes.string,
+};
+
+StatusPill.propTypes = Pill.propTypes;
+
+Tag.propTypes = {
+  children: PropTypes.node,
+  className: PropTypes.string,
+};
+
+Badge.propTypes = Tag.propTypes;
+
+ClusterSidebar.propTypes = {
+  clusters: PropTypes.arrayOf(clusterListItemShape).isRequired,
+  totalCount: PropTypes.number,
+  activeClusterId: PropTypes.string,
+  filters: filtersShape.isRequired,
+  onFilterChange: PropTypes.func.isRequired,
+  onSelectCluster: PropTypes.func.isRequired,
+  onRefresh: PropTypes.func.isRequired,
+  loading: PropTypes.bool.isRequired,
+};
+
+CandidateCard.propTypes = {
+  item: railItemShape.isRequired,
+  index: PropTypes.number.isRequired,
+  selected: PropTypes.bool.isRequired,
+  focused: PropTypes.bool.isRequired,
+  expanded: PropTypes.bool.isRequired,
+  workspace: workspaceShape.isRequired,
+  candidateMap: PropTypes.shape({
+    get: PropTypes.func.isRequired,
+  }).isRequired,
+  onToggle: PropTypes.func.isRequired,
+  onFocus: PropTypes.func.isRequired,
+  onSplit: PropTypes.func.isRequired,
+  onRenameRef: PropTypes.func.isRequired,
+  onRenameComposite: PropTypes.func.isRequired,
+  onUpdateGroupTransfer: PropTypes.func.isRequired,
+  onUpdateGroupNodeLabel: PropTypes.func.isRequired,
+  onRemoveGroupMember: PropTypes.func.isRequired,
+  onRemoveMergeMember: PropTypes.func.isRequired,
+  onToggleExpand: PropTypes.func.isRequired,
+};
+
+EvidencePanel.propTypes = {
+  clusterDetail: clusterDetailShape,
+  focusedItem: railItemShape,
+  workspace: workspaceShape.isRequired,
+};
+
+HistoryPanel.propTypes = {
+  clusterDetail: clusterDetailShape,
+};

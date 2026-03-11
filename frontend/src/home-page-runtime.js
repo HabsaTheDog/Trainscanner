@@ -1,174 +1,24 @@
+import {
+  createBoundsState,
+  legLineCoordinates,
+  pickPrimaryRoute,
+  updateBounds,
+} from "./home-page-route-utils";
+import {
+  durationToText,
+  fetchJson,
+  formatDateTime,
+  formatTime,
+  mapStyleUrl,
+  parseBracketId,
+  pretty,
+} from "./home-page-utils";
 import maplibregl from "./maplibre";
-
-const BRACKET_ID_PATTERN = /\[(.+?)\]\s*$/;
-
-function pretty(payload) {
-  return JSON.stringify(payload, null, 2);
-}
 
 function clearElement(node) {
   while (node.firstChild) {
     node.firstChild.remove();
   }
-}
-
-function formatTime(value) {
-  if (!value) {
-    return "--:--";
-  }
-  const dt = new Date(value);
-  if (Number.isNaN(dt.getTime())) {
-    return String(value);
-  }
-  return dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
-function formatDateTime(value) {
-  if (!value) {
-    return "-";
-  }
-  const dt = new Date(value);
-  if (Number.isNaN(dt.getTime())) {
-    return String(value);
-  }
-  return dt.toLocaleString();
-}
-
-function durationToText(seconds) {
-  const total = Number(seconds || 0);
-  if (!Number.isFinite(total) || total <= 0) {
-    return "0m";
-  }
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.round((total % 3600) / 60);
-  if (hours > 0) {
-    return `${hours}h ${minutes}m`;
-  }
-  return `${minutes}m`;
-}
-
-function parseBracketId(value) {
-  const input = String(value || "").trim();
-  const match = BRACKET_ID_PATTERN.exec(input);
-  return match ? match[1].trim() : "";
-}
-
-async function fetchJson(url, options) {
-  const response = await fetch(url, options);
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const err = new Error(data.error || `Request failed (${response.status})`);
-    err.payload = data;
-    err.status = response.status;
-    throw err;
-  }
-  return data;
-}
-
-function protomapsStyleUrl() {
-  const key = String(globalThis.PROTOMAPS_API_KEY || "").trim();
-  if (!key) {
-    return null;
-  }
-  return `https://api.protomaps.com/styles/v4/light/en.json?key=${encodeURIComponent(key)}`;
-}
-
-function mapStyleUrl() {
-  const explicit = String(globalThis.MAP_STYLE_URL || "").trim();
-  if (explicit) {
-    return explicit;
-  }
-
-  const proto = protomapsStyleUrl();
-  if (proto) {
-    return proto;
-  }
-
-  // Fallback when no Protomaps key is configured.
-  return "https://tiles.openfreemap.org/styles/liberty";
-}
-
-function decodePolyline(encoded, precision) {
-  const coords = [];
-  if (!encoded || typeof encoded !== "string") {
-    return coords;
-  }
-
-  const factor = 10 ** (Number.isFinite(precision) ? precision : 5);
-  let index = 0;
-  let lat = 0;
-  let lon = 0;
-
-  while (index < encoded.length) {
-    let result = 0;
-    let shift = 0;
-    let byte = 0;
-
-    do {
-      byte = (encoded.codePointAt(index) ?? 63) - 63;
-      index += 1;
-      result |= (byte & 0x1f) << shift;
-      shift += 5;
-    } while (byte >= 0x20 && index < encoded.length + 1);
-
-    lat += result & 1 ? ~(result >> 1) : result >> 1;
-
-    result = 0;
-    shift = 0;
-    do {
-      byte = (encoded.codePointAt(index) ?? 63) - 63;
-      index += 1;
-      result |= (byte & 0x1f) << shift;
-      shift += 5;
-    } while (byte >= 0x20 && index < encoded.length + 1);
-
-    lon += result & 1 ? ~(result >> 1) : result >> 1;
-
-    coords.push([lon / factor, lat / factor]);
-  }
-
-  return coords;
-}
-
-function updateBounds(bounds, lon, lat) {
-  if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
-    return;
-  }
-  bounds.minLat = Math.min(bounds.minLat, lat);
-  bounds.maxLat = Math.max(bounds.maxLat, lat);
-  bounds.minLon = Math.min(bounds.minLon, lon);
-  bounds.maxLon = Math.max(bounds.maxLon, lon);
-  bounds.count += 1;
-}
-
-function legLineCoordinates(leg) {
-  if (leg?.legGeometry?.points) {
-    try {
-      const precision = Number(leg.legGeometry.precision);
-      const decoded = decodePolyline(leg.legGeometry.points, precision);
-      if (decoded.length >= 2) {
-        return decoded;
-      }
-    } catch {
-      // fallback below
-    }
-  }
-
-  if (
-    leg?.from &&
-    leg.to &&
-    Number.isFinite(leg.from.lat) &&
-    Number.isFinite(leg.from.lon) &&
-    Number.isFinite(leg.to.lat) &&
-    Number.isFinite(leg.to.lon)
-  ) {
-    return [
-      [leg.from.lon, leg.from.lat],
-      [leg.to.lon, leg.to.lat],
-    ];
-  }
-
-  return [];
 }
 
 function getFormFieldString(formData, key) {
@@ -305,11 +155,10 @@ export function initHomeApp() {
         return;
       }
       renderStationSuggestions(payload.stations || []);
-    } catch (err) {
+    } catch {
       if (requestId !== stationFetchCounter) {
         return;
       }
-      console.debug("Failed to load station suggestions", err);
       renderStationSuggestions([]);
     }
   }
@@ -512,17 +361,7 @@ export function initHomeApp() {
 
     clearMap();
 
-    const route = payload?.route || {};
-    const itineraries = Array.isArray(route.itineraries)
-      ? route.itineraries
-      : [];
-    const direct = Array.isArray(route.direct) ? route.direct : [];
-    let selected = null;
-    if (itineraries.length > 0) {
-      selected = itineraries[0];
-    } else if (direct.length > 0) {
-      selected = direct[0];
-    }
+    const selected = pickPrimaryRoute(payload?.route || {});
 
     if (
       !selected ||
@@ -535,13 +374,7 @@ export function initHomeApp() {
     }
 
     const features = [];
-    const bounds = {
-      minLat: Infinity,
-      maxLat: -Infinity,
-      minLon: Infinity,
-      maxLon: -Infinity,
-      count: 0,
-    };
+    const bounds = createBoundsState();
 
     selected.legs.forEach((leg, idx) => {
       const mode = String(leg.mode || "").toUpperCase();
@@ -567,8 +400,8 @@ export function initHomeApp() {
       }
     });
 
-    const from = route.from;
-    const to = route.to;
+    const from = payload?.route?.from;
+    const to = payload?.route?.to;
 
     clearMapMarkers();
     if (from && Number.isFinite(from.lon) && Number.isFinite(from.lat)) {

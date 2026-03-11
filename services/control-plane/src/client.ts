@@ -1,37 +1,62 @@
 import { Client, Connection } from "@temporalio/client";
-import { processStationEntityWorkflow } from "./workflows/processStationEntityWorkflow";
+import { resolveTemporalAddress } from "./config";
+import { logError, logInfo } from "./logging";
+import {
+  processStationEntityWorkflow,
+  type StationEntityParams,
+} from "./workflows/processStationEntityWorkflow";
 
-function run() {
-  return (async () => {
-    try {
-      // Connect to the default Server location
-      const connection = await Connection.connect({
-        address: "localhost:7233",
-      });
-
-      // In production, instantiate the Client using a namespace
-      const client = new Client({
-        connection,
-        // namespace: 'foo.bar', // connects to 'default' namespace if omitted
-      });
-
-      const handle = await client.workflow.start(processStationEntityWorkflow, {
-        taskQueue: "entity-update",
-        // In practice, use a meaningful business ID, like a station ID
-        workflowId: `test-station-workflow-${Date.now()}`,
-        args: [{ stationId: "8000105", name: "Frankfurt (Main) Hbf" }],
-      });
-
-      console.log(`Started workflow ${handle.workflowId}`);
-
-      // Optional: wait for result
-      const result = await handle.result();
-      console.log("Workflow result:", result);
-    } catch (err) {
-      console.error(err);
-      process.exit(1);
-    }
-  })();
+export function buildConnectionOptions(env: NodeJS.ProcessEnv = process.env) {
+  return {
+    address: resolveTemporalAddress(env),
+  };
 }
 
-void run();
+export function buildWorkflowStartOptions(now = Date.now()): {
+  taskQueue: string;
+  workflowId: string;
+  args: [StationEntityParams];
+} {
+  return {
+    taskQueue: "entity-update",
+    workflowId: `test-station-workflow-${now}`,
+    args: [{ stationId: "8000105", name: "Frankfurt (Main) Hbf" }],
+  };
+}
+
+export async function run() {
+  const connection = await Connection.connect(buildConnectionOptions());
+  const client = new Client({
+    connection,
+  });
+
+  const handle = await client.workflow.start(
+    processStationEntityWorkflow,
+    buildWorkflowStartOptions(),
+  );
+
+  logInfo("Started workflow", { workflowId: handle.workflowId });
+  const result = await handle.result();
+  logInfo("Workflow result received", {
+    workflowId: handle.workflowId,
+    result,
+  });
+}
+
+export async function runCli() {
+  try {
+    await run();
+    return 0;
+  } catch (err) {
+    logError("Workflow client failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return 1;
+  }
+}
+
+if (require.main === module) {
+  void runCli().then((exitCode) => {
+    process.exitCode = exitCode;
+  });
+}

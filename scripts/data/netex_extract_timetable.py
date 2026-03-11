@@ -11,7 +11,7 @@ import sys
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 import lxml.etree as etree
 
@@ -237,6 +237,42 @@ def parse_service_journey_availability_refs(journey_elem: etree._Element) -> lis
     return refs
 
 
+def _resolve_call_stop_ref(call: etree._Element) -> str:
+    for field_name in ("ScheduledStopPointRef", "StopPointRef", "StopPlaceRef"):
+        scheduled_stop_ref = child_ref(call, field_name)
+        if scheduled_stop_ref:
+            return scheduled_stop_ref
+    return ""
+
+
+def _normalize_stop_time_pair(
+    arrival_time: str,
+    departure_time: str,
+) -> tuple[str, str]:
+    if not arrival_time and departure_time:
+        arrival_time = departure_time
+    if not departure_time and arrival_time:
+        departure_time = arrival_time
+    return arrival_time, departure_time
+
+
+def _build_raw_stop_time(
+    *,
+    order: int,
+    fallback_order: int,
+    arrival_time: str,
+    departure_time: str,
+    metadata: dict[str, str],
+) -> dict[str, object]:
+    return {
+        "order": order,
+        "fallback_order": fallback_order,
+        "arrival_time": arrival_time,
+        "departure_time": departure_time,
+        "metadata": metadata,
+    }
+
+
 def extract_call_stop_times(
     *,
     journey_elem: etree._Element,
@@ -252,11 +288,7 @@ def extract_call_stop_times(
         if order <= 0:
             order = fallback_order
 
-        scheduled_stop_ref = child_ref(call, "ScheduledStopPointRef")
-        if not scheduled_stop_ref:
-            scheduled_stop_ref = child_ref(call, "StopPointRef")
-        if not scheduled_stop_ref:
-            scheduled_stop_ref = child_ref(call, "StopPlaceRef")
+        scheduled_stop_ref = _resolve_call_stop_ref(call)
         provider_stop_place_ref = stop_point_to_stop_place.get(scheduled_stop_ref, "")
         provider_stop_point_ref = scheduled_stop_ref
         if not provider_stop_point_ref:
@@ -269,10 +301,10 @@ def extract_call_stop_times(
         departure_time = nested_child_text(call, ["Departure", "Time"]) or child_text(
             call, "DepartureTime"
         )
-        if not arrival_time and departure_time:
-            arrival_time = departure_time
-        if not departure_time and arrival_time:
-            departure_time = arrival_time
+        arrival_time, departure_time = _normalize_stop_time_pair(
+            arrival_time,
+            departure_time,
+        )
         if not arrival_time and not departure_time:
             continue
 
@@ -284,35 +316,20 @@ def extract_call_stop_times(
             "stop_time_source": "call",
         }
         raw_stop_times.append(
-            {
-                "order": order,
-                "fallback_order": fallback_order,
-                "arrival_time": arrival_time,
-                "departure_time": departure_time,
-                "metadata": metadata,
-            }
+            _build_raw_stop_time(
+                order=order,
+                fallback_order=fallback_order,
+                arrival_time=arrival_time,
+                departure_time=departure_time,
+                metadata=metadata,
+            )
         )
     return raw_stop_times
 
 
-def append_trip_rows(
-    *,
+def _resolve_service_id(
     journey_elem: etree._Element,
-    entry: str,
-    args: argparse.Namespace,
-    summary: Summary,
-    trip_writer: csv.DictWriter,
-    stop_time_writer: csv.DictWriter,
-    seen_trip_ids: set[str],
-    seen_trip_stop_times: set[tuple[str, int]],
-    line_meta: dict[str, dict[str, str]],
-    stop_point_to_stop_place: dict[str, str],
-    pattern_map: dict[str, dict[str, object]],
-) -> None:
-    provider_trip_ref = clean_text(journey_elem.attrib.get("id"))
-    if not provider_trip_ref:
-        return
-
+) -> tuple[list[str], list[str], str]:
     day_type_refs = parse_service_journey_day_types(journey_elem)
     availability_refs = parse_service_journey_availability_refs(journey_elem)
     service_id = (
@@ -320,7 +337,15 @@ def append_trip_rows(
         if day_type_refs
         else (availability_refs[0] if availability_refs else "")
     )
+    return day_type_refs, availability_refs, service_id
 
+
+def _resolve_line_context(
+    journey_elem: etree._Element,
+    summary: Summary,
+    line_meta: dict[str, dict[str, str]],
+    pattern_map: dict[str, dict[str, object]],
+) -> tuple[str, dict[str, object] | None, dict[str, str]]:
     pattern_ref = child_ref(journey_elem, "ServiceJourneyPatternRef")
     pattern_info = pattern_map.get(pattern_ref) if pattern_ref else None
     if pattern_ref and pattern_info is None:
@@ -331,127 +356,142 @@ def append_trip_rows(
         line_ref = str(pattern_info.get("line_ref") or "")
     if not line_ref:
         line_ref = child_ref(journey_elem, "LineRef")
-    line_info = line_meta.get(line_ref, {})
+    return pattern_ref, pattern_info, line_meta.get(line_ref, {})
 
-    route_id = line_ref
-    route_short_name = (
-        line_info.get("short_name") or line_info.get("public_code") or route_id
-    )
-    route_long_name = line_info.get("name") or route_short_name
-    transport_mode = child_text(journey_elem, "TransportMode") or line_info.get(
-        "transport_mode", ""
-    )
-    trip_headsign = route_long_name or route_short_name or provider_trip_ref
 
-    trip_fact_id = stable_id(
-        "ttf", f"{args.dataset_id}|{args.source_id}|{provider_trip_ref}"
-    )
-
+def _write_trip_row(
+    *,
+    args: argparse.Namespace,
+    entry: str,
+    journey_elem: etree._Element,
+    trip_writer: csv.DictWriter,
+    summary: Summary,
+    seen_trip_ids: set[str],
+    provider_trip_ref: str,
+    trip_fact_id: str,
+    route_id: str,
+    route_short_name: str,
+    route_long_name: str,
+    trip_headsign: str,
+    transport_mode: str,
+    service_id: str,
+    pattern_ref: str,
+    line_ref: str,
+    day_type_refs: list[str],
+    availability_refs: list[str],
+) -> None:
     if trip_fact_id in seen_trip_ids:
         summary.duplicate_trips_skipped += 1
-    else:
-        payload = {
-            "source_file": entry,
-            "service_journey_pattern_ref": pattern_ref,
-            "line_ref": line_ref,
-            "day_type_refs": day_type_refs,
-            "availability_condition_refs": availability_refs,
-            "import_run_id": args.import_run_id,
-            "provider_slug": args.provider_slug,
-            "country": args.country,
-            "snapshot_date": args.snapshot_date,
-            "manifest_sha256": args.manifest_sha256,
-        }
-        trip_writer.writerow(
-            {
-                "trip_fact_id": trip_fact_id,
-                "dataset_id": args.dataset_id,
-                "source_id": args.source_id,
-                "provider_trip_ref": provider_trip_ref,
-                "service_id": service_id,
-                "route_id": route_id,
-                "route_short_name": route_short_name,
-                "route_long_name": route_long_name,
-                "trip_headsign": trip_headsign,
-                "transport_mode": transport_mode,
-                "trip_start_date": "",
-                "trip_end_date": "",
-                "raw_payload": json.dumps(
-                    payload, ensure_ascii=True, separators=(",", ":")
-                ),
-            }
-        )
-        seen_trip_ids.add(trip_fact_id)
-        summary.trips_written += 1
-
-    raw_stop_times: list[dict[str, Any]] = []
-    if pattern_info is not None:
-        pattern_points_raw = pattern_info.get("points")
-        pattern_points = (
-            cast(dict[str, dict[str, object]], pattern_points_raw)
-            if isinstance(pattern_points_raw, dict)
-            else {}
-        )
-        fallback_order = 0
-        for passing in journey_elem.iterfind(".//{*}TimetabledPassingTime"):
-            fallback_order += 1
-            point_ref = child_ref(passing, "StopPointInJourneyPatternRef")
-            point_info = pattern_points.get(point_ref) or {}
-            scheduled_stop_ref = str(point_info.get("scheduled_stop_ref") or "")
-            order_value = point_info.get("order")
-            order = parse_int(
-                str(order_value) if order_value is not None else "",
-                fallback_order,
-            )
-            if order <= 0:
-                order = fallback_order
-
-            provider_stop_place_ref = stop_point_to_stop_place.get(
-                scheduled_stop_ref, ""
-            )
-            provider_stop_point_ref = scheduled_stop_ref
-            if not provider_stop_point_ref:
-                summary.stop_times_missing_stop_point += 1
-                continue
-
-            arrival_time = child_text(passing, "ArrivalTime")
-            departure_time = child_text(passing, "DepartureTime")
-            if not arrival_time and departure_time:
-                arrival_time = departure_time
-            if not departure_time and arrival_time:
-                departure_time = arrival_time
-            if not arrival_time and not departure_time:
-                continue
-
-            metadata = {
-                "provider_stop_point_ref": provider_stop_point_ref,
-                "provider_stop_place_ref": provider_stop_place_ref,
-                "scheduled_stop_point_ref": scheduled_stop_ref,
-                "stop_point_in_journey_pattern_ref": point_ref,
-                "source_file": entry,
-                "stop_time_source": "timetabled_passing_time",
-            }
-            raw_stop_times.append(
-                {
-                    "order": order,
-                    "fallback_order": fallback_order,
-                    "arrival_time": arrival_time,
-                    "departure_time": departure_time,
-                    "metadata": metadata,
-                }
-            )
-
-    if not raw_stop_times:
-        raw_stop_times = extract_call_stop_times(
-            journey_elem=journey_elem,
-            entry=entry,
-            stop_point_to_stop_place=stop_point_to_stop_place,
-            summary=summary,
-        )
-
-    if not raw_stop_times:
         return
 
+    payload = {
+        "source_file": entry,
+        "service_journey_pattern_ref": pattern_ref,
+        "line_ref": line_ref,
+        "day_type_refs": day_type_refs,
+        "availability_condition_refs": availability_refs,
+        "import_run_id": args.import_run_id,
+        "provider_slug": args.provider_slug,
+        "country": args.country,
+        "snapshot_date": args.snapshot_date,
+        "manifest_sha256": args.manifest_sha256,
+    }
+    trip_writer.writerow(
+        {
+            "trip_fact_id": trip_fact_id,
+            "dataset_id": args.dataset_id,
+            "source_id": args.source_id,
+            "provider_trip_ref": provider_trip_ref,
+            "service_id": service_id,
+            "route_id": route_id,
+            "route_short_name": route_short_name,
+            "route_long_name": route_long_name,
+            "trip_headsign": trip_headsign,
+            "transport_mode": transport_mode,
+            "trip_start_date": "",
+            "trip_end_date": "",
+            "raw_payload": json.dumps(
+                payload, ensure_ascii=True, separators=(",", ":")
+            ),
+        }
+    )
+    seen_trip_ids.add(trip_fact_id)
+    summary.trips_written += 1
+
+
+def _build_pattern_stop_times(
+    *,
+    journey_elem: etree._Element,
+    entry: str,
+    summary: Summary,
+    stop_point_to_stop_place: dict[str, str],
+    pattern_info: dict[str, object] | None,
+) -> list[dict[str, object]]:
+    if pattern_info is None:
+        return []
+
+    raw_stop_times: list[dict[str, object]] = []
+    pattern_points_raw = pattern_info.get("points")
+    pattern_points = (
+        cast(dict[str, dict[str, object]], pattern_points_raw)
+        if isinstance(pattern_points_raw, dict)
+        else {}
+    )
+    fallback_order = 0
+    for passing in journey_elem.iterfind(".//{*}TimetabledPassingTime"):
+        fallback_order += 1
+        point_ref = child_ref(passing, "StopPointInJourneyPatternRef")
+        point_info = pattern_points.get(point_ref) or {}
+        scheduled_stop_ref = str(point_info.get("scheduled_stop_ref") or "")
+        order_value = point_info.get("order")
+        order = parse_int(
+            str(order_value) if order_value is not None else "",
+            fallback_order,
+        )
+        if order <= 0:
+            order = fallback_order
+
+        provider_stop_place_ref = stop_point_to_stop_place.get(scheduled_stop_ref, "")
+        provider_stop_point_ref = scheduled_stop_ref
+        if not provider_stop_point_ref:
+            summary.stop_times_missing_stop_point += 1
+            continue
+
+        arrival_time, departure_time = _normalize_stop_time_pair(
+            child_text(passing, "ArrivalTime"),
+            child_text(passing, "DepartureTime"),
+        )
+        if not arrival_time and not departure_time:
+            continue
+
+        metadata = {
+            "provider_stop_point_ref": provider_stop_point_ref,
+            "provider_stop_place_ref": provider_stop_place_ref,
+            "scheduled_stop_point_ref": scheduled_stop_ref,
+            "stop_point_in_journey_pattern_ref": point_ref,
+            "source_file": entry,
+            "stop_time_source": "timetabled_passing_time",
+        }
+        raw_stop_times.append(
+            _build_raw_stop_time(
+                order=order,
+                fallback_order=fallback_order,
+                arrival_time=arrival_time,
+                departure_time=departure_time,
+                metadata=metadata,
+            )
+        )
+    return raw_stop_times
+
+
+def _write_stop_time_rows(
+    *,
+    trip_fact_id: str,
+    raw_stop_times: list[dict[str, object]],
+    summary: Summary,
+    stop_time_writer: csv.DictWriter,
+    seen_trip_stop_times: set[tuple[str, int]],
+) -> None:
     raw_stop_times.sort(
         key=lambda item: (
             cast(int, item["order"]),
@@ -480,6 +520,150 @@ def append_trip_rows(
         )
         seen_trip_stop_times.add(key)
         summary.trip_stop_times_written += 1
+
+
+def append_trip_rows(
+    *,
+    journey_elem: etree._Element,
+    entry: str,
+    args: argparse.Namespace,
+    summary: Summary,
+    trip_writer: csv.DictWriter,
+    stop_time_writer: csv.DictWriter,
+    seen_trip_ids: set[str],
+    seen_trip_stop_times: set[tuple[str, int]],
+    line_meta: dict[str, dict[str, str]],
+    stop_point_to_stop_place: dict[str, str],
+    pattern_map: dict[str, dict[str, object]],
+) -> None:
+    provider_trip_ref = clean_text(journey_elem.attrib.get("id"))
+    if not provider_trip_ref:
+        return
+
+    day_type_refs, availability_refs, service_id = _resolve_service_id(journey_elem)
+    pattern_ref, pattern_info, line_info = _resolve_line_context(
+        journey_elem,
+        summary,
+        line_meta,
+        pattern_map,
+    )
+    line_ref = str(pattern_info.get("line_ref") or "") if pattern_info else ""
+    if not line_ref:
+        line_ref = child_ref(journey_elem, "LineRef")
+
+    route_id = line_ref
+    route_short_name = (
+        line_info.get("short_name") or line_info.get("public_code") or route_id
+    )
+    route_long_name = line_info.get("name") or route_short_name
+    transport_mode = child_text(journey_elem, "TransportMode") or line_info.get(
+        "transport_mode", ""
+    )
+    trip_headsign = route_long_name or route_short_name or provider_trip_ref
+
+    trip_fact_id = stable_id(
+        "ttf", f"{args.dataset_id}|{args.source_id}|{provider_trip_ref}"
+    )
+
+    _write_trip_row(
+        args=args,
+        entry=entry,
+        journey_elem=journey_elem,
+        trip_writer=trip_writer,
+        summary=summary,
+        seen_trip_ids=seen_trip_ids,
+        provider_trip_ref=provider_trip_ref,
+        trip_fact_id=trip_fact_id,
+        route_id=route_id,
+        route_short_name=route_short_name,
+        route_long_name=route_long_name,
+        trip_headsign=trip_headsign,
+        transport_mode=transport_mode,
+        service_id=service_id,
+        pattern_ref=pattern_ref,
+        line_ref=line_ref,
+        day_type_refs=day_type_refs,
+        availability_refs=availability_refs,
+    )
+
+    raw_stop_times = _build_pattern_stop_times(
+        journey_elem=journey_elem,
+        entry=entry,
+        summary=summary,
+        stop_point_to_stop_place=stop_point_to_stop_place,
+        pattern_info=pattern_info,
+    )
+
+    if not raw_stop_times:
+        raw_stop_times = extract_call_stop_times(
+            journey_elem=journey_elem,
+            entry=entry,
+            stop_point_to_stop_place=stop_point_to_stop_place,
+            summary=summary,
+        )
+
+    if not raw_stop_times:
+        return
+
+    _write_stop_time_rows(
+        trip_fact_id=trip_fact_id,
+        raw_stop_times=raw_stop_times,
+        summary=summary,
+        stop_time_writer=stop_time_writer,
+        seen_trip_stop_times=seen_trip_stop_times,
+    )
+
+
+def _handle_entry_element(
+    *,
+    tag: str,
+    elem: etree._Element,
+    entry: str,
+    args: argparse.Namespace,
+    summary: Summary,
+    trip_writer: csv.DictWriter,
+    stop_time_writer: csv.DictWriter,
+    seen_trip_ids: set[str],
+    seen_trip_stop_times: set[tuple[str, int]],
+    line_meta: dict[str, dict[str, str]],
+    stop_point_to_stop_place: dict[str, str],
+    pattern_map: dict[str, dict[str, object]],
+) -> None:
+    if tag == "Line":
+        parsed = parse_line_meta(elem)
+        if parsed:
+            line_id, payload = parsed
+            line_meta[line_id] = payload
+        return
+    if tag == "PassengerStopAssignment":
+        parsed = parse_passenger_stop_assignment(elem)
+        if parsed:
+            scheduled_ref, stop_place_ref = parsed
+            if scheduled_ref:
+                stop_point_to_stop_place[scheduled_ref] = stop_place_ref
+        return
+    if tag == "ServiceJourneyPattern":
+        parsed = parse_journey_pattern(elem)
+        if parsed:
+            pattern_id, payload = parsed
+            pattern_map[pattern_id] = payload
+        return
+    if tag != "ServiceJourney":
+        return
+    summary.service_journeys_found += 1
+    append_trip_rows(
+        journey_elem=elem,
+        entry=entry,
+        args=args,
+        summary=summary,
+        trip_writer=trip_writer,
+        stop_time_writer=stop_time_writer,
+        seen_trip_ids=seen_trip_ids,
+        seen_trip_stop_times=seen_trip_stop_times,
+        line_meta=line_meta,
+        stop_point_to_stop_place=stop_point_to_stop_place,
+        pattern_map=pattern_map,
+    )
 
 
 def scan_entry(
@@ -521,39 +705,20 @@ def scan_entry(
         )
 
         for _, elem in context:
-            tag = local_name(elem.tag)
-            if tag == "Line":
-                parsed = parse_line_meta(elem)
-                if parsed:
-                    line_id, payload = parsed
-                    line_meta[line_id] = payload
-            elif tag == "PassengerStopAssignment":
-                parsed = parse_passenger_stop_assignment(elem)
-                if parsed:
-                    scheduled_ref, stop_place_ref = parsed
-                    if scheduled_ref:
-                        stop_point_to_stop_place[scheduled_ref] = stop_place_ref
-            elif tag == "ServiceJourneyPattern":
-                parsed = parse_journey_pattern(elem)
-                if parsed:
-                    pattern_id, payload = parsed
-                    pattern_map[pattern_id] = payload
-            elif tag == "ServiceJourney":
-                summary.service_journeys_found += 1
-                append_trip_rows(
-                    journey_elem=elem,
-                    entry=entry,
-                    args=args,
-                    summary=summary,
-                    trip_writer=trip_writer,
-                    stop_time_writer=stop_time_writer,
-                    seen_trip_ids=seen_trip_ids,
-                    seen_trip_stop_times=seen_trip_stop_times,
-                    line_meta=line_meta,
-                    stop_point_to_stop_place=stop_point_to_stop_place,
-                    pattern_map=pattern_map,
-                )
-
+            _handle_entry_element(
+                tag=local_name(elem.tag),
+                elem=elem,
+                entry=entry,
+                args=args,
+                summary=summary,
+                trip_writer=trip_writer,
+                stop_time_writer=stop_time_writer,
+                seen_trip_ids=seen_trip_ids,
+                seen_trip_stop_times=seen_trip_stop_times,
+                line_meta=line_meta,
+                stop_point_to_stop_place=stop_point_to_stop_place,
+                pattern_map=pattern_map,
+            )
             clear_element(elem)
 
 

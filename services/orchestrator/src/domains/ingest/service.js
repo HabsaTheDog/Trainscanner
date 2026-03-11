@@ -3,6 +3,7 @@ const {
   buildIdempotencyKey,
   createPipelineLogger,
 } = require("../../core/pipeline-runner");
+const { readJobExecutionConfig } = require("../../core/runtime");
 const { createPostgisClient } = require("../../data/postgis/client");
 const {
   createPipelineJobsRepo,
@@ -21,13 +22,10 @@ function createIngestService(deps = {}) {
       const rootDir = options.rootDir || process.cwd();
       const args = Array.isArray(options.args) ? options.args : [];
       const runId = options.runId || "";
-      const defaultJobOrchestrationEnabled =
-        String(
-          process.env.PIPELINE_JOB_ORCHESTRATION_ENABLED || "true",
-        ).toLowerCase() !== "false";
+      const jobExecutionConfig = readJobExecutionConfig(options.env);
       const jobOrchestrationEnabled =
         options.jobOrchestrationEnabled === undefined
-          ? defaultJobOrchestrationEnabled
+          ? jobExecutionConfig.jobOrchestrationEnabled
           : Boolean(options.jobOrchestrationEnabled);
       const helpRequested = args.includes("--help") || args.includes("-h");
 
@@ -66,14 +64,8 @@ function createIngestService(deps = {}) {
         runContext: {
           args,
         },
-        maxAttempts: Number.parseInt(
-          process.env.PIPELINE_JOB_MAX_ATTEMPTS || "3",
-          10,
-        ),
-        maxConcurrent: Number.parseInt(
-          process.env.PIPELINE_JOB_MAX_CONCURRENT || "1",
-          10,
-        ),
+        maxAttempts: jobExecutionConfig.maxAttempts,
+        maxConcurrent: jobExecutionConfig.maxConcurrent,
         execute: async ({ updateCheckpoint }) => {
           const result = await runScriptCall();
           await updateCheckpoint({

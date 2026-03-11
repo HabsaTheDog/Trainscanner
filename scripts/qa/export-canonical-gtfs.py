@@ -13,6 +13,7 @@ import tempfile
 import time
 import zipfile
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import NoReturn
@@ -26,6 +27,32 @@ VALID_TIERS = {"high-speed", "regional", "local", "all"}
 VALID_QUERY_MODES = {"legacy", "optimized"}
 DEFAULT_PROGRESS_INTERVAL_SEC = 20
 PARALLEL_SHM_ERROR_TOKEN = "could not resize shared memory segment"
+GTFS_CORE_FILES = [
+    "agency.txt",
+    "stops.txt",
+    "routes.txt",
+    "trips.txt",
+    "stop_times.txt",
+    "calendar.txt",
+]
+
+
+@dataclass(frozen=True)
+class ExportBatchOptions:
+    profile: str
+    requested_tier: str
+    as_of: str
+    country: str
+    source_id: str
+    batch_size_trips: int
+    agency_url: str
+    output_zip: str
+    query_mode: str
+    benchmark_max_sources: int
+    benchmark_max_batches: int
+    benchmark_max_trips: int
+    sql_profile_sample: bool
+    progress_interval_sec: int
 
 
 def fail(msg: str) -> NoReturn:
@@ -185,6 +212,16 @@ def _parse_psql_csv(content: str):
 def _build_psql_cmd(
     query: str, *, csv_mode: bool, pgoptions_override: str | None = None
 ):
+    settings = _read_db_settings()
+    env = _build_psql_env(settings["password"], pgoptions_override)
+    common_args = _build_psql_common_args(query, csv_mode=csv_mode)
+    psql_bin = shutil.which("psql")
+    if psql_bin:
+        return _build_host_psql_cmd(psql_bin, settings, common_args), env
+    return _build_docker_psql_cmd(settings, common_args, env), env
+
+
+def _read_db_settings() -> dict:
     db_url = (
         os.environ.get("CANONICAL_DB_URL") or os.environ.get("DATABASE_URL") or ""
     ).strip()
@@ -209,7 +246,17 @@ def _build_psql_cmd(
         or os.environ.get("PGPASSWORD")
         or "trainscanner"
     )
+    return {
+        "url": db_url,
+        "host": db_host,
+        "port": db_port,
+        "user": db_user,
+        "name": db_name,
+        "password": db_password,
+    }
 
+
+def _build_psql_env(db_password: str, pgoptions_override: str | None = None) -> dict:
     env = dict(os.environ)
     env["PGPASSWORD"] = db_password
     export_pgoptions = (
@@ -226,48 +273,54 @@ def _build_psql_cmd(
             "-c max_parallel_workers_per_gather=2 "
             "-c max_parallel_workers=8"
         )
+    return env
 
+
+def _build_psql_common_args(query: str, *, csv_mode: bool) -> list[str]:
     common_args = ["-X", "-v", PSQL_ON_ERROR_STOP]
     if csv_mode:
         common_args.append("--csv")
     else:
         common_args.append("-At")
     common_args.extend(["-c", query])
+    return common_args
 
-    psql_bin = shutil.which("psql")
-    if psql_bin:
-        if db_url:
-            cmd = [psql_bin, db_url]
-            cmd.extend(common_args)
-        else:
-            cmd = [
-                psql_bin,
-                "-h",
-                db_host,
-                "-p",
-                db_port,
-                "-U",
-                db_user,
-                "-d",
-                db_name,
-            ]
-            cmd.extend(common_args)
-    else:
-        # Fallback for dev environments where psql is not installed on host.
-        # Reuse the project's docker-compose PostGIS service instead.
-        cmd = [
-            "docker",
-            "compose",
-            "--profile",
-            "pan-europe-data",
-            "exec",
-            "-T",
-        ]
-        if str(env.get("PGOPTIONS", "")).strip():
-            cmd.extend(["-e", f"PGOPTIONS={env['PGOPTIONS']}"])
-        cmd.extend(["postgis", "psql", "-U", db_user, "-d", db_name])
-        cmd.extend(common_args)
-    return cmd, env
+
+def _build_host_psql_cmd(
+    psql_bin: str, settings: dict, common_args: list[str]
+) -> list[str]:
+    if settings["url"]:
+        return [psql_bin, settings["url"], *common_args]
+    return [
+        psql_bin,
+        "-h",
+        settings["host"],
+        "-p",
+        settings["port"],
+        "-U",
+        settings["user"],
+        "-d",
+        settings["name"],
+        *common_args,
+    ]
+
+
+def _build_docker_psql_cmd(
+    settings: dict, common_args: list[str], env: dict
+) -> list[str]:
+    cmd = [
+        "docker",
+        "compose",
+        "--profile",
+        "pan-europe-data",
+        "exec",
+        "-T",
+    ]
+    if str(env.get("PGOPTIONS", "")).strip():
+        cmd.extend(["-e", f"PGOPTIONS={env['PGOPTIONS']}"])
+    cmd.extend(["postgis", "psql", "-U", settings["user"], "-d", settings["name"]])
+    cmd.extend(common_args)
+    return cmd
 
 
 def _is_parallel_shm_error(stderr_text: str) -> bool:
@@ -415,7 +468,7 @@ ORDER BY tts.trip_fact_id, tts.stop_sequence;
 
 def build_trip_batch_query_optimized(
     as_of: str,
-    country: str,
+    _country: str,
     source_id: str,
     trip_after: str,
     batch_size: int,
@@ -511,24 +564,70 @@ def build_explain_query(sql: str) -> str:
     return f"EXPLAIN (ANALYZE, BUFFERS, WAL, SETTINGS, FORMAT JSON) {base_sql};"
 
 
-def iter_trip_batches(
+def _resolve_source_ids(
+    as_of: str, source_id: str, benchmark_max_sources: int
+) -> list[str]:
+    source_rows = run_psql_csv(build_source_ids_query(as_of, source_id))
+    source_ids = [str(row.get("source_id") or "").strip() for row in source_rows]
+    filtered_source_ids = [sid for sid in source_ids if sid]
+    if benchmark_max_sources > 0:
+        return filtered_source_ids[:benchmark_max_sources]
+    return filtered_source_ids
+
+
+def _build_trip_query(
+    options: ExportBatchOptions,
+    current_source_id: str,
+    trip_after: str,
+) -> str:
+    if options.query_mode == "optimized":
+        return build_trip_batch_query_optimized(
+            as_of=options.as_of,
+            _country=options.country,
+            source_id=current_source_id,
+            trip_after=trip_after,
+            batch_size=options.batch_size_trips,
+        )
+    return build_trip_batch_query_legacy(
+        as_of=options.as_of,
+        country=options.country,
+        source_id=current_source_id,
+        trip_after=trip_after,
+        batch_size=options.batch_size_trips,
+    )
+
+
+def _record_batch_profile(profiling: dict, rows, query_duration_ms: float) -> None:
+    profiling["dbFetchMs"] += query_duration_ms
+    profiling["batchFetchMs"].append(round(query_duration_ms, 3))
+    profiling["batchRows"].append(len(rows))
+
+
+def _resolve_benchmark_stop_reason(
     *,
-    as_of: str,
-    country: str,
-    source_id: str,
-    batch_size: int,
-    query_mode: str,
-    benchmark_max_sources: int,
+    total_batches: int,
+    total_trips: int,
     benchmark_max_batches: int,
     benchmark_max_trips: int,
+) -> str:
+    if benchmark_max_batches > 0 and total_batches >= benchmark_max_batches:
+        return "max_batches"
+    if benchmark_max_trips > 0 and total_trips >= benchmark_max_trips:
+        return "max_trips"
+    return ""
+
+
+def iter_trip_batches(
+    *,
+    options: ExportBatchOptions,
     profiling: dict,
     progress_state: dict,
 ):
-    source_rows = run_psql_csv(build_source_ids_query(as_of, source_id))
-    source_ids = [str(row.get("source_id") or "").strip() for row in source_rows]
-    source_ids = [sid for sid in source_ids if sid]
-    if benchmark_max_sources > 0:
-        source_ids = source_ids[:benchmark_max_sources]
+    source_ids = _resolve_source_ids(
+        options.as_of,
+        options.source_id,
+        options.benchmark_max_sources,
+    )
     log_progress(
         progress_state, f"Discovered {len(source_ids)} source(s) in scope", force=True
     )
@@ -545,28 +644,11 @@ def iter_trip_batches(
         )
         after_trip = ""
         while True:
-            if query_mode == "optimized":
-                query = build_trip_batch_query_optimized(
-                    as_of=as_of,
-                    country=country,
-                    source_id=sid,
-                    trip_after=after_trip,
-                    batch_size=batch_size,
-                )
-            else:
-                query = build_trip_batch_query_legacy(
-                    as_of=as_of,
-                    country=country,
-                    source_id=sid,
-                    trip_after=after_trip,
-                    batch_size=batch_size,
-                )
+            query = _build_trip_query(options, sid, after_trip)
             query_started = time.perf_counter()
             rows = run_psql_csv(query)
             query_duration_ms = (time.perf_counter() - query_started) * 1000.0
-            profiling["dbFetchMs"] += query_duration_ms
-            profiling["batchFetchMs"].append(round(query_duration_ms, 3))
-            profiling["batchRows"].append(len(rows))
+            _record_batch_profile(profiling, rows, query_duration_ms)
             if not rows:
                 log_progress(
                     progress_state,
@@ -591,11 +673,13 @@ def iter_trip_batches(
             after_trip = str(rows[-1].get("trip_fact_id") or "").strip()
             if not after_trip:
                 break
-            if benchmark_max_batches > 0 and total_batches >= benchmark_max_batches:
-                benchmark_stop_reason = "max_batches"
-                break
-            if benchmark_max_trips > 0 and total_trips >= benchmark_max_trips:
-                benchmark_stop_reason = "max_trips"
+            benchmark_stop_reason = _resolve_benchmark_stop_reason(
+                total_batches=total_batches,
+                total_trips=total_trips,
+                benchmark_max_batches=options.benchmark_max_batches,
+                benchmark_max_trips=options.benchmark_max_trips,
+            )
+            if benchmark_stop_reason:
                 break
         if benchmark_stop_reason:
             log_progress(
@@ -660,7 +744,7 @@ def load_rows_from_stops_csv(path: str):
     return rows
 
 
-def load_rows_from_db_static(as_of: str, country: str, source_id: str):
+def load_rows_from_db_static(_as_of: str, country: str, source_id: str):
     stops = run_psql_csv(build_stops_query(country, source_id))
     transfers = run_psql_csv(build_transfer_query(country, source_id))
     return stops, transfers
@@ -681,14 +765,7 @@ def write_deterministic_zip_from_paths(file_paths, output_zip: str, as_of: str):
     except Exception:
         timestamp = (2024, 1, 1, 0, 0, 0)
 
-    ordered_names = [
-        "agency.txt",
-        "stops.txt",
-        "routes.txt",
-        "trips.txt",
-        "stop_times.txt",
-        "calendar.txt",
-    ]
+    ordered_names = list(GTFS_CORE_FILES)
     if TRANSFERS_FILE in file_paths:
         ordered_names.append(TRANSFERS_FILE)
 
@@ -705,24 +782,8 @@ def write_deterministic_zip_from_paths(file_paths, output_zip: str, as_of: str):
                     shutil.copyfileobj(handle, out_handle, length=1024 * 1024)
 
 
-def export_from_db_batched(
-    profile: str,
-    requested_tier: str,
-    as_of: str,
-    country: str,
-    source_id: str,
-    batch_size_trips: int,
-    agency_url: str,
-    output_zip: str,
-    query_mode: str,
-    benchmark_max_sources: int,
-    benchmark_max_batches: int,
-    benchmark_max_trips: int,
-    sql_profile_sample: bool,
-    progress_interval_sec: int,
-):
-    run_started = time.perf_counter()
-    profiling = {
+def _create_profiling_state() -> dict:
+    return {
         "staticLoadMs": 0.0,
         "dbFetchMs": 0.0,
         "pythonProcessMs": 0.0,
@@ -734,21 +795,217 @@ def export_from_db_batched(
         "benchmarkStopReason": "",
         "benchmarkSourceCount": 0,
     }
-    progress_state = {
+
+
+def _create_progress_state(run_started: float, progress_interval_sec: int) -> dict:
+    return {
         "intervalSec": max(int(progress_interval_sec), 0),
         "lastLogAt": 0.0,
         "runStartedAt": run_started,
     }
+
+
+def _resolve_scope_countries(stops) -> list[str]:
+    countries = sorted(
+        {
+            str(row.get("country") or "").strip()
+            for row in stops
+            if str(row.get("country") or "").strip()
+        }
+    )
+    return countries or ["EU"]
+
+
+def _resolve_timezone_for_country(country: str) -> str:
+    if country == "AT":
+        return "Europe/Vienna"
+    if country == "CH":
+        return "Europe/Zurich"
+    return "Europe/Berlin"
+
+
+def _build_agency_rows(countries: list[str], agency_url: str) -> list[list[str]]:
+    agency_rows = [
+        [
+            f"agency_{agency_country.lower()}",
+            f"Pan-European {agency_country} Transit",
+            agency_url,
+            _resolve_timezone_for_country(agency_country),
+            "en",
+        ]
+        for agency_country in countries
+    ]
+    agency_rows.sort(key=lambda row: row[0])
+    return agency_rows
+
+
+def _collect_sql_plan_summary(options: ExportBatchOptions, profiling: dict) -> dict:
+    if not options.sql_profile_sample:
+        return {}
+
+    source_ids = _resolve_source_ids(
+        options.as_of,
+        options.source_id,
+        options.benchmark_max_sources,
+    )
+    if not source_ids:
+        return {}
+
+    sample_source = source_ids[0]
+    sample_query = _build_trip_query(options, sample_source, "")
+    explain_started = time.perf_counter()
+    explain_raw = run_psql_text(build_explain_query(sample_query)).strip()
+    profiling["dbFetchMs"] += (time.perf_counter() - explain_started) * 1000.0
+    try:
+        explain_payload = json.loads(explain_raw)
+        if isinstance(explain_payload, list) and explain_payload:
+            root = explain_payload[0]
+            plan = root.get("Plan") or {}
+            return {
+                "sourceId": sample_source,
+                "planningTimeMs": root.get("Planning Time"),
+                "executionTimeMs": root.get("Execution Time"),
+                "planNodeType": plan.get("Node Type"),
+                "planRows": plan.get("Plan Rows"),
+                "actualRows": plan.get("Actual Rows"),
+                "sharedHitBlocks": plan.get("Shared Hit Blocks"),
+                "sharedReadBlocks": plan.get("Shared Read Blocks"),
+                "tempReadBlocks": plan.get("Temp Read Blocks"),
+                "tempWrittenBlocks": plan.get("Temp Written Blocks"),
+                "ioReadTimeMs": plan.get("I/O Read Time"),
+                "ioWriteTimeMs": plan.get("I/O Write Time"),
+            }
+    except Exception:
+        return {
+            "sourceId": sample_source,
+            "error": "failed_to_parse_explain_json",
+        }
+    return {}
+
+
+def _resolve_route_type(transport_mode: str) -> str:
+    if any(token in transport_mode for token in ["metro", "subway", "u-bahn"]):
+        return "1"
+    if "tram" in transport_mode:
+        return "0"
+    if "bus" in transport_mode:
+        return "3"
+    return "2"
+
+
+def _collect_valid_stop_times(
+    trip_rows, stop_country_by_id: dict[str, str]
+) -> tuple[list[tuple[str, str, str, int]], str]:
+    valid_stop_times: list[tuple[str, str, str, int]] = []
+    trip_country = str(trip_rows[0].get("country") or "").strip()
+    seq = 0
+    for stop in trip_rows:
+        stop_id = str(stop.get("stop_id") or "").strip()
+        if not stop_id or stop_id not in stop_country_by_id:
+            continue
+        if not trip_country:
+            trip_country = stop_country_by_id.get(stop_id, "")
+        seq += 1
+        fallback = 6 * 3600 + (seq - 1) * 300
+        arrival = ensure_time(stop.get("arrival_time") or "", fallback)
+        departure = ensure_time(stop.get("departure_time") or "", fallback)
+        valid_stop_times.append((arrival, departure, stop_id, seq))
+    return valid_stop_times, trip_country
+
+
+def _flush_trip_rows_for_batch(
+    trip_rows,
+    *,
+    options: ExportBatchOptions,
+    countries: list[str],
+    stop_country_by_id: dict[str, str],
+    batch_routes: dict,
+    batch_services: set,
+    trips_writer,
+    stop_times_writer,
+    counters: dict[str, int],
+) -> None:
+    if len(trip_rows) < 2:
+        return
+    template = trip_rows[0]
+    trip_id = str(template.get("trip_fact_id") or "").strip()
+    if not trip_id:
+        return
+    tier = classify_trip_tier(template)
+    if options.requested_tier != "all" and tier != options.requested_tier:
+        return
+
+    route_id = str(template.get("route_id") or f"route_{trip_id}").strip()
+    route_short_name = str(template.get("route_short_name") or "R").strip()
+    route_long_name = str(template.get("route_long_name") or route_id).strip()
+    transport_mode = str(template.get("transport_mode") or "rail").strip().lower()
+    service_id = str(template.get("service_id") or f"svc_{trip_id}").strip()
+    trip_headsign = str(template.get("trip_headsign") or route_long_name).strip()
+    valid_stop_times, trip_country = _collect_valid_stop_times(
+        trip_rows,
+        stop_country_by_id,
+    )
+    if len(valid_stop_times) < 2:
+        return
+
+    agency_id = f"agency_{(trip_country or countries[0]).lower()}"
+    batch_routes[route_id] = (
+        route_id,
+        agency_id,
+        route_short_name,
+        route_long_name,
+        _resolve_route_type(transport_mode),
+        f"tier:{tier};profile:{options.profile}",
+    )
+    batch_services.add(service_id)
+    trips_writer.writerow([route_id, service_id, trip_id, trip_headsign])
+    counters["trip_count"] += 1
+    for arrival, departure, stop_id, seq in valid_stop_times:
+        stop_times_writer.writerow([trip_id, arrival, departure, stop_id, str(seq)])
+        counters["stop_time_count"] += 1
+
+
+def _percentile(values, pct: float):
+    if not values:
+        return 0.0
+    idx = int(round((len(values) - 1) * pct))
+    return float(values[idx])
+
+
+def _build_batch_perf(profiling: dict) -> dict:
+    batch_fetch_ms = sorted(profiling["batchFetchMs"])
+    batch_rows = sorted(profiling["batchRows"])
+    return {
+        "count": len(batch_fetch_ms),
+        "fetchMsMin": round(batch_fetch_ms[0], 3) if batch_fetch_ms else 0.0,
+        "fetchMsP50": round(_percentile(batch_fetch_ms, 0.50), 3),
+        "fetchMsP95": round(_percentile(batch_fetch_ms, 0.95), 3),
+        "fetchMsMax": round(batch_fetch_ms[-1], 3) if batch_fetch_ms else 0.0,
+        "rowsMin": int(batch_rows[0]) if batch_rows else 0,
+        "rowsP50": int(_percentile(batch_rows, 0.50)) if batch_rows else 0,
+        "rowsP95": int(_percentile(batch_rows, 0.95)) if batch_rows else 0,
+        "rowsMax": int(batch_rows[-1]) if batch_rows else 0,
+    }
+
+
+def export_from_db_batched(options: ExportBatchOptions):
+    run_started = time.perf_counter()
+    profiling = _create_profiling_state()
+    progress_state = _create_progress_state(run_started, options.progress_interval_sec)
     log_progress(
         progress_state,
         "Starting export "
-        + f"profile='{profile}' as-of='{as_of}' tier='{requested_tier}' query-mode='{query_mode}' "
-        + f"batch-size='{batch_size_trips}'",
+        + f"profile='{options.profile}' as-of='{options.as_of}' tier='{options.requested_tier}' query-mode='{options.query_mode}' "
+        + f"batch-size='{options.batch_size_trips}'",
         force=True,
     )
 
     static_started = time.perf_counter()
-    stops, transfers = load_rows_from_db_static(as_of, country, source_id)
+    stops, transfers = load_rows_from_db_static(
+        options.as_of,
+        options.country,
+        options.source_id,
+    )
     profiling["staticLoadMs"] = (time.perf_counter() - static_started) * 1000.0
     if not stops:
         fail("export scope produced no stops")
@@ -758,89 +1015,17 @@ def export_from_db_batched(
         force=True,
     )
 
-    sql_plan_summary = {}
-    if sql_profile_sample:
-        source_rows = run_psql_csv(build_source_ids_query(as_of, source_id))
-        source_ids = [str(row.get("source_id") or "").strip() for row in source_rows]
-        source_ids = [sid for sid in source_ids if sid]
-        if benchmark_max_sources > 0:
-            source_ids = source_ids[:benchmark_max_sources]
-        if source_ids:
-            sample_source = source_ids[0]
-            if query_mode == "optimized":
-                sample_query = build_trip_batch_query_optimized(
-                    as_of=as_of,
-                    country=country,
-                    source_id=sample_source,
-                    trip_after="",
-                    batch_size=batch_size_trips,
-                )
-            else:
-                sample_query = build_trip_batch_query_legacy(
-                    as_of=as_of,
-                    country=country,
-                    source_id=sample_source,
-                    trip_after="",
-                    batch_size=batch_size_trips,
-                )
-            explain_started = time.perf_counter()
-            explain_raw = run_psql_text(build_explain_query(sample_query)).strip()
-            profiling["dbFetchMs"] += (time.perf_counter() - explain_started) * 1000.0
-            try:
-                explain_payload = json.loads(explain_raw)
-                if isinstance(explain_payload, list) and explain_payload:
-                    root = explain_payload[0]
-                    plan = root.get("Plan") or {}
-                    sql_plan_summary = {
-                        "sourceId": sample_source,
-                        "planningTimeMs": root.get("Planning Time"),
-                        "executionTimeMs": root.get("Execution Time"),
-                        "planNodeType": plan.get("Node Type"),
-                        "planRows": plan.get("Plan Rows"),
-                        "actualRows": plan.get("Actual Rows"),
-                        "sharedHitBlocks": plan.get("Shared Hit Blocks"),
-                        "sharedReadBlocks": plan.get("Shared Read Blocks"),
-                        "tempReadBlocks": plan.get("Temp Read Blocks"),
-                        "tempWrittenBlocks": plan.get("Temp Written Blocks"),
-                        "ioReadTimeMs": plan.get("I/O Read Time"),
-                        "ioWriteTimeMs": plan.get("I/O Write Time"),
-                    }
-            except Exception:
-                sql_plan_summary = {
-                    "sourceId": sample_source,
-                    "error": "failed_to_parse_explain_json",
-                }
+    sql_plan_summary = _collect_sql_plan_summary(options, profiling)
 
-    countries = sorted(
-        {
-            str(row.get("country") or "").strip()
-            for row in stops
-            if str(row.get("country") or "").strip()
-        }
-    )
-    if not countries:
-        countries = ["EU"]
-
-    agency_rows = []
-    for agency_country in countries:
-        tz = "Europe/Berlin"
-        if agency_country == "AT":
-            tz = "Europe/Vienna"
-        elif agency_country == "CH":
-            tz = "Europe/Zurich"
-        agency_rows.append(
-            [
-                f"agency_{agency_country.lower()}",
-                f"Pan-European {agency_country} Transit",
-                agency_url,
-                tz,
-                "en",
-            ]
-        )
-    agency_rows.sort(key=lambda r: r[0])
+    countries = _resolve_scope_countries(stops)
+    agency_rows = _build_agency_rows(countries, options.agency_url)
     benchmark_enabled = any(
         value > 0
-        for value in [benchmark_max_sources, benchmark_max_batches, benchmark_max_trips]
+        for value in [
+            options.benchmark_max_sources,
+            options.benchmark_max_batches,
+            options.benchmark_max_trips,
+        ]
     )
 
     with tempfile.TemporaryDirectory(prefix="export-gtfs-batch-") as tmp_dir_raw:
@@ -923,88 +1108,14 @@ def export_from_db_batched(
             ) * 1000.0
 
         route_count = 0
-        trip_count = 0
-        stop_time_count = 0
         batch_count = 0
         source_batches = set()
+        counters = {"trip_count": 0, "stop_time_count": 0}
         stop_country_by_id = {
             str(row.get("stop_id") or "").strip(): str(row.get("country") or "").strip()
             for row in stops
             if str(row.get("stop_id") or "").strip()
         }
-
-        def flush_trip_rows(
-            trip_rows,
-            *,
-            batch_routes,
-            batch_services,
-            trips_writer,
-            stop_times_writer,
-        ):
-            nonlocal trip_count, stop_time_count
-            if len(trip_rows) < 2:
-                return
-            template = trip_rows[0]
-            trip_id = str(template.get("trip_fact_id") or "").strip()
-            if not trip_id:
-                return
-            tier = classify_trip_tier(template)
-            if requested_tier != "all" and tier != requested_tier:
-                return
-
-            route_id = str(template.get("route_id") or f"route_{trip_id}").strip()
-            route_short_name = str(template.get("route_short_name") or "R").strip()
-            route_long_name = str(template.get("route_long_name") or route_id).strip()
-            transport_mode = (
-                str(template.get("transport_mode") or "rail").strip().lower()
-            )
-            service_id = str(template.get("service_id") or f"svc_{trip_id}").strip()
-            trip_headsign = str(
-                template.get("trip_headsign") or route_long_name
-            ).strip()
-            trip_country = str(template.get("country") or "").strip()
-            valid_stop_times = []
-            seq = 0
-            for stop in trip_rows:
-                stop_id = str(stop.get("stop_id") or "").strip()
-                if not stop_id or stop_id not in stop_country_by_id:
-                    continue
-                if not trip_country:
-                    trip_country = stop_country_by_id.get(stop_id, "")
-                seq += 1
-                fallback = 6 * 3600 + (seq - 1) * 300
-                arrival = ensure_time(stop.get("arrival_time") or "", fallback)
-                departure = ensure_time(stop.get("departure_time") or "", fallback)
-                valid_stop_times.append((arrival, departure, stop_id, seq))
-
-            if len(valid_stop_times) < 2:
-                return
-
-            agency_id = f"agency_{(trip_country or countries[0]).lower()}"
-            route_type = "2"
-            if any(token in transport_mode for token in ["metro", "subway", "u-bahn"]):
-                route_type = "1"
-            elif "tram" in transport_mode:
-                route_type = "0"
-            elif "bus" in transport_mode:
-                route_type = "3"
-
-            batch_routes[route_id] = (
-                route_id,
-                agency_id,
-                route_short_name,
-                route_long_name,
-                route_type,
-                f"tier:{tier};profile:{profile}",
-            )
-            batch_services.add(service_id)
-            trips_writer.writerow([route_id, service_id, trip_id, trip_headsign])
-            trip_count += 1
-            for arrival, departure, stop_id, seq in valid_stop_times:
-                stop_times_writer.writerow(
-                    [trip_id, arrival, departure, stop_id, str(seq)]
-                )
-                stop_time_count += 1
 
         with (
             sqlite3.connect(str(sqlite_path)) as db,
@@ -1042,14 +1153,7 @@ def export_from_db_batched(
                 seen_batches,
                 _seen_trips,
             ) in iter_trip_batches(
-                as_of=as_of,
-                country=country,
-                source_id=source_id,
-                batch_size=batch_size_trips,
-                query_mode=query_mode,
-                benchmark_max_sources=benchmark_max_sources,
-                benchmark_max_batches=benchmark_max_batches,
-                benchmark_max_trips=benchmark_max_trips,
+                options=options,
                 profiling=profiling,
                 progress_state=progress_state,
             ):
@@ -1066,23 +1170,31 @@ def export_from_db_batched(
                     if not trip_id:
                         continue
                     if current_trip_id and trip_id != current_trip_id:
-                        flush_trip_rows(
+                        _flush_trip_rows_for_batch(
                             current_trip_rows,
+                            options=options,
+                            countries=countries,
+                            stop_country_by_id=stop_country_by_id,
                             batch_routes=batch_routes,
                             batch_services=batch_services,
                             trips_writer=trips_writer,
                             stop_times_writer=stop_times_writer,
+                            counters=counters,
                         )
                         current_trip_rows = []
                     current_trip_id = trip_id
                     current_trip_rows.append(row)
                 if current_trip_rows:
-                    flush_trip_rows(
+                    _flush_trip_rows_for_batch(
                         current_trip_rows,
+                        options=options,
+                        countries=countries,
+                        stop_country_by_id=stop_country_by_id,
                         batch_routes=batch_routes,
                         batch_services=batch_services,
                         trips_writer=trips_writer,
                         stop_times_writer=stop_times_writer,
+                        counters=counters,
                     )
                 profiling["pythonProcessMs"] += (
                     time.perf_counter() - process_started
@@ -1108,17 +1220,19 @@ def export_from_db_batched(
                 ) * 1000.0
                 elapsed_ms = (time.perf_counter() - run_started) * 1000.0
                 trips_per_minute = (
-                    (trip_count * 60000.0 / elapsed_ms) if elapsed_ms > 0 else 0.0
+                    (counters["trip_count"] * 60000.0 / elapsed_ms)
+                    if elapsed_ms > 0
+                    else 0.0
                 )
                 log_progress(
                     progress_state,
                     "Applied "
                     + f"batch={batch_count} source='{batch_source_id}' rows={len(batch_rows)} "
-                    + f"tripsWritten={trip_count} stopTimesWritten={stop_time_count} "
+                    + f"tripsWritten={counters['trip_count']} stopTimesWritten={counters['stop_time_count']} "
                     + f"tripsPerMinute={trips_per_minute:.1f}",
                 )
 
-            if stop_time_count == 0:
+            if counters["stop_time_count"] == 0:
                 fail(
                     "export scope produced no timetable rows after stop-point resolution; "
                     "check provider_global_stop_point_mappings coverage for the selected source scope"
@@ -1195,39 +1309,22 @@ def export_from_db_batched(
             file_paths[TRANSFERS_FILE] = transfers_path
 
         zip_started = time.perf_counter()
-        write_deterministic_zip_from_paths(file_paths, output_zip, as_of)
+        write_deterministic_zip_from_paths(
+            file_paths, options.output_zip, options.as_of
+        )
         profiling["zipMs"] = (time.perf_counter() - zip_started) * 1000.0
 
     total_runtime_ms = (time.perf_counter() - run_started) * 1000.0
-    batch_fetch_ms = sorted(profiling["batchFetchMs"])
-    batch_rows = sorted(profiling["batchRows"])
-
-    def percentile(values, pct: float):
-        if not values:
-            return 0.0
-        idx = int(round((len(values) - 1) * pct))
-        return float(values[idx])
-
-    batch_perf = {
-        "count": len(batch_fetch_ms),
-        "fetchMsMin": round(batch_fetch_ms[0], 3) if batch_fetch_ms else 0.0,
-        "fetchMsP50": round(percentile(batch_fetch_ms, 0.50), 3),
-        "fetchMsP95": round(percentile(batch_fetch_ms, 0.95), 3),
-        "fetchMsMax": round(batch_fetch_ms[-1], 3) if batch_fetch_ms else 0.0,
-        "rowsMin": int(batch_rows[0]) if batch_rows else 0,
-        "rowsP50": int(percentile(batch_rows, 0.50)) if batch_rows else 0,
-        "rowsP95": int(percentile(batch_rows, 0.95)) if batch_rows else 0,
-        "rowsMax": int(batch_rows[-1]) if batch_rows else 0,
-    }
+    batch_perf = _build_batch_perf(profiling)
 
     summary = {
-        "profile": profile,
-        "tier": requested_tier,
+        "profile": options.profile,
+        "tier": options.requested_tier,
         "bridgeMode": "timetable-preserving-pan-europe",
-        "queryMode": query_mode,
+        "queryMode": options.query_mode,
         "batching": {
             "enabled": True,
-            "batchSizeTrips": batch_size_trips,
+            "batchSizeTrips": options.batch_size_trips,
             "sourcesProcessed": len(source_batches),
             "tripBatches": batch_count,
         },
@@ -1235,17 +1332,17 @@ def export_from_db_batched(
             "stops": len(stop_rows),
             "agencies": len(agency_rows),
             "routes": route_count,
-            "trips": trip_count,
-            "stopTimes": stop_time_count,
+            "trips": counters["trip_count"],
+            "stopTimes": counters["stop_time_count"],
             "services": len(calendar_rows),
             "transfers": len(transfers_rows),
             "countries": len(countries),
         },
         "benchmark": {
             "enabled": benchmark_enabled,
-            "maxSources": benchmark_max_sources,
-            "maxBatches": benchmark_max_batches,
-            "maxTrips": benchmark_max_trips,
+            "maxSources": options.benchmark_max_sources,
+            "maxBatches": options.benchmark_max_batches,
+            "maxTrips": options.benchmark_max_trips,
             "truncated": bool(profiling.get("benchmarkStopReason")),
             "stopReason": profiling.get("benchmarkStopReason") or "",
             "selectedSources": int(
@@ -1253,13 +1350,15 @@ def export_from_db_batched(
             ),
         },
         "performance": {
-            "progressIntervalSec": max(int(progress_interval_sec), 0),
+            "progressIntervalSec": max(int(options.progress_interval_sec), 0),
             "totalRuntimeMs": round(total_runtime_ms, 3),
-            "tripsPerMinute": round((trip_count * 60000.0 / total_runtime_ms), 3)
+            "tripsPerMinute": round(
+                (counters["trip_count"] * 60000.0 / total_runtime_ms), 3
+            )
             if total_runtime_ms > 0
             else 0.0,
             "stopTimesPerMinute": round(
-                (stop_time_count * 60000.0 / total_runtime_ms), 3
+                (counters["stop_time_count"] * 60000.0 / total_runtime_ms), 3
             )
             if total_runtime_ms > 0
             else 0.0,
@@ -1277,10 +1376,118 @@ def export_from_db_batched(
     }
     log_progress(
         progress_state,
-        f"Finished export trips={trip_count} stopTimes={stop_time_count} runtimeMs={total_runtime_ms:.1f}",
+        f"Finished export trips={counters['trip_count']} stopTimes={counters['stop_time_count']} runtimeMs={total_runtime_ms:.1f}",
         force=True,
     )
     return summary
+
+
+def _resolve_trip_route_rows(
+    *,
+    template,
+    trip_id: str,
+    countries: list[str],
+    profile: str,
+) -> tuple[str, str, list[str], list[str]]:
+    route_id = str(template.get("route_id") or f"route_{trip_id}").strip()
+    route_short_name = str(template.get("route_short_name") or "R").strip()
+    route_long_name = str(template.get("route_long_name") or route_id).strip()
+    transport_mode = str(template.get("transport_mode") or "rail").strip().lower()
+    service_id = str(template.get("service_id") or f"svc_{trip_id}").strip()
+    trip_headsign = str(template.get("trip_headsign") or route_long_name).strip()
+    country = str(template.get("country") or "").strip()
+    agency_id = f"agency_{(country or countries[0]).lower()}"
+    tier = classify_trip_tier(template)
+    route_row = [
+        route_id,
+        agency_id,
+        route_short_name,
+        route_long_name,
+        _resolve_route_type(transport_mode),
+        f"tier:{tier};profile:{profile}",
+    ]
+    trip_row = [route_id, service_id, trip_id, trip_headsign]
+    return tier, service_id, route_row, trip_row
+
+
+def _append_fixture_rows(
+    *,
+    profile: str,
+    agency_id: str,
+    ordered_stop_ids: list[str],
+    route_defs: dict[str, list[str]],
+    trip_defs: dict[str, list[str]],
+    stop_time_rows: list[list[str]],
+    service_ids: set[str],
+) -> None:
+    route_id = "route_fixture"
+    trip_id = "trip_fixture"
+    service_id = "svc_fixture"
+    route_defs[route_id] = [
+        route_id,
+        agency_id,
+        "FIX",
+        "Fixture Route",
+        "2",
+        f"tier:regional;profile:{profile}",
+    ]
+    trip_defs[trip_id] = [route_id, service_id, trip_id, "Fixture"]
+    service_ids.add(service_id)
+    for idx, stop_id in enumerate(ordered_stop_ids, start=1):
+        t = ensure_time("", 7 * 3600 + (idx - 1) * 300)
+        stop_time_rows.append([trip_id, t, t, stop_id, str(idx)])
+
+
+def _collect_unique_transfer_rows(stop_map, transfers) -> list[list[str]]:
+    transfer_rows = []
+    seen_transfer_keys = set()
+    for row in transfers:
+        from_id = str(row.get("from_stop_id") or "").strip()
+        to_id = str(row.get("to_stop_id") or "").strip()
+        if from_id not in stop_map or to_id not in stop_map or from_id == to_id:
+            continue
+        min_transfer = int(row.get("min_transfer_seconds") or 0)
+        transfer_type = str(row.get("transfer_type") or "2")
+        key = (from_id, to_id, transfer_type, min_transfer)
+        if key in seen_transfer_keys:
+            continue
+        seen_transfer_keys.add(key)
+        transfer_rows.append([from_id, to_id, transfer_type, str(min_transfer)])
+    return transfer_rows
+
+
+def _build_stop_rows(stop_map) -> list[list[str]]:
+    stop_rows = []
+    for stop_id, row in sorted(stop_map.items()):
+        stop_rows.append(
+            [
+                stop_id,
+                str(row.get("stop_name") or stop_id).strip() or stop_id,
+                str(row.get("stop_lat") or "").strip(),
+                str(row.get("stop_lon") or "").strip(),
+                str(row.get("location_type") or "").strip(),
+                str(row.get("parent_station") or "").strip(),
+            ]
+        )
+    return stop_rows
+
+
+def _build_calendar_rows(service_ids: set[str]) -> list[list[str]]:
+    return [
+        [
+            service_id,
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "20240101",
+            "20351231",
+        ]
+        for service_id in sorted(service_ids)
+    ]
 
 
 def build_tables(
@@ -1335,36 +1542,17 @@ def build_tables(
             continue
 
         template = trip_rows[0]
-        tier = classify_trip_tier(template)
+        tier, service_id, route_row, trip_row = _resolve_trip_route_rows(
+            template=template,
+            trip_id=trip_id,
+            countries=countries,
+            profile=profile,
+        )
         if requested_tier != "all" and tier != requested_tier:
             continue
-
-        route_id = str(template.get("route_id") or f"route_{trip_id}").strip()
-        route_short_name = str(template.get("route_short_name") or "R").strip()
-        route_long_name = str(template.get("route_long_name") or route_id).strip()
-        transport_mode = str(template.get("transport_mode") or "rail").strip().lower()
-        service_id = str(template.get("service_id") or f"svc_{trip_id}").strip()
-        trip_headsign = str(template.get("trip_headsign") or route_long_name).strip()
-        country = str(template.get("country") or "").strip()
-        agency_id = f"agency_{(country or countries[0]).lower()}"
-
-        route_type = "2"
-        if any(token in transport_mode for token in ["metro", "subway", "u-bahn"]):
-            route_type = "1"
-        elif "tram" in transport_mode:
-            route_type = "0"
-        elif "bus" in transport_mode:
-            route_type = "3"
-
-        route_defs[route_id] = [
-            route_id,
-            agency_id,
-            route_short_name,
-            route_long_name,
-            route_type,
-            f"tier:{tier};profile:{profile}",
-        ]
-        trip_defs[trip_id] = [route_id, service_id, trip_id, trip_headsign]
+        route_id = route_row[0]
+        route_defs[route_id] = route_row
+        trip_defs[trip_id] = trip_row
         service_ids.add(service_id)
 
         for idx, stop in enumerate(trip_rows, start=1):
@@ -1380,71 +1568,23 @@ def build_tables(
         if len(stop_map) < 2:
             fail("export scope produced fewer than 2 stops and no timetable rows")
         # Fixture fallback only for explicit CSV mode without timetable facts.
-        ordered = sorted(stop_map.keys())
-        route_id = "route_fixture"
-        trip_id = "trip_fixture"
-        service_id = "svc_fixture"
-        route_defs[route_id] = [
-            route_id,
-            agency_rows[0][0],
-            "FIX",
-            "Fixture Route",
-            "2",
-            f"tier:regional;profile:{profile}",
-        ]
-        trip_defs[trip_id] = [route_id, service_id, trip_id, "Fixture"]
-        service_ids.add(service_id)
-        for idx, stop_id in enumerate(ordered, start=1):
-            t = ensure_time("", 7 * 3600 + (idx - 1) * 300)
-            stop_time_rows.append([trip_id, t, t, stop_id, str(idx)])
-
-    transfer_rows = []
-    seen_transfer_keys = set()
-    for row in transfers:
-        from_id = str(row.get("from_stop_id") or "").strip()
-        to_id = str(row.get("to_stop_id") or "").strip()
-        if from_id not in stop_map or to_id not in stop_map or from_id == to_id:
-            continue
-        min_transfer = int(row.get("min_transfer_seconds") or 0)
-        transfer_type = str(row.get("transfer_type") or "2")
-        key = (from_id, to_id, transfer_type, min_transfer)
-        if key in seen_transfer_keys:
-            continue
-        seen_transfer_keys.add(key)
-        transfer_rows.append([from_id, to_id, transfer_type, str(min_transfer)])
-
-    stop_rows = []
-    for stop_id, row in sorted(stop_map.items()):
-        stop_rows.append(
-            [
-                stop_id,
-                str(row.get("stop_name") or stop_id).strip() or stop_id,
-                str(row.get("stop_lat") or "").strip(),
-                str(row.get("stop_lon") or "").strip(),
-                str(row.get("location_type") or "").strip(),
-                str(row.get("parent_station") or "").strip(),
-            ]
+        _append_fixture_rows(
+            profile=profile,
+            agency_id=agency_rows[0][0],
+            ordered_stop_ids=sorted(stop_map.keys()),
+            route_defs=route_defs,
+            trip_defs=trip_defs,
+            stop_time_rows=stop_time_rows,
+            service_ids=service_ids,
         )
+
+    transfer_rows = _collect_unique_transfer_rows(stop_map, transfers)
+    stop_rows = _build_stop_rows(stop_map)
 
     route_rows = sorted(route_defs.values(), key=lambda r: r[0])
     trip_rows = sorted(trip_defs.values(), key=lambda r: r[2])
     stop_time_rows.sort(key=lambda r: (r[0], int(r[4]), r[3]))
-    calendar_rows = []
-    for service_id in sorted(service_ids):
-        calendar_rows.append(
-            [
-                service_id,
-                "1",
-                "1",
-                "1",
-                "1",
-                "1",
-                "1",
-                "1",
-                "20240101",
-                "20351231",
-            ]
-        )
+    calendar_rows = _build_calendar_rows(service_ids)
 
     files = {
         "agency.txt": csv_text(
@@ -1609,20 +1749,22 @@ def main():
 
     if args.from_db:
         summary = export_from_db_batched(
-            profile=profile,
-            requested_tier=tier,
-            as_of=as_of,
-            country=country,
-            source_id=source_id,
-            batch_size_trips=batch_size_trips,
-            agency_url=args.agency_url,
-            output_zip=output_zip,
-            query_mode=query_mode,
-            benchmark_max_sources=benchmark_max_sources,
-            benchmark_max_batches=benchmark_max_batches,
-            benchmark_max_trips=benchmark_max_trips,
-            sql_profile_sample=bool(args.sql_profile_sample),
-            progress_interval_sec=progress_interval_sec,
+            ExportBatchOptions(
+                profile=profile,
+                requested_tier=tier,
+                as_of=as_of,
+                country=country,
+                source_id=source_id,
+                batch_size_trips=batch_size_trips,
+                agency_url=args.agency_url,
+                output_zip=output_zip,
+                query_mode=query_mode,
+                benchmark_max_sources=benchmark_max_sources,
+                benchmark_max_batches=benchmark_max_batches,
+                benchmark_max_trips=benchmark_max_trips,
+                sql_profile_sample=bool(args.sql_profile_sample),
+                progress_interval_sec=progress_interval_sec,
+            )
         )
     elif args.stops_csv:
         stops = load_rows_from_stops_csv(args.stops_csv)

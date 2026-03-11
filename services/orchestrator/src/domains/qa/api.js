@@ -145,6 +145,50 @@ function normalizeCandidateMetadata(candidate) {
   };
 }
 
+function normalizeEvidenceRow(row) {
+  const normalized = {
+    ...row,
+    status: String(row?.status || "informational").trim() || "informational",
+    raw_value:
+      row?.raw_value === null || row?.raw_value === undefined
+        ? null
+        : Number(row.raw_value),
+    score:
+      row?.score === null || row?.score === undefined
+        ? null
+        : Number(row.score),
+    details:
+      row?.details &&
+      typeof row.details === "object" &&
+      !Array.isArray(row.details)
+        ? row.details
+        : {},
+  };
+  return {
+    ...normalized,
+    ...classifyEvidenceRow(normalized),
+  };
+}
+
+function resolveUpdatedBy(input, fallback = "qa_operator") {
+  return (
+    String(input?.updated_by || input?.updatedBy || fallback).trim() || fallback
+  );
+}
+
+function buildWorkspaceMutationResponse(
+  clusterId,
+  { workspaceVersion, effectiveStatus, workspace },
+) {
+  return {
+    ok: true,
+    cluster_id: clusterId,
+    workspace_version: workspaceVersion,
+    effective_status: effectiveStatus,
+    workspace,
+  };
+}
+
 async function requireCluster(client, clusterId) {
   const cleanClusterId = String(clusterId || "").trim();
   if (!cleanClusterId) {
@@ -1488,29 +1532,7 @@ async function getGlobalClusterDetail(clusterId) {
   ]);
 
   const normalizedCandidates = candidates.map(normalizeCandidateMetadata);
-  const normalizedEvidence = evidence
-    .map((row) => ({
-      ...row,
-      status: String(row.status || "informational").trim() || "informational",
-      raw_value:
-        row.raw_value === null || row.raw_value === undefined
-          ? null
-          : Number(row.raw_value),
-      score:
-        row.score === null || row.score === undefined
-          ? null
-          : Number(row.score),
-      details:
-        row.details &&
-        typeof row.details === "object" &&
-        !Array.isArray(row.details)
-          ? row.details
-          : {},
-    }))
-    .map((row) => ({
-      ...row,
-      ...classifyEvidenceRow(row),
-    }));
+  const normalizedEvidence = evidence.map(normalizeEvidenceRow);
   const { evidenceSummary, pairSummaries } =
     summarizeEvidenceRows(normalizedEvidence);
 
@@ -1541,21 +1563,17 @@ async function saveGlobalClusterWorkspace(clusterId, input) {
     await maybeMoveClusterToInReview(client, cluster.cluster_id);
   }
 
-  return {
-    ok: true,
-    cluster_id: cluster.cluster_id,
-    workspace_version: saved.version,
-    effective_status: cluster.status === "open" ? "in_review" : cluster.status,
+  return buildWorkspaceMutationResponse(cluster.cluster_id, {
+    workspaceVersion: saved.version,
+    effectiveStatus: cluster.status === "open" ? "in_review" : cluster.status,
     workspace: saved.workspace,
-  };
+  });
 }
 
 async function undoGlobalClusterWorkspace(clusterId, input) {
   const client = await getDbClient();
   const cluster = await requireCluster(client, clusterId);
-  const updatedBy =
-    String(input?.updated_by || input?.updatedBy || "qa_operator").trim() ||
-    "qa_operator";
+  const updatedBy = resolveUpdatedBy(input);
   const versions = await client.queryRows(
     `
     SELECT
@@ -1584,13 +1602,11 @@ async function undoGlobalClusterWorkspace(clusterId, input) {
       action: "undo",
     });
     await setClusterFinalStatus(client, cluster.cluster_id, "open", updatedBy);
-    return {
-      ok: true,
-      cluster_id: cluster.cluster_id,
-      workspace_version: 0,
-      effective_status: "open",
+    return buildWorkspaceMutationResponse(cluster.cluster_id, {
+      workspaceVersion: 0,
+      effectiveStatus: "open",
       workspace: null,
-    };
+    });
   }
 
   const previousPayload = normalizeWorkspacePayload(
@@ -1604,21 +1620,17 @@ async function undoGlobalClusterWorkspace(clusterId, input) {
   });
   await maybeMoveClusterToInReview(client, cluster.cluster_id);
 
-  return {
-    ok: true,
-    cluster_id: cluster.cluster_id,
-    workspace_version: saved.version,
-    effective_status: "in_review",
+  return buildWorkspaceMutationResponse(cluster.cluster_id, {
+    workspaceVersion: saved.version,
+    effectiveStatus: "in_review",
     workspace: saved.workspace,
-  };
+  });
 }
 
 async function resetGlobalClusterWorkspace(clusterId, input) {
   const client = await getDbClient();
   const cluster = await requireCluster(client, clusterId);
-  const updatedBy =
-    String(input?.updated_by || input?.updatedBy || "qa_operator").trim() ||
-    "qa_operator";
+  const updatedBy = resolveUpdatedBy(input);
 
   await clearWorkspaceSnapshot(client, {
     clusterId: cluster.cluster_id,
@@ -1627,21 +1639,17 @@ async function resetGlobalClusterWorkspace(clusterId, input) {
   });
   await setClusterFinalStatus(client, cluster.cluster_id, "open", updatedBy);
 
-  return {
-    ok: true,
-    cluster_id: cluster.cluster_id,
-    workspace_version: 0,
-    effective_status: "open",
+  return buildWorkspaceMutationResponse(cluster.cluster_id, {
+    workspaceVersion: 0,
+    effectiveStatus: "open",
     workspace: null,
-  };
+  });
 }
 
 async function reopenGlobalCluster(clusterId, input) {
   const client = await getDbClient();
   const cluster = await requireCluster(client, clusterId);
-  const updatedBy =
-    String(input?.updated_by || input?.updatedBy || "qa_operator").trim() ||
-    "qa_operator";
+  const updatedBy = resolveUpdatedBy(input);
 
   if (
     !["resolved", "dismissed"].includes(
@@ -1679,14 +1687,12 @@ async function reopenGlobalCluster(clusterId, input) {
     updatedBy,
   );
 
-  return {
-    ok: true,
-    cluster_id: cluster.cluster_id,
-    workspace_version:
+  return buildWorkspaceMutationResponse(cluster.cluster_id, {
+    workspaceVersion:
       Number.parseInt(String(currentWorkspace?.version || 0), 10) || 0,
-    effective_status: effectiveStatus,
+    effectiveStatus,
     workspace,
-  };
+  });
 }
 
 async function resolveGlobalCluster(clusterId, input) {
@@ -1855,6 +1861,11 @@ async function getRefreshJob(jobId, options = {}) {
 }
 
 module.exports = {
+  _internal: {
+    buildWorkspaceMutationResponse,
+    normalizeEvidenceRow,
+    resolveUpdatedBy,
+  },
   getGlobalClusters,
   getGlobalClusterDetail,
   getRefreshJob,

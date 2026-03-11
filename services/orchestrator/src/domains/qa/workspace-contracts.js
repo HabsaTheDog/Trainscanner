@@ -26,6 +26,10 @@ function normalizeStringArray(values) {
   return out;
 }
 
+function asArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
 function parseWorkspaceRef(value, options = {}) {
   const fieldName = options.fieldName || "ref";
   const raw = normalizeString(value);
@@ -181,20 +185,18 @@ function normalizeGroup(row, index) {
     invalid(`groups[${index}] requires at least two member_refs`);
   }
 
-  const internalNodes = (
-    Array.isArray(row?.internal_nodes)
-      ? row.internal_nodes
-      : Array.isArray(row?.internalNodes)
-        ? row.internalNodes
-        : []
-  ).map((item, itemIndex) => normalizeInternalNode(item, itemIndex, index));
-  const transferMatrix = (
-    Array.isArray(row?.transfer_matrix)
-      ? row.transfer_matrix
-      : Array.isArray(row?.transferMatrix)
-        ? row.transferMatrix
-        : []
-  ).map((item, itemIndex) => normalizeTransfer(item, itemIndex, index));
+  const internalNodeRows = asArray(row?.internal_nodes).concat(
+    asArray(row?.internalNodes),
+  );
+  const transferRows = asArray(row?.transfer_matrix).concat(
+    asArray(row?.transferMatrix),
+  );
+  const internalNodes = internalNodeRows.map((item, itemIndex) =>
+    normalizeInternalNode(item, itemIndex, index),
+  );
+  const transferMatrix = transferRows.map((item, itemIndex) =>
+    normalizeTransfer(item, itemIndex, index),
+  );
 
   if (internalNodes.length === 0) {
     invalid(`groups[${index}] requires at least one internal node`);
@@ -215,54 +217,157 @@ function normalizeGroup(row, index) {
   };
 }
 
-function normalizeWorkspacePayload(input, options = {}) {
-  const requireCompleteGroups = options.requireCompleteGroups === true;
+function resolveWorkspaceInput(input) {
   const rawWorkspace =
     input && typeof input === "object" && input.workspace
       ? input.workspace
       : input;
-  const payload =
-    rawWorkspace && typeof rawWorkspace === "object" ? rawWorkspace : {};
+  return rawWorkspace && typeof rawWorkspace === "object" ? rawWorkspace : {};
+}
+
+function resolveRenameTargets(payload) {
+  if (Array.isArray(payload.renames)) {
+    return payload.renames;
+  }
+  return asArray(payload.rename_targets).map((row) => ({
+    ref:
+      row?.ref ||
+      `raw:${normalizeString(row?.global_station_id || row?.globalStationId)}`,
+    display_name:
+      row?.display_name || row?.displayName || row?.rename_to || row?.renameTo,
+  }));
+}
+
+function normalizeKeepSeparateSet(row, index) {
+  const refs = normalizeStringArray(
+    Array.isArray(row) ? row : row?.refs || row?.member_refs,
+  ).map(
+    (ref) =>
+      parseWorkspaceRef(ref, {
+        fieldName: `keep_separate_sets[${index}]`,
+      }).ref,
+  );
+  if (refs.length < 2) {
+    invalid(`keep_separate_sets[${index}] requires at least two refs`);
+  }
+  return { refs };
+}
+
+function validateGroupMembers(group, mergeIds) {
+  const memberRefSet = new Set(group.member_refs);
+  for (const memberRef of group.member_refs) {
+    const memberParsed = parseWorkspaceRef(memberRef);
+    if (memberParsed.type === "group") {
+      invalid(`groups '${group.entity_id}' cannot include nested group refs`);
+    }
+    if (memberParsed.type === "merge" && !mergeIds.has(memberParsed.id)) {
+      invalid(
+        `groups '${group.entity_id}' references unknown merge entity '${memberParsed.id}'`,
+      );
+    }
+  }
+  return memberRefSet;
+}
+
+function validateInternalNodes(group, mergeIds, memberRefSet) {
+  const nodeIds = new Set();
+  const nodeRefs = new Set();
+
+  for (const node of group.internal_nodes) {
+    if (nodeIds.has(node.node_id)) {
+      invalid(
+        `groups '${group.entity_id}' contains duplicate node_id '${node.node_id}'`,
+      );
+    }
+    nodeIds.add(node.node_id);
+    if (nodeRefs.has(node.source_ref)) {
+      invalid(
+        `groups '${group.entity_id}' contains duplicate internal node source_ref '${node.source_ref}'`,
+      );
+    }
+    nodeRefs.add(node.source_ref);
+    if (!memberRefSet.has(node.source_ref)) {
+      invalid(
+        `groups '${group.entity_id}' internal node '${node.node_id}' must reference a member_ref`,
+      );
+    }
+    const nodeSource = parseWorkspaceRef(node.source_ref);
+    if (nodeSource.type === "merge" && !mergeIds.has(nodeSource.id)) {
+      invalid(
+        `groups '${group.entity_id}' internal node '${node.node_id}' references unknown merge entity '${nodeSource.id}'`,
+      );
+    }
+    if (
+      node.member_global_station_ids.length === 0 &&
+      nodeSource.type === "raw"
+    ) {
+      node.member_global_station_ids = [nodeSource.id];
+    }
+  }
+
+  return nodeIds;
+}
+
+function validateTransferMatrix(group, nodeIds, requireCompleteGroups) {
+  const transferKeys = new Set();
+  for (const transfer of group.transfer_matrix) {
+    if (
+      !nodeIds.has(transfer.from_node_id) ||
+      !nodeIds.has(transfer.to_node_id)
+    ) {
+      invalid(
+        `groups '${group.entity_id}' transfer_matrix references unknown node ids`,
+      );
+    }
+    const orderedKey = [transfer.from_node_id, transfer.to_node_id]
+      .sort((a, b) => a.localeCompare(b))
+      .join("|");
+    if (transferKeys.has(orderedKey)) {
+      invalid(
+        `groups '${group.entity_id}' transfer_matrix contains duplicate pair '${orderedKey}'`,
+      );
+    }
+    transferKeys.add(orderedKey);
+  }
+
+  if (!requireCompleteGroups || group.internal_nodes.length < 2) {
+    return;
+  }
+
+  for (let i = 0; i < group.internal_nodes.length; i += 1) {
+    for (let j = i + 1; j < group.internal_nodes.length; j += 1) {
+      const key = [
+        group.internal_nodes[i].node_id,
+        group.internal_nodes[j].node_id,
+      ]
+        .sort((a, b) => a.localeCompare(b))
+        .join("|");
+      if (!transferKeys.has(key)) {
+        invalid(
+          `groups '${group.entity_id}' must define a walking time for every internal node pair`,
+        );
+      }
+    }
+  }
+}
+
+function normalizeWorkspacePayload(input, options = {}) {
+  const requireCompleteGroups = options.requireCompleteGroups === true;
+  const payload = resolveWorkspaceInput(input);
   const normalized = createEmptyWorkspace();
 
-  normalized.merges = (Array.isArray(payload.merges) ? payload.merges : []).map(
-    (row, index) => normalizeMerge(row, index),
+  normalized.merges = asArray(payload.merges).map((row, index) =>
+    normalizeMerge(row, index),
   );
-  normalized.groups = (Array.isArray(payload.groups) ? payload.groups : []).map(
-    (row, index) => normalizeGroup(row, index),
+  normalized.groups = asArray(payload.groups).map((row, index) =>
+    normalizeGroup(row, index),
   );
-  normalized.renames = (
-    Array.isArray(payload.renames)
-      ? payload.renames
-      : Array.isArray(payload.rename_targets)
-        ? payload.rename_targets.map((row) => ({
-            ref:
-              row?.ref ||
-              `raw:${normalizeString(row?.global_station_id || row?.globalStationId)}`,
-            display_name:
-              row?.display_name ||
-              row?.displayName ||
-              row?.rename_to ||
-              row?.renameTo,
-          }))
-        : []
-  ).map((row, index) => normalizeRename(row, index));
-  normalized.keep_separate_sets = (
-    Array.isArray(payload.keep_separate_sets) ? payload.keep_separate_sets : []
-  ).map((row, index) => {
-    const refs = normalizeStringArray(
-      Array.isArray(row) ? row : row?.refs || row?.member_refs,
-    ).map(
-      (ref) =>
-        parseWorkspaceRef(ref, {
-          fieldName: `keep_separate_sets[${index}]`,
-        }).ref,
-    );
-    if (refs.length < 2) {
-      invalid(`keep_separate_sets[${index}] requires at least two refs`);
-    }
-    return { refs };
-  });
+  normalized.renames = resolveRenameTargets(payload).map((row, index) =>
+    normalizeRename(row, index),
+  );
+  normalized.keep_separate_sets = asArray(payload.keep_separate_sets).map(
+    (row, index) => normalizeKeepSeparateSet(row, index),
+  );
   normalized.note = normalizeString(payload.note);
 
   const mergeIds = new Set();
@@ -280,91 +385,9 @@ function normalizeWorkspacePayload(input, options = {}) {
     }
     groupIds.add(group.entity_id);
 
-    const memberRefSet = new Set(group.member_refs);
-    for (const memberRef of group.member_refs) {
-      const memberParsed = parseWorkspaceRef(memberRef);
-      if (memberParsed.type === "group") {
-        invalid(`groups '${group.entity_id}' cannot include nested group refs`);
-      }
-      if (memberParsed.type === "merge" && !mergeIds.has(memberParsed.id)) {
-        invalid(
-          `groups '${group.entity_id}' references unknown merge entity '${memberParsed.id}'`,
-        );
-      }
-    }
-
-    const nodeIds = new Set();
-    const nodeRefs = new Set();
-    for (const node of group.internal_nodes) {
-      if (nodeIds.has(node.node_id)) {
-        invalid(
-          `groups '${group.entity_id}' contains duplicate node_id '${node.node_id}'`,
-        );
-      }
-      nodeIds.add(node.node_id);
-      if (nodeRefs.has(node.source_ref)) {
-        invalid(
-          `groups '${group.entity_id}' contains duplicate internal node source_ref '${node.source_ref}'`,
-        );
-      }
-      nodeRefs.add(node.source_ref);
-      if (!memberRefSet.has(node.source_ref)) {
-        invalid(
-          `groups '${group.entity_id}' internal node '${node.node_id}' must reference a member_ref`,
-        );
-      }
-      const nodeSource = parseWorkspaceRef(node.source_ref);
-      if (nodeSource.type === "merge" && !mergeIds.has(nodeSource.id)) {
-        invalid(
-          `groups '${group.entity_id}' internal node '${node.node_id}' references unknown merge entity '${nodeSource.id}'`,
-        );
-      }
-      if (
-        node.member_global_station_ids.length === 0 &&
-        nodeSource.type === "raw"
-      ) {
-        node.member_global_station_ids = [nodeSource.id];
-      }
-    }
-
-    const transferKeys = new Set();
-    for (const transfer of group.transfer_matrix) {
-      if (
-        !nodeIds.has(transfer.from_node_id) ||
-        !nodeIds.has(transfer.to_node_id)
-      ) {
-        invalid(
-          `groups '${group.entity_id}' transfer_matrix references unknown node ids`,
-        );
-      }
-      const orderedKey = [transfer.from_node_id, transfer.to_node_id]
-        .sort((a, b) => a.localeCompare(b))
-        .join("|");
-      if (transferKeys.has(orderedKey)) {
-        invalid(
-          `groups '${group.entity_id}' transfer_matrix contains duplicate pair '${orderedKey}'`,
-        );
-      }
-      transferKeys.add(orderedKey);
-    }
-
-    if (requireCompleteGroups && group.internal_nodes.length >= 2) {
-      for (let i = 0; i < group.internal_nodes.length; i += 1) {
-        for (let j = i + 1; j < group.internal_nodes.length; j += 1) {
-          const key = [
-            group.internal_nodes[i].node_id,
-            group.internal_nodes[j].node_id,
-          ]
-            .sort((a, b) => a.localeCompare(b))
-            .join("|");
-          if (!transferKeys.has(key)) {
-            invalid(
-              `groups '${group.entity_id}' must define a walking time for every internal node pair`,
-            );
-          }
-        }
-      }
-    }
+    const memberRefSet = validateGroupMembers(group, mergeIds);
+    const nodeIds = validateInternalNodes(group, mergeIds, memberRefSet);
+    validateTransferMatrix(group, nodeIds, requireCompleteGroups);
   }
 
   const occupiedRawRefs = new Set();
@@ -381,8 +404,7 @@ function normalizeWorkspacePayload(input, options = {}) {
   return normalized;
 }
 
-function buildWorkspaceEntities(workspace) {
-  const entities = [];
+function collectCompositeMemberRefs(workspace, entities) {
   const compositeMemberRefs = new Set();
 
   for (const merge of workspace.merges) {
@@ -411,7 +433,12 @@ function buildWorkspaceEntities(workspace) {
     });
   }
 
+  return compositeMemberRefs;
+}
+
+function collectStandaloneRawRefs(workspace, compositeMemberRefs) {
   const rawRefs = new Set();
+
   for (const rename of workspace.renames) {
     const parsed = parseWorkspaceRef(rename.ref);
     if (parsed.type === "raw" && !compositeMemberRefs.has(rename.ref)) {
@@ -426,6 +453,14 @@ function buildWorkspaceEntities(workspace) {
       }
     }
   }
+
+  return rawRefs;
+}
+
+function buildWorkspaceEntities(workspace) {
+  const entities = [];
+  const compositeMemberRefs = collectCompositeMemberRefs(workspace, entities);
+  const rawRefs = collectStandaloneRawRefs(workspace, compositeMemberRefs);
 
   for (const ref of Array.from(rawRefs).sort((a, b) => a.localeCompare(b))) {
     entities.push({

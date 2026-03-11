@@ -27,6 +27,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Generate Sonar coverage inputs
+        run: npm run test:sonar:coverage
+
       - name: SonarCloud scan
         uses: SonarSource/sonarqube-scan-action@v6.0.0
         env:

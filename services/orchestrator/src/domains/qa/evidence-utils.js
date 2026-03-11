@@ -110,6 +110,118 @@ function normalizeSeedReasons(value) {
   );
 }
 
+function compareStationIds(left, right) {
+  return String(left || "").localeCompare(String(right || ""));
+}
+
+function createEmptyPairEntry(sourceId, targetId) {
+  const sortedIds = [sourceId, targetId].sort(compareStationIds);
+  return {
+    source_global_station_id: sortedIds[0] || sourceId,
+    target_global_station_id: sortedIds[1] || targetId,
+    supporting_count: 0,
+    warning_count: 0,
+    missing_count: 0,
+    informational_count: 0,
+    score_total: 0,
+    score_count: 0,
+    highlights: {
+      evidence_types: [],
+      distance_status: "",
+      shared_signal_count: 0,
+      seed_reasons: [],
+    },
+    categories: [],
+    seed_reasons: [],
+  };
+}
+
+function incrementStatusCount(statusCounts, status) {
+  if (status in statusCounts) {
+    statusCounts[status] += 1;
+    return;
+  }
+  statusCounts.informational += 1;
+}
+
+function incrementCategoryCount(categoryCounts, category) {
+  if (category in categoryCounts) {
+    categoryCounts[category] += 1;
+    return;
+  }
+  categoryCounts.risk_conflict += 1;
+}
+
+function incrementPairStatus(entry, status) {
+  if (status === "supporting") {
+    entry.supporting_count += 1;
+    return;
+  }
+  if (status === "warning") {
+    entry.warning_count += 1;
+    return;
+  }
+  if (status === "missing") {
+    entry.missing_count += 1;
+    return;
+  }
+  entry.informational_count += 1;
+}
+
+function shouldHighlightEvidenceType(status, entry, evidenceType) {
+  return (
+    ["warning", "missing", "supporting"].includes(status) &&
+    !entry.highlights.evidence_types.includes(evidenceType) &&
+    entry.highlights.evidence_types.length < 4
+  );
+}
+
+function appendUnique(target, value) {
+  if (!target.includes(value)) {
+    target.push(value);
+  }
+}
+
+function updatePairHighlights(entry, row, evidenceType, category, seedReasons) {
+  if (shouldHighlightEvidenceType(row.status, entry, evidenceType)) {
+    entry.highlights.evidence_types.push(evidenceType);
+  }
+  if (
+    row?.evidence_type === "geographic_distance" &&
+    row?.details?.distance_status
+  ) {
+    entry.highlights.distance_status = String(row.details.distance_status);
+  }
+  if (
+    [
+      "shared_provider_sources",
+      "shared_route_context",
+      "shared_adjacent_stations",
+    ].includes(evidenceType) &&
+    Number.isFinite(Number(row?.raw_value))
+  ) {
+    entry.highlights.shared_signal_count += Number(row.raw_value);
+  }
+  appendUnique(entry.categories, category);
+  for (const seedReason of seedReasons) {
+    appendUnique(entry.highlights.seed_reasons, seedReason);
+    appendUnique(entry.seed_reasons, seedReason);
+  }
+}
+
+function buildPairSummaryMessage(entry) {
+  if (entry.warning_count > 0) {
+    return "Conflicting evidence needs review";
+  }
+  if (entry.missing_count > 0) {
+    return "Key evidence is missing";
+  }
+  if (entry.supporting_count > 0) {
+    return "Signals are mostly supportive";
+  }
+  return "Mostly contextual evidence";
+}
+
 function classifyEvidenceRow(row = {}) {
   const evidenceType =
     String(row?.evidence_type || "unknown").trim() || "unknown";
@@ -143,11 +255,7 @@ function summarizeEvidenceRows(rows = []) {
 
   for (const row of Array.isArray(rows) ? rows : []) {
     const status = String(row?.status || "informational").trim();
-    if (status in statusCounts) {
-      statusCounts[status] += 1;
-    } else {
-      statusCounts.informational += 1;
-    }
+    incrementStatusCount(statusCounts, status);
     const evidenceType =
       String(row?.evidence_type || "unknown").trim() || "unknown";
     typeCounts[evidenceType] = (typeCounts[evidenceType] || 0) + 1;
@@ -155,11 +263,7 @@ function summarizeEvidenceRows(rows = []) {
     const category =
       String(row?.category || classification.category).trim() ||
       "risk_conflict";
-    if (category in categoryCounts) {
-      categoryCounts[category] += 1;
-    } else {
-      categoryCounts.risk_conflict += 1;
-    }
+    incrementCategoryCount(categoryCounts, category);
     const seedReasons =
       Array.isArray(row?.seed_reasons) && row.seed_reasons.length > 0
         ? normalizeSeedReasons(row.seed_reasons)
@@ -170,30 +274,11 @@ function summarizeEvidenceRows(rows = []) {
 
     const sourceId = String(row?.source_global_station_id || "").trim();
     const targetId = String(row?.target_global_station_id || "").trim();
-    const pairKey = [sourceId, targetId].sort().join("|");
-    const entry = pairMap.get(pairKey) || {
-      source_global_station_id: [sourceId, targetId].sort()[0] || sourceId,
-      target_global_station_id: [sourceId, targetId].sort()[1] || targetId,
-      supporting_count: 0,
-      warning_count: 0,
-      missing_count: 0,
-      informational_count: 0,
-      score_total: 0,
-      score_count: 0,
-      highlights: {
-        evidence_types: [],
-        distance_status: "",
-        shared_signal_count: 0,
-        seed_reasons: [],
-      },
-      categories: [],
-      seed_reasons: [],
-    };
+    const pairKey = [sourceId, targetId].sort(compareStationIds).join("|");
+    const entry =
+      pairMap.get(pairKey) || createEmptyPairEntry(sourceId, targetId);
 
-    if (status === "supporting") entry.supporting_count += 1;
-    else if (status === "warning") entry.warning_count += 1;
-    else if (status === "missing") entry.missing_count += 1;
-    else entry.informational_count += 1;
+    incrementPairStatus(entry, status);
 
     const score = Number(row?.score);
     if (Number.isFinite(score)) {
@@ -201,40 +286,7 @@ function summarizeEvidenceRows(rows = []) {
       entry.score_count += 1;
     }
 
-    if (
-      ["warning", "missing", "supporting"].includes(status) &&
-      !entry.highlights.evidence_types.includes(evidenceType) &&
-      entry.highlights.evidence_types.length < 4
-    ) {
-      entry.highlights.evidence_types.push(evidenceType);
-    }
-    if (
-      row?.evidence_type === "geographic_distance" &&
-      row?.details?.distance_status
-    ) {
-      entry.highlights.distance_status = String(row.details.distance_status);
-    }
-    if (
-      [
-        "shared_provider_sources",
-        "shared_route_context",
-        "shared_adjacent_stations",
-      ].includes(evidenceType) &&
-      Number.isFinite(Number(row?.raw_value))
-    ) {
-      entry.highlights.shared_signal_count += Number(row.raw_value);
-    }
-    if (!entry.categories.includes(category)) {
-      entry.categories.push(category);
-    }
-    for (const seedReason of seedReasons) {
-      if (!entry.highlights.seed_reasons.includes(seedReason)) {
-        entry.highlights.seed_reasons.push(seedReason);
-      }
-      if (!entry.seed_reasons.includes(seedReason)) {
-        entry.seed_reasons.push(seedReason);
-      }
-    }
+    updatePairHighlights(entry, row, evidenceType, category, seedReasons);
 
     pairMap.set(pairKey, entry);
   }
@@ -251,14 +303,6 @@ function summarizeEvidenceRows(rows = []) {
     .map((entry) => {
       const score =
         entry.score_count > 0 ? entry.score_total / entry.score_count : 0;
-      const summary =
-        entry.warning_count > 0
-          ? "Conflicting evidence needs review"
-          : entry.missing_count > 0
-            ? "Key evidence is missing"
-            : entry.supporting_count > 0
-              ? "Signals are mostly supportive"
-              : "Mostly contextual evidence";
       return {
         source_global_station_id: entry.source_global_station_id,
         target_global_station_id: entry.target_global_station_id,
@@ -267,7 +311,7 @@ function summarizeEvidenceRows(rows = []) {
         missing_count: entry.missing_count,
         informational_count: entry.informational_count,
         score: Number(score.toFixed(3)),
-        summary,
+        summary: buildPairSummaryMessage(entry),
         categories: entry.categories,
         seed_reasons: entry.seed_reasons,
         highlights: entry.highlights,

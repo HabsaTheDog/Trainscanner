@@ -310,16 +310,24 @@ function createJobOrchestrator(options = {}) {
 
   async function throwBackpressureForClaim(job, context) {
     if (typeof jobsRepo.getById === "function") {
-      const latest = await jobsRepo.getById(job.jobId).catch(() => null);
+      let latest = null;
+      try {
+        latest = await jobsRepo.getById(job.jobId);
+      } catch {
+        latest = null;
+      }
       const latestOutcome = resolveExistingJob(latest, context);
       if (latestOutcome) {
         return latestOutcome;
       }
     }
 
-    const currentRunning = await jobsRepo
-      .countRunningByType(context.jobType)
-      .catch(() => context.maxConcurrent);
+    let currentRunning = context.maxConcurrent;
+    try {
+      currentRunning = await jobsRepo.countRunningByType(context.jobType);
+    } catch {
+      currentRunning = context.maxConcurrent;
+    }
     throw new AppError({
       code: "JOB_BACKPRESSURE",
       message: `Backpressure active for jobType '${context.jobType}' (running=${currentRunning}, limit=${context.maxConcurrent})`,

@@ -66,16 +66,19 @@ slugify() {
 
 now_ms() {
   date +%s%3N
+  return 0
 }
 
 parse_args() {
   local arg
+  local value
   while [[ $# -gt 0 ]]; do
     arg="$1"
     case "$arg" in
       --country)
         [[ $# -ge 2 ]] || fail "Missing value for --country"
-        COUNTRY_FILTER="$(printf '%s' "$2" | tr '[:lower:]' '[:upper:]')"
+        value="$2"
+        COUNTRY_FILTER="$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')"
         shift 2
         ;;
       --source-id)
@@ -425,6 +428,7 @@ print(json.dumps({
     "explicitStopPointsRows": len(explicit_point_refs),
 }))
 PY
+  return 0
 }
 
 ingest_source() {

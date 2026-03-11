@@ -322,6 +322,27 @@ def _parse_passenger_stop_assignment(
     return scheduled_ref, child_ref(elem, "QuayRef"), child_ref(elem, "StopPlaceRef")
 
 
+def _ancestor_stop_place_ref(elem: etree._Element) -> str:
+    ancestor = elem.getparent()
+    while ancestor is not None:
+        if local_name(ancestor.tag) == "StopPlace":
+            stop_place_id = clean_text(ancestor.attrib.get("id"))
+            if stop_place_id:
+                return stop_place_id
+            break
+        ancestor = ancestor.getparent()
+    return ""
+
+
+def _key_value_stop_place_ref(elem: etree._Element) -> str:
+    for key in ("stopplaceref", "parentstopplace", "parentsiteref"):
+        value = key_values(elem).get(key)
+        clean = clean_text(value)
+        if clean:
+            return clean
+    return ""
+
+
 def _resolve_own_stop_place_ref(
     elem: etree._Element, quay_to_stop_place: dict[str, str]
 ) -> str:
@@ -333,20 +354,13 @@ def _resolve_own_stop_place_ref(
     if parent:
         return parent
 
-    ancestor = elem.getparent()
-    while ancestor is not None:
-        if local_name(ancestor.tag) == "StopPlace":
-            stop_place_id = clean_text(ancestor.attrib.get("id"))
-            if stop_place_id:
-                return stop_place_id
-            break
-        ancestor = ancestor.getparent()
+    ancestor_stop_place_ref = _ancestor_stop_place_ref(elem)
+    if ancestor_stop_place_ref:
+        return ancestor_stop_place_ref
 
-    for key in ("stopplaceref", "parentstopplace", "parentsiteref"):
-        value = key_values(elem).get(key)
-        clean = clean_text(value)
-        if clean:
-            return clean
+    keyed_stop_place_ref = _key_value_stop_place_ref(elem)
+    if keyed_stop_place_ref:
+        return keyed_stop_place_ref
 
     stop_place_ref = child_ref(elem, "StopPlaceRef")
     if stop_place_ref:
@@ -408,6 +422,18 @@ def _write_stop_place_row(
     )
 
 
+def _resolve_parent_coordinates(
+    source_stop_place_ref: str,
+    stop_place_lookup: dict[str, dict[str, float | str | None]],
+) -> tuple[float | None, float | None]:
+    parent = stop_place_lookup.get(source_stop_place_ref) or {}
+    parent_lat = parent.get("lat")
+    parent_lon = parent.get("lon")
+    lat = float(parent_lat) if isinstance(parent_lat, (int, float)) else None
+    lon = float(parent_lon) if isinstance(parent_lon, (int, float)) else None
+    return lat, lon
+
+
 def _resolve_parent_stop_place_ref(
     elem: etree._Element,
     stop_place_lookup: dict[str, dict[str, float | str | None]],
@@ -431,20 +457,13 @@ def _resolve_parent_stop_place_ref(
     if parent:
         return parent
 
-    ancestor = elem.getparent()
-    while ancestor is not None:
-        if local_name(ancestor.tag) == "StopPlace":
-            stop_place_id = clean_text(ancestor.attrib.get("id"))
-            if stop_place_id:
-                return stop_place_id
-            break
-        ancestor = ancestor.getparent()
+    ancestor_stop_place_ref = _ancestor_stop_place_ref(elem)
+    if ancestor_stop_place_ref:
+        return ancestor_stop_place_ref
 
-    for key in ("stopplaceref", "parentstopplace", "parentsiteref"):
-        value = key_values(elem).get(key)
-        clean = clean_text(value)
-        if clean:
-            return clean
+    keyed_stop_place_ref = _key_value_stop_place_ref(elem)
+    if keyed_stop_place_ref:
+        return keyed_stop_place_ref
 
     fallback_parent = clean_text(elem.attrib.get("id")) or ""
     if fallback_parent in stop_place_lookup:
@@ -598,11 +617,7 @@ def _process_stop_point(
 
     lat, lon = first_location_coords(elem)
     if lat is None or lon is None:
-        parent = stop_place_lookup.get(source_stop_place_ref) or {}
-        parent_lat = parent.get("lat")
-        parent_lon = parent.get("lon")
-        lat = float(parent_lat) if isinstance(parent_lat, (int, float)) else None
-        lon = float(parent_lon) if isinstance(parent_lon, (int, float)) else None
+        lat, lon = _resolve_parent_coordinates(source_stop_place_ref, stop_place_lookup)
 
     if lat is None or lon is None:
         summary.without_coordinates += 1
@@ -712,6 +727,49 @@ def _scan_xml_entry(
             _clear_element(elem)
 
 
+def _record_reference_map_stop_place(
+    elem: etree._Element,
+    stop_place_lookup: dict[str, dict[str, float | str | None]],
+) -> None:
+    source_stop_id, stop_name, lat, lon = _extract_stop_place_meta(elem)
+    if not source_stop_id:
+        return
+    stop_place_lookup.setdefault(
+        source_stop_id,
+        {
+            "stop_name": stop_name,
+            "lat": lat,
+            "lon": lon,
+        },
+    )
+
+
+def _record_reference_map_quay(
+    elem: etree._Element,
+    quay_to_stop_place: dict[str, str],
+) -> None:
+    quay_id = clean_text(elem.attrib.get("id"))
+    stop_place_ref = _resolve_own_stop_place_ref(elem, quay_to_stop_place)
+    if quay_id and stop_place_ref:
+        quay_to_stop_place[quay_id] = stop_place_ref
+
+
+def _record_reference_map_assignment(
+    elem: etree._Element,
+    quay_to_stop_place: dict[str, str],
+    scheduled_stop_point_to_stop_place: dict[str, str],
+    scheduled_stop_point_to_quay: dict[str, str],
+) -> None:
+    scheduled_ref, quay_ref, stop_place_ref = _parse_passenger_stop_assignment(elem)
+    if scheduled_ref and quay_ref:
+        scheduled_stop_point_to_quay[scheduled_ref] = quay_ref
+    if scheduled_ref and stop_place_ref:
+        scheduled_stop_point_to_stop_place[scheduled_ref] = stop_place_ref
+        return
+    if scheduled_ref and quay_ref and quay_ref in quay_to_stop_place:
+        scheduled_stop_point_to_stop_place[scheduled_ref] = quay_to_stop_place[quay_ref]
+
+
 def _collect_reference_maps(
     archive: zipfile.ZipFile,
     entry: str,
@@ -734,33 +792,16 @@ def _collect_reference_maps(
         for _, elem in context:
             tag = local_name(elem.tag)
             if tag == "StopPlace":
-                source_stop_id, stop_name, lat, lon = _extract_stop_place_meta(elem)
-                if source_stop_id:
-                    stop_place_lookup.setdefault(
-                        source_stop_id,
-                        {
-                            "stop_name": stop_name,
-                            "lat": lat,
-                            "lon": lon,
-                        },
-                    )
+                _record_reference_map_stop_place(elem, stop_place_lookup)
             elif tag == "Quay":
-                quay_id = clean_text(elem.attrib.get("id"))
-                stop_place_ref = _resolve_own_stop_place_ref(elem, quay_to_stop_place)
-                if quay_id and stop_place_ref:
-                    quay_to_stop_place[quay_id] = stop_place_ref
+                _record_reference_map_quay(elem, quay_to_stop_place)
             elif tag == "PassengerStopAssignment":
-                scheduled_ref, quay_ref, stop_place_ref = (
-                    _parse_passenger_stop_assignment(elem)
+                _record_reference_map_assignment(
+                    elem,
+                    quay_to_stop_place,
+                    scheduled_stop_point_to_stop_place,
+                    scheduled_stop_point_to_quay,
                 )
-                if scheduled_ref and quay_ref:
-                    scheduled_stop_point_to_quay[scheduled_ref] = quay_ref
-                if scheduled_ref and stop_place_ref:
-                    scheduled_stop_point_to_stop_place[scheduled_ref] = stop_place_ref
-                elif scheduled_ref and quay_ref and quay_ref in quay_to_stop_place:
-                    scheduled_stop_point_to_stop_place[scheduled_ref] = (
-                        quay_to_stop_place[quay_ref]
-                    )
             _clear_element(elem)
 
 

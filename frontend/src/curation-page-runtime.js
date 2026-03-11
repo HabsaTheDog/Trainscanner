@@ -179,6 +179,35 @@ const AI_SCORE_MUTATION = `
   }
 `;
 
+export function pickPrimaryCountry(countryTags, fallback = "EU") {
+  return Array.isArray(countryTags) && countryTags.length > 0
+    ? countryTags[0]
+    : fallback;
+}
+
+export function requireGraphqlField(data, fieldName, errorMessage) {
+  const value = data?.[fieldName];
+  if (value === null || value === undefined) {
+    throw new Error(errorMessage);
+  }
+  return value;
+}
+
+export function requireSuccessfulMutation(data, fieldName, errorMessage) {
+  const value = requireGraphqlField(data, fieldName, errorMessage);
+  if (!value?.ok) {
+    throw new Error(errorMessage);
+  }
+  return value;
+}
+
+function normalizeWorkspaceResult(result) {
+  return {
+    ...result,
+    workspace: normalizeWorkspace(result.workspace),
+  };
+}
+
 export async function fetchClusters(filters = {}) {
   const data = await graphqlQuery(CLUSTERS_QUERY, {
     country: filters.country || null,
@@ -189,10 +218,7 @@ export async function fetchClusters(filters = {}) {
   return {
     items: rows.map((row) => ({
       ...row,
-      country:
-        Array.isArray(row.country_tags) && row.country_tags.length > 0
-          ? row.country_tags[0]
-          : "EU",
+      country: pickPrimaryCountry(row.country_tags),
     })),
     totalCount: Number.isFinite(payload.total_count) ? payload.total_count : 0,
     limit: Number.isFinite(payload.limit) ? payload.limit : rows.length,
@@ -214,10 +240,7 @@ export function normalizeClusterDetail(cluster) {
   if (!cluster || typeof cluster !== "object") return null;
   return {
     ...cluster,
-    country:
-      Array.isArray(cluster.country_tags) && cluster.country_tags.length > 0
-        ? cluster.country_tags[0]
-        : "EU",
+    country: pickPrimaryCountry(cluster.country_tags),
     workspace: normalizeWorkspace(cluster.workspace),
     candidates: (cluster.candidates || []).map((candidate) => ({
       global_station_id: candidate.global_station_id,
@@ -299,14 +322,13 @@ export async function saveClusterWorkspace(clusterId, workspace) {
       updated_by: "qa_operator",
     },
   });
-  const result = data?.saveGlobalClusterWorkspace;
-  if (!result?.ok) {
-    throw new Error("Workspace save failed.");
-  }
-  return {
-    ...result,
-    workspace: normalizeWorkspace(result.workspace),
-  };
+  return normalizeWorkspaceResult(
+    requireSuccessfulMutation(
+      data,
+      "saveGlobalClusterWorkspace",
+      "Workspace save failed.",
+    ),
+  );
 }
 
 export async function undoClusterWorkspace(clusterId) {
@@ -314,14 +336,13 @@ export async function undoClusterWorkspace(clusterId) {
     clusterId,
     input: { updated_by: "qa_operator" },
   });
-  const result = data?.undoGlobalClusterWorkspace;
-  if (!result?.ok) {
-    throw new Error("Workspace undo failed.");
-  }
-  return {
-    ...result,
-    workspace: normalizeWorkspace(result.workspace),
-  };
+  return normalizeWorkspaceResult(
+    requireSuccessfulMutation(
+      data,
+      "undoGlobalClusterWorkspace",
+      "Workspace undo failed.",
+    ),
+  );
 }
 
 export async function resetClusterWorkspace(clusterId) {
@@ -329,14 +350,13 @@ export async function resetClusterWorkspace(clusterId) {
     clusterId,
     input: { updated_by: "qa_operator" },
   });
-  const result = data?.resetGlobalClusterWorkspace;
-  if (!result?.ok) {
-    throw new Error("Workspace reset failed.");
-  }
-  return {
-    ...result,
-    workspace: normalizeWorkspace(result.workspace),
-  };
+  return normalizeWorkspaceResult(
+    requireSuccessfulMutation(
+      data,
+      "resetGlobalClusterWorkspace",
+      "Workspace reset failed.",
+    ),
+  );
 }
 
 export async function reopenCluster(clusterId) {
@@ -344,14 +364,13 @@ export async function reopenCluster(clusterId) {
     clusterId,
     input: { updated_by: "qa_operator" },
   });
-  const result = data?.reopenGlobalCluster;
-  if (!result?.ok) {
-    throw new Error("Cluster reopen failed.");
-  }
-  return {
-    ...result,
-    workspace: normalizeWorkspace(result.workspace),
-  };
+  return normalizeWorkspaceResult(
+    requireSuccessfulMutation(
+      data,
+      "reopenGlobalCluster",
+      "Cluster reopen failed.",
+    ),
+  );
 }
 
 export async function resolveCluster(clusterId, status, note) {
@@ -363,17 +382,16 @@ export async function resolveCluster(clusterId, status, note) {
       requested_by: "qa_operator",
     },
   });
-  const result = data?.resolveGlobalCluster;
-  if (!result?.ok) {
-    throw new Error("Cluster resolve failed.");
-  }
-  return result;
+  return requireSuccessfulMutation(
+    data,
+    "resolveGlobalCluster",
+    "Cluster resolve failed.",
+  );
 }
 
 export async function requestAiScore(clusterId) {
   const data = await graphqlQuery(AI_SCORE_MUTATION, { id: clusterId });
-  if (!data?.requestAiScore) throw new Error("No response from AI.");
-  return data.requestAiScore;
+  return requireGraphqlField(data, "requestAiScore", "No response from AI.");
 }
 
 export function escapeHtml(value) {

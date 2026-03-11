@@ -3,9 +3,33 @@ const _path = require("node:path");
 const activities = require("./activities");
 const { createPostgisClient } = require("../data/postgis/client");
 const { loadConfig } = require("../config");
+const { resolveTemporalAddress } = require("../core/runtime");
+const { createLogger } = require("../logger");
+
+function buildWorkerConnectionOptions(env = process.env) {
+  return {
+    address: resolveTemporalAddress(env),
+  };
+}
+
+function buildWorkerOptions(connection, dbClient, config) {
+  return {
+    connection,
+    namespace: "default",
+    taskQueue: "review-pipeline",
+    workflowsPath: require.resolve("./workflows"),
+    activities: {
+      ...activities.createIngestionActivities(dbClient, config),
+      ...activities.createCompileActivities(dbClient, config),
+    },
+  };
+}
 
 async function run() {
   const config = loadConfig();
+  const logger = createLogger(config.switchLogPath, {
+    service: "temporal.worker",
+  });
 
   // Reuse our Phase 1 pooled PostGIS client for the worker context
   const dbClient = createPostgisClient({ env: process.env });
@@ -17,38 +41,41 @@ async function run() {
   // but for the worker side `Worker.create` resolves it through the default
   // NativeConnection under the hood, or we explicitly pass a connection.
 
-  // For production, create a NativeConnection using TEMPORAL_ADDRESS.
   const { NativeConnection } = require("@temporalio/worker");
-  const connection = await NativeConnection.connect({
-    address: process.env.TEMPORAL_ADDRESS || "localhost:7233",
-  });
+  const connection = await NativeConnection.connect(
+    buildWorkerConnectionOptions(),
+  );
+  const worker = await Worker.create(
+    buildWorkerOptions(connection, dbClient, config),
+  );
 
-  const worker = await Worker.create({
-    connection,
-    namespace: "default",
-    taskQueue: "review-pipeline",
-    // In JS we point to the compiled/executable workflows file
-    workflowsPath: require.resolve("./workflows"),
-    activities: {
-      ...activities.createIngestionActivities(dbClient, config),
-      ...activities.createCompileActivities(dbClient, config),
-    },
-  });
-
-  console.log("Temporal Worker started on taskQueue: review-pipeline");
+  logger.info("Temporal worker started", { taskQueue: "review-pipeline" });
   await worker.run();
 }
 
-if (require.main === module) {
-  const main = async () => {
-    try {
-      await run();
-    } catch (err) {
-      console.error("Temporal worker failed:", err);
-      process.exit(1);
-    }
-  };
-  void main();
+async function runCli() {
+  try {
+    await run();
+    return 0;
+  } catch (err) {
+    const config = loadConfig();
+    const logger = createLogger(config.switchLogPath, {
+      service: "temporal.worker",
+    });
+    logger.error("Temporal worker failed", { err });
+    return 1;
+  }
 }
 
-module.exports = { run };
+if (require.main === module) {
+  void runCli().then((exitCode) => {
+    process.exitCode = exitCode;
+  });
+}
+
+module.exports = {
+  buildWorkerConnectionOptions,
+  buildWorkerOptions,
+  run,
+  runCli,
+};

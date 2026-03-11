@@ -16,6 +16,7 @@
       "!dist",
       "!**/dist",
       "!coverage",
+      "!**/coverage",
       "!state"
     ]
   },

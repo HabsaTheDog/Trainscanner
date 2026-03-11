@@ -1,33 +1,31 @@
 const { runLegacyDataScript } = require("../../core/pipeline-runner");
 const { createCircuitBreaker } = require("../../core/circuit-breaker");
+const { readCircuitBreakerConfig } = require("../../core/runtime");
 
 function createSourceDiscoveryService(deps = {}) {
   const runScript = deps.runLegacyDataScript || runLegacyDataScript;
+  const env = deps.env || process.env;
+  const fetchBreakerConfig = readCircuitBreakerConfig(env, {
+    thresholdKey: "SOURCE_FETCH_CIRCUIT_THRESHOLD",
+    cooldownKey: "SOURCE_FETCH_CIRCUIT_COOLDOWN_MS",
+  });
+  const verifyBreakerConfig = readCircuitBreakerConfig(env, {
+    thresholdKey: "SOURCE_VERIFY_CIRCUIT_THRESHOLD",
+    cooldownKey: "SOURCE_VERIFY_CIRCUIT_COOLDOWN_MS",
+  });
   const fetchBreaker =
     deps.fetchBreaker ||
     createCircuitBreaker({
       name: "source-discovery.fetch",
-      failureThreshold: Number.parseInt(
-        process.env.SOURCE_FETCH_CIRCUIT_THRESHOLD || "3",
-        10,
-      ),
-      cooldownMs: Number.parseInt(
-        process.env.SOURCE_FETCH_CIRCUIT_COOLDOWN_MS || "15000",
-        10,
-      ),
+      failureThreshold: fetchBreakerConfig.failureThreshold,
+      cooldownMs: fetchBreakerConfig.cooldownMs,
     });
   const verifyBreaker =
     deps.verifyBreaker ||
     createCircuitBreaker({
       name: "source-discovery.verify",
-      failureThreshold: Number.parseInt(
-        process.env.SOURCE_VERIFY_CIRCUIT_THRESHOLD || "3",
-        10,
-      ),
-      cooldownMs: Number.parseInt(
-        process.env.SOURCE_VERIFY_CIRCUIT_COOLDOWN_MS || "15000",
-        10,
-      ),
+      failureThreshold: verifyBreakerConfig.failureThreshold,
+      cooldownMs: verifyBreakerConfig.cooldownMs,
     });
 
   return {

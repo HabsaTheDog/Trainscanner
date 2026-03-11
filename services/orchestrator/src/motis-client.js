@@ -567,6 +567,20 @@ async function queryMotisRoute(config, payload) {
 }
 
 module.exports = {
+  _internal: {
+    buildPlanPaths,
+    buildRouteRequestParamCandidates,
+    classifyFallbackRouteResponse,
+    compareDockerApiVersion,
+    isEndpointNotFound,
+    joinUrl,
+    parseDockerApiVersion,
+    parseStationInput,
+    responseText,
+    stationCandidates,
+    toConfiguredPlanPath,
+    uniqueList,
+  },
   checkMotisHealth,
   restartMotisContainer,
   waitForMotisReady,

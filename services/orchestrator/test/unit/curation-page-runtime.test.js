@@ -152,3 +152,54 @@ test("normalizeClusterDetail preserves canonical evidence taxonomy fields", asyn
   assert.deepEqual(detail.pair_summaries[0].categories, ["core_match"]);
   assert.deepEqual(detail.pair_summaries[0].seed_reasons, ["exact_name"]);
 });
+
+test("pickPrimaryCountry falls back to EU when no country tags exist", async () => {
+  const { pickPrimaryCountry } = await loadRuntimeModule();
+  assert.equal(pickPrimaryCountry(["AT", "DE"]), "AT");
+  assert.equal(pickPrimaryCountry([]), "EU");
+  assert.equal(pickPrimaryCountry(null, "ALL"), "ALL");
+});
+
+test("requireSuccessfulMutation rejects missing or unsuccessful mutation payloads", async () => {
+  const { requireSuccessfulMutation } = await loadRuntimeModule();
+
+  assert.throws(
+    () => requireSuccessfulMutation({}, "saveGlobalClusterWorkspace", "failed"),
+    /failed/,
+  );
+  assert.throws(
+    () =>
+      requireSuccessfulMutation(
+        { saveGlobalClusterWorkspace: { ok: false } },
+        "saveGlobalClusterWorkspace",
+        "failed",
+      ),
+    /failed/,
+  );
+
+  assert.deepEqual(
+    requireSuccessfulMutation(
+      { saveGlobalClusterWorkspace: { ok: true, workspace_version: 2 } },
+      "saveGlobalClusterWorkspace",
+      "failed",
+    ),
+    { ok: true, workspace_version: 2 },
+  );
+});
+
+test("requireGraphqlField rejects missing AI responses", async () => {
+  const { requireGraphqlField } = await loadRuntimeModule();
+
+  assert.throws(
+    () => requireGraphqlField({}, "requestAiScore", "No response from AI."),
+    /No response from AI\./,
+  );
+  assert.deepEqual(
+    requireGraphqlField(
+      { requestAiScore: { suggested_action: "merge" } },
+      "requestAiScore",
+      "No response from AI.",
+    ),
+    { suggested_action: "merge" },
+  );
+});

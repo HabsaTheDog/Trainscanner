@@ -1,32 +1,51 @@
 import { NativeConnection, Worker } from "@temporalio/worker";
 import * as activities from "./activities";
+import { resolveTemporalAddress } from "./config";
+import { logError, logInfo } from "./logging";
 
-function run() {
-  return (async () => {
-    try {
-      // Establish connection to Temporal server
-      const connection = await NativeConnection.connect({
-        address: process.env.TEMPORAL_ADDRESS || "localhost:7233",
-      });
-
-      const worker = await Worker.create({
-        connection,
-        namespace: "default",
-        taskQueue: "entity-update",
-        // In TS, workflows are loaded from the source file path
-        workflowsPath: require.resolve("./workflows"),
-        activities,
-      });
-
-      console.log("Temporal Worker started on taskQueue: entity-update");
-
-      // Start accepting tasks on the `entity-update` queue
-      await worker.run();
-    } catch (err) {
-      console.error("Terminal worker failed:", err);
-      process.exit(1);
-    }
-  })();
+export function buildNativeConnectionOptions(
+  env: NodeJS.ProcessEnv = process.env,
+) {
+  return {
+    address: resolveTemporalAddress(env),
+  };
 }
 
-void run();
+export function buildWorkerOptions(connection: NativeConnection) {
+  return {
+    connection,
+    namespace: "default",
+    taskQueue: "entity-update",
+    workflowsPath: require.resolve("./workflows"),
+    activities,
+  };
+}
+
+export async function run() {
+  const connection = await NativeConnection.connect(
+    buildNativeConnectionOptions(),
+  );
+
+  const worker = await Worker.create(buildWorkerOptions(connection));
+
+  logInfo("Temporal worker started", { taskQueue: "entity-update" });
+  await worker.run();
+}
+
+export async function runCli() {
+  try {
+    await run();
+    return 0;
+  } catch (err) {
+    logError("Temporal worker failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return 1;
+  }
+}
+
+if (require.main === module) {
+  void runCli().then((exitCode) => {
+    process.exitCode = exitCode;
+  });
+}
