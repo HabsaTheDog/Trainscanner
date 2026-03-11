@@ -41,8 +41,82 @@ function extractPhaseFromNotice(notice) {
   return message.slice("merge_queue_phase:".length).trim();
 }
 
+function extractInfoFromNotice(notice) {
+  const message = String(notice?.message || notice || "").trim();
+  if (!message.startsWith("merge_queue_info:")) {
+    return null;
+  }
+
+  const payload = message.slice("merge_queue_info:".length).trim();
+  const separatorIndex = payload.indexOf("=");
+  if (separatorIndex <= 0) {
+    return null;
+  }
+
+  return {
+    key: payload.slice(0, separatorIndex).trim(),
+    value: payload.slice(separatorIndex + 1).trim(),
+  };
+}
+
+const LOOSE_NAME_TOKEN_SPLIT_REGEX_SQL = String.raw`\s+`;
+const LOOSE_NAME_TOKEN_STOP_WORDS_SQL = [
+  "bahnhof",
+  "hauptbahnhof",
+  "station",
+  "halt",
+  "haltestelle",
+  "busbahnhof",
+  "bus",
+  "tram",
+]
+  .map((token) => `'${token}'`)
+  .join(", ");
+
+function buildLooseStationNameSql(inputExpression) {
+  return String.raw`
+trim(
+  regexp_replace(
+    regexp_replace(
+      regexp_replace(
+        regexp_replace(
+          regexp_replace(
+            regexp_replace(
+              lower(unaccent(coalesce(${inputExpression}, ''))),
+              '\b(abzw|abzw\.)\b',
+              ' abzweig ',
+              'g'
+            ),
+            '\b(bhf|bf)\b',
+            ' bahnhof ',
+            'g'
+          ),
+          '\b(hbf)\b',
+          ' hauptbahnhof ',
+          'g'
+        ),
+        '\b(str|str\.)\b',
+        ' strasse ',
+        'g'
+      ),
+      '[^[:alnum:]]+',
+      ' ',
+      'g'
+    ),
+    '\s+',
+    ' ',
+    'g'
+  )
+)`;
+}
+
 const BUILD_MERGE_QUEUE_SQL = `
 BEGIN;
+
+SET LOCAL max_parallel_workers_per_gather = 6;
+SET LOCAL work_mem = '256MB';
+SET LOCAL maintenance_work_mem = '1GB';
+SET LOCAL jit = off;
 
 DO $$
 BEGIN
@@ -51,52 +125,6 @@ END $$;
 
 CREATE EXTENSION IF NOT EXISTS unaccent;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
-
-CREATE OR REPLACE FUNCTION qa_loose_station_name(input_name text)
-RETURNS text
-LANGUAGE sql
-STABLE
-AS $qa$
-  SELECT trim(
-    regexp_replace(
-      regexp_replace(
-        regexp_replace(
-          regexp_replace(
-            regexp_replace(
-              regexp_replace(
-                lower(unaccent(coalesce(input_name, ''))),
-                '\b(abzw|abzw.)\b',
-                ' abzweig ',
-                'g'
-              ),
-              '\b(bhf|bf)\b',
-              ' bahnhof ',
-              'g'
-            ),
-            '\b(hbf)\b',
-            ' hauptbahnhof ',
-            'g'
-          ),
-          '\b(str|str.)\b',
-          ' strasse ',
-          'g'
-        ),
-        '[^[:alnum:]]+',
-        ' ',
-        'g'
-      ),
-      's+',
-      ' ',
-      'g'
-    )
-  );
-$qa$;
-
-ALTER TABLE qa_merge_cluster_evidence
-  ADD COLUMN IF NOT EXISTS status text;
-
-ALTER TABLE qa_merge_cluster_evidence
-  ADD COLUMN IF NOT EXISTS raw_value numeric(12,4);
 
 CREATE TEMP TABLE _scope AS
 SELECT
@@ -115,350 +143,406 @@ BEGIN
   RAISE NOTICE 'merge_queue_phase:building_station_context';
 END $$;
 
-CREATE TEMP TABLE _station_provider_context AS
+CREATE TEMP TABLE _scope_stations AS
 SELECT
   gs.global_station_id,
-  COALESCE(
-    ARRAY_AGG(DISTINCT m.source_id ORDER BY m.source_id)
-      FILTER (WHERE m.source_id IS NOT NULL),
-    ARRAY[]::text[]
-  ) AS provider_sources,
-  COALESCE(
-    ARRAY_AGG(DISTINCT rp.stop_name ORDER BY rp.stop_name)
-      FILTER (
-        WHERE rp.stop_name IS NOT NULL
-          AND btrim(rp.stop_name) <> ''
-          AND rp.stop_name <> gs.display_name
-      ),
-    ARRAY[]::text[]
-  ) AS aliases
+  gs.display_name,
+  gs.normalized_name,
+  ${buildLooseStationNameSql("gs.display_name")} AS loose_name,
+  gs.country,
+  gs.latitude,
+  gs.longitude,
+  gs.geom,
+  CASE
+    WHEN gs.geom IS NOT NULL THEN ST_Transform(gs.geom, 3857)::geometry(Point, 3857)
+    ELSE NULL::geometry(Point, 3857)
+  END AS geom_3857
 FROM global_stations gs
-LEFT JOIN provider_global_station_mappings m
-  ON m.global_station_id = gs.global_station_id
- AND m.is_active = true
-LEFT JOIN raw_provider_stop_places rp
-  ON rp.source_id = m.source_id
- AND rp.provider_stop_place_ref = m.provider_stop_place_ref
 WHERE gs.is_active = true
   AND (
     NULLIF(:'country_filter', '') IS NULL
     OR gs.country = NULLIF(:'country_filter', '')::char(2)
-  )
-GROUP BY gs.global_station_id;
+  );
 
-CREATE TEMP TABLE _station_route_counts AS
+CREATE INDEX _scope_stations_station_idx
+  ON _scope_stations (global_station_id);
+
+CREATE INDEX _scope_stations_country_idx
+  ON _scope_stations (country, global_station_id);
+
+ANALYZE _scope_stations;
+
+CREATE TEMP TABLE _station_provider_context AS
 SELECT
-  sp.global_station_id,
+  ss.global_station_id,
   COALESCE(
-    NULLIF(tt.route_short_name, ''),
-    NULLIF(tt.route_long_name, ''),
-    NULLIF(tt.route_id, ''),
-    NULLIF(tt.transport_mode, ''),
-    'unlabeled'
-  ) AS route_label,
-  NULLIF(tt.transport_mode, '') AS transport_mode,
-  COUNT(*)::integer AS hits
-FROM global_stop_points sp
-JOIN timetable_trip_stop_times tts
-  ON tts.global_stop_point_id = sp.global_stop_point_id
-JOIN timetable_trips tt
-  ON tt.trip_fact_id = tts.trip_fact_id
-WHERE sp.is_active = true
-GROUP BY
-  sp.global_station_id,
-  COALESCE(
-    NULLIF(tt.route_short_name, ''),
-    NULLIF(tt.route_long_name, ''),
-    NULLIF(tt.route_id, ''),
-    NULLIF(tt.transport_mode, ''),
-    'unlabeled'
-  ),
-  NULLIF(tt.transport_mode, '');
-
-CREATE TEMP TABLE _station_incoming_counts AS
-SELECT
-  sp.global_station_id,
-  prev_gs.display_name AS station_label,
-  COUNT(*)::integer AS hits
-FROM global_stop_points sp
-JOIN timetable_trip_stop_times cur
-  ON cur.global_stop_point_id = sp.global_stop_point_id
-JOIN timetable_trip_stop_times prev
-  ON prev.trip_fact_id = cur.trip_fact_id
- AND prev.stop_sequence = cur.stop_sequence - 1
-JOIN global_stop_points prev_sp
-  ON prev_sp.global_stop_point_id = prev.global_stop_point_id
-JOIN global_stations prev_gs
-  ON prev_gs.global_station_id = prev_sp.global_station_id
-WHERE sp.is_active = true
-  AND prev_sp.is_active = true
-  AND prev_gs.is_active = true
-GROUP BY sp.global_station_id, prev_gs.display_name;
-
-CREATE TEMP TABLE _station_outgoing_counts AS
-SELECT
-  sp.global_station_id,
-  next_gs.display_name AS station_label,
-  COUNT(*)::integer AS hits
-FROM global_stop_points sp
-JOIN timetable_trip_stop_times cur
-  ON cur.global_stop_point_id = sp.global_stop_point_id
-JOIN timetable_trip_stop_times nxt
-  ON nxt.trip_fact_id = cur.trip_fact_id
- AND nxt.stop_sequence = cur.stop_sequence + 1
-JOIN global_stop_points next_sp
-  ON next_sp.global_stop_point_id = nxt.global_stop_point_id
-JOIN global_stations next_gs
-  ON next_gs.global_station_id = next_sp.global_station_id
-WHERE sp.is_active = true
-  AND next_sp.is_active = true
-  AND next_gs.is_active = true
-GROUP BY sp.global_station_id, next_gs.display_name;
+    ARRAY_AGG(DISTINCT m.source_id ORDER BY m.source_id)
+      FILTER (WHERE m.source_id IS NOT NULL),
+    ARRAY[]::text[]
+  ) AS provider_sources
+FROM _scope_stations ss
+LEFT JOIN provider_global_station_mappings m
+  ON m.global_station_id = ss.global_station_id
+ AND m.is_active = true
+GROUP BY ss.global_station_id;
 
 CREATE TEMP TABLE _station_stop_point_counts AS
 SELECT
   sp.global_station_id,
   COUNT(*)::integer AS stop_point_count
 FROM global_stop_points sp
+JOIN _scope_stations ss
+  ON ss.global_station_id = sp.global_station_id
 WHERE sp.is_active = true
 GROUP BY sp.global_station_id;
 
 CREATE TEMP TABLE _station_context AS
 SELECT
-  gs.global_station_id,
-  gs.display_name,
-  gs.normalized_name,
-  qa_loose_station_name(gs.display_name) AS loose_name,
-  COALESCE(
-    ARRAY(
-      SELECT DISTINCT token
-      FROM regexp_split_to_table(qa_loose_station_name(gs.display_name), 's+') token
-      WHERE token IS NOT NULL
-        AND btrim(token) <> ''
-        AND token NOT IN (
-          'bahnhof',
-          'hauptbahnhof',
-          'station',
-          'halt',
-          'haltestelle',
-          'busbahnhof',
-          'bus',
-          'tram'
-        )
-      ORDER BY token
-    ),
-    ARRAY[]::text[]
-  ) AS loose_tokens,
-  gs.country,
-  gs.latitude,
-  gs.longitude,
-  gs.geom,
-  COALESCE(pc.provider_sources, ARRAY[]::text[]) AS provider_sources,
-  COALESCE(pc.aliases, ARRAY[]::text[]) AS aliases,
-  COALESCE(
-    ARRAY(
-      SELECT rc.route_label
-      FROM _station_route_counts rc
-      WHERE rc.global_station_id = gs.global_station_id
-      ORDER BY rc.hits DESC, rc.route_label ASC
-      LIMIT 8
-    ),
-    ARRAY[]::text[]
-  ) AS route_labels,
-  COALESCE(
-    ARRAY(
-      SELECT DISTINCT rc.transport_mode
-      FROM _station_route_counts rc
-      WHERE rc.global_station_id = gs.global_station_id
-        AND rc.transport_mode IS NOT NULL
-      ORDER BY rc.transport_mode ASC
-      LIMIT 6
-    ),
-    ARRAY[]::text[]
-  ) AS transport_modes,
-  COALESCE(
-    ARRAY(
-      SELECT ic.station_label
-      FROM _station_incoming_counts ic
-      WHERE ic.global_station_id = gs.global_station_id
-      ORDER BY ic.hits DESC, ic.station_label ASC
-      LIMIT 8
-    ),
-    ARRAY[]::text[]
-  ) AS incoming_labels,
-  COALESCE(
-    ARRAY(
-      SELECT oc.station_label
-      FROM _station_outgoing_counts oc
-      WHERE oc.global_station_id = gs.global_station_id
-      ORDER BY oc.hits DESC, oc.station_label ASC
-      LIMIT 8
-    ),
-    ARRAY[]::text[]
-  ) AS outgoing_labels,
-  COALESCE(spc.stop_point_count, 0) AS stop_point_count,
-  cardinality(COALESCE(pc.provider_sources, ARRAY[]::text[])) AS provider_source_count,
+  base.global_station_id,
+  base.display_name,
+  base.normalized_name,
+  base.loose_name,
+  base.country,
+  base.latitude,
+  base.longitude,
+  base.geom,
+  base.geom_3857,
   CASE
-    WHEN gs.latitude IS NOT NULL AND gs.longitude IS NOT NULL THEN 'coordinates_present'
+    WHEN base.geom_3857 IS NOT NULL THEN floor(ST_X(base.geom_3857) / 2000)::integer
+    ELSE NULL::integer
+  END AS tile_2km_x,
+  CASE
+    WHEN base.geom_3857 IS NOT NULL THEN floor(ST_Y(base.geom_3857) / 2000)::integer
+    ELSE NULL::integer
+  END AS tile_2km_y,
+  base.provider_sources,
+  ARRAY[]::text[] AS aliases,
+  ARRAY[]::text[] AS route_labels,
+  ARRAY[]::text[] AS transport_modes,
+  ARRAY[]::text[] AS incoming_labels,
+  ARRAY[]::text[] AS outgoing_labels,
+  ARRAY[]::text[] AS adjacent_labels,
+  base.stop_point_count,
+  cardinality(base.provider_sources) AS provider_source_count,
+  CASE
+    WHEN base.geom_3857 IS NOT NULL THEN 'coordinates_present'
     ELSE 'missing_coordinates'
   END AS coord_status,
   (
-    qa_loose_station_name(gs.display_name) ~
+    base.loose_name ~
     '^(steig|gleis|platform|plattform|quai|bussteig|bahnsteig)( [[:alnum:]]+)?$'
   ) AS is_lexically_generic,
-  0::integer AS name_frequency,
-  false AS is_generic
-FROM global_stations gs
-LEFT JOIN _station_provider_context pc
-  ON pc.global_station_id = gs.global_station_id
-LEFT JOIN _station_stop_point_counts spc
-  ON spc.global_station_id = gs.global_station_id
-WHERE gs.is_active = true
-  AND (
-    NULLIF(:'country_filter', '') IS NULL
-    OR gs.country = NULLIF(:'country_filter', '')::char(2)
-  );
+  false AS is_generic,
+  0::integer AS name_frequency
+FROM (
+  SELECT
+    ss.global_station_id,
+    ss.display_name,
+    ss.normalized_name,
+    ss.loose_name,
+    ss.country,
+    ss.latitude,
+    ss.longitude,
+    ss.geom,
+    ss.geom_3857,
+    COALESCE(pc.provider_sources, ARRAY[]::text[]) AS provider_sources,
+    COALESCE(spc.stop_point_count, 0) AS stop_point_count
+  FROM _scope_stations ss
+  LEFT JOIN _station_provider_context pc
+    ON pc.global_station_id = ss.global_station_id
+  LEFT JOIN _station_stop_point_counts spc
+    ON spc.global_station_id = ss.global_station_id
+) base;
+
+CREATE INDEX _station_context_station_idx
+  ON _station_context (global_station_id);
 
 CREATE INDEX _station_context_normalized_name_idx
   ON _station_context (normalized_name);
 
-CREATE INDEX _station_context_country_idx
-  ON _station_context (country);
+CREATE INDEX _station_context_geo_tile_idx
+  ON _station_context (country, tile_2km_x, tile_2km_y, global_station_id);
 
-CREATE INDEX _station_context_loose_name_trgm_idx
-  ON _station_context USING gin (loose_name gin_trgm_ops);
-
-CREATE INDEX _station_context_geom_idx
-  ON _station_context USING gist (geom)
-  WHERE geom IS NOT NULL;
-
-CREATE TEMP TABLE _name_frequency AS
-SELECT
-  loose_name,
-  COUNT(*)::integer AS name_frequency
-FROM _station_context
-GROUP BY loose_name;
-
-UPDATE _station_context sc
-SET
-  name_frequency = nf.name_frequency,
-  is_generic = sc.is_lexically_generic OR nf.name_frequency >= 12
-FROM _name_frequency nf
-WHERE nf.loose_name = sc.loose_name;
+ANALYZE _station_context;
 
 DO $$
 BEGIN
   RAISE NOTICE 'merge_queue_phase:building_pair_seeds';
 END $$;
 
-CREATE TEMP TABLE _pair_seeds AS
-SELECT DISTINCT
-  LEAST(a.global_station_id, b.global_station_id) AS source_global_station_id,
-  GREATEST(a.global_station_id, b.global_station_id) AS target_global_station_id,
-  'exact_name'::text AS seed_reason
+CREATE TEMP TABLE _pair_seed_reasons (
+  source_global_station_id text NOT NULL,
+  target_global_station_id text NOT NULL,
+  seed_reason text NOT NULL,
+  PRIMARY KEY (
+    source_global_station_id,
+    target_global_station_id,
+    seed_reason
+  )
+);
+
+INSERT INTO _pair_seed_reasons (
+  source_global_station_id,
+  target_global_station_id,
+  seed_reason
+)
+SELECT
+  LEAST(a.global_station_id, b.global_station_id),
+  GREATEST(a.global_station_id, b.global_station_id),
+  'exact_name'::text
 FROM _station_context a
 JOIN _station_context b
   ON b.global_station_id > a.global_station_id
  AND a.normalized_name = b.normalized_name
 WHERE
   (
-    a.geom IS NOT NULL
-    AND b.geom IS NOT NULL
-    AND ST_DWithin(ST_Transform(a.geom, 3857), ST_Transform(b.geom, 3857), 5000)
+    a.geom_3857 IS NOT NULL
+    AND b.geom_3857 IS NOT NULL
+    AND ST_DWithin(a.geom_3857, b.geom_3857, 5000)
   )
   OR (
-    (a.geom IS NULL OR b.geom IS NULL)
+    (a.geom_3857 IS NULL OR b.geom_3857 IS NULL)
     AND a.country IS NOT NULL
     AND a.country = b.country
   )
-  OR a.provider_sources && b.provider_sources
-  OR a.route_labels && b.route_labels
-  OR a.incoming_labels && b.incoming_labels
-  OR a.outgoing_labels && b.outgoing_labels
-
-UNION
-
-SELECT DISTINCT
-  LEAST(a.global_station_id, b.global_station_id) AS source_global_station_id,
-  GREATEST(a.global_station_id, b.global_station_id) AS target_global_station_id,
-  'loose_name_geo'::text AS seed_reason
-FROM _station_context a
-JOIN _station_context b
-  ON b.global_station_id > a.global_station_id
- AND a.loose_name % b.loose_name
-WHERE similarity(a.loose_name, b.loose_name) >= 0.72
-  AND a.geom IS NOT NULL
-  AND b.geom IS NOT NULL
-  AND ST_DWithin(ST_Transform(a.geom, 3857), ST_Transform(b.geom, 3857), 1500)
-
-UNION
-
-SELECT DISTINCT
-  LEAST(a.global_station_id, b.global_station_id) AS source_global_station_id,
-  GREATEST(a.global_station_id, b.global_station_id) AS target_global_station_id,
-  'loose_name_missing_coords'::text AS seed_reason
-FROM _station_context a
-JOIN _station_context b
-  ON b.global_station_id > a.global_station_id
- AND a.country = b.country
- AND a.loose_name % b.loose_name
-WHERE similarity(a.loose_name, b.loose_name) >= 0.88
-  AND (a.geom IS NULL OR b.geom IS NULL)
-
-UNION
-
-SELECT DISTINCT
-  LEAST(a.global_station_id, b.global_station_id) AS source_global_station_id,
-  GREATEST(a.global_station_id, b.global_station_id) AS target_global_station_id,
-  'shared_context'::text AS seed_reason
-FROM _station_context a
-JOIN _station_context b
-  ON b.global_station_id > a.global_station_id
-WHERE similarity(a.loose_name, b.loose_name) >= 0.45
-  AND (
-    a.provider_sources && b.provider_sources
-    OR a.route_labels && b.route_labels
-    OR a.incoming_labels && b.incoming_labels
-    OR a.outgoing_labels && b.outgoing_labels
+  OR (
+    a.country IS NOT NULL
+    AND a.country = b.country
+    AND a.provider_sources && b.provider_sources
+    AND similarity(a.loose_name, b.loose_name) >= 0.92
   )
-  AND (
-    (
-      a.geom IS NOT NULL
-      AND b.geom IS NOT NULL
-      AND ST_DWithin(ST_Transform(a.geom, 3857), ST_Transform(b.geom, 3857), 10000)
-    )
-    OR a.country = b.country
-    OR a.geom IS NULL
-    OR b.geom IS NULL
-  );
+ON CONFLICT DO NOTHING;
+
+DO $$
+DECLARE
+  exact_name_count bigint;
+BEGIN
+  SELECT COUNT(*) INTO exact_name_count
+  FROM _pair_seed_reasons
+  WHERE seed_reason = 'exact_name';
+  RAISE NOTICE 'merge_queue_info:pair_seeds_exact_name=%', exact_name_count;
+END $$;
+
+INSERT INTO _pair_seed_reasons (
+  source_global_station_id,
+  target_global_station_id,
+  seed_reason
+)
+SELECT
+  LEAST(a.global_station_id, b.global_station_id),
+  GREATEST(a.global_station_id, b.global_station_id),
+  'loose_name_geo'::text
+FROM _station_context a
+JOIN _station_context b
+  ON b.global_station_id > a.global_station_id
+ AND b.country = a.country
+ AND b.tile_2km_x BETWEEN a.tile_2km_x - 1 AND a.tile_2km_x + 1
+ AND b.tile_2km_y BETWEEN a.tile_2km_y - 1 AND a.tile_2km_y + 1
+WHERE a.loose_name % b.loose_name
+  AND a.geom_3857 IS NOT NULL
+  AND b.geom_3857 IS NOT NULL
+  AND similarity(a.loose_name, b.loose_name) >= 0.72
+  AND ST_DWithin(a.geom_3857, b.geom_3857, 1500)
+ON CONFLICT DO NOTHING;
+
+DO $$
+DECLARE
+  loose_name_geo_count bigint;
+BEGIN
+  SELECT COUNT(*) INTO loose_name_geo_count
+  FROM _pair_seed_reasons
+  WHERE seed_reason = 'loose_name_geo';
+  RAISE NOTICE 'merge_queue_info:pair_seeds_loose_name_geo=%', loose_name_geo_count;
+END $$;
+
+CREATE TEMP TABLE _missing_coord_subjects AS
+SELECT
+  sc.global_station_id,
+  sc.country,
+  sc.loose_name
+FROM _station_context sc
+WHERE sc.geom_3857 IS NULL
+  AND sc.country IS NOT NULL;
+
+CREATE INDEX _missing_coord_subjects_station_idx
+  ON _missing_coord_subjects (global_station_id);
+
+CREATE TEMP TABLE _missing_coord_subject_tokens AS
+SELECT DISTINCT
+  subject.global_station_id,
+  subject.country,
+  token
+FROM _missing_coord_subjects subject
+CROSS JOIN LATERAL regexp_split_to_table(
+  subject.loose_name,
+  '${LOOSE_NAME_TOKEN_SPLIT_REGEX_SQL}'
+) AS token
+WHERE token IS NOT NULL
+  AND btrim(token) <> ''
+  AND token NOT IN (${LOOSE_NAME_TOKEN_STOP_WORDS_SQL});
+
+CREATE INDEX _missing_coord_subject_tokens_lookup_idx
+  ON _missing_coord_subject_tokens (country, token, global_station_id);
+
+CREATE TEMP TABLE _missing_coord_candidate_tokens AS
+SELECT DISTINCT
+  sc.global_station_id,
+  sc.country,
+  token
+FROM _station_context sc
+JOIN (
+  SELECT DISTINCT country
+  FROM _missing_coord_subjects
+) missing_country
+  ON missing_country.country = sc.country
+CROSS JOIN LATERAL regexp_split_to_table(
+  sc.loose_name,
+  '${LOOSE_NAME_TOKEN_SPLIT_REGEX_SQL}'
+) AS token
+WHERE token IS NOT NULL
+  AND btrim(token) <> ''
+  AND token NOT IN (${LOOSE_NAME_TOKEN_STOP_WORDS_SQL});
+
+CREATE INDEX _missing_coord_candidate_tokens_lookup_idx
+  ON _missing_coord_candidate_tokens (country, token, global_station_id);
+
+CREATE TEMP TABLE _missing_coord_token_frequency AS
+SELECT
+  rows.country,
+  rows.token,
+  COUNT(*)::integer AS station_count
+FROM (
+  SELECT DISTINCT
+    global_station_id,
+    country,
+    token
+  FROM _missing_coord_candidate_tokens
+) rows
+GROUP BY rows.country, rows.token;
+
+CREATE TEMP TABLE _missing_coord_primary_tokens AS
+SELECT
+  ranked.global_station_id,
+  ranked.token AS primary_rare_token
+FROM (
+  SELECT
+    subject_token.global_station_id,
+    subject_token.token,
+    ROW_NUMBER() OVER (
+      PARTITION BY subject_token.global_station_id
+      ORDER BY tf.station_count ASC, subject_token.token ASC
+    ) AS token_rank
+  FROM _missing_coord_subject_tokens subject_token
+  JOIN _missing_coord_token_frequency tf
+    ON tf.country = subject_token.country
+   AND tf.token = subject_token.token
+  WHERE tf.station_count BETWEEN 2 AND 64
+) ranked
+WHERE ranked.token_rank = 1;
+
+CREATE INDEX _missing_coord_primary_tokens_lookup_idx
+  ON _missing_coord_primary_tokens (primary_rare_token, global_station_id);
+
+ANALYZE _missing_coord_subjects;
+ANALYZE _missing_coord_candidate_tokens;
+ANALYZE _missing_coord_primary_tokens;
+
+INSERT INTO _pair_seed_reasons (
+  source_global_station_id,
+  target_global_station_id,
+  seed_reason
+)
+SELECT
+  LEAST(subject.global_station_id, candidate.global_station_id),
+  GREATEST(subject.global_station_id, candidate.global_station_id),
+  'loose_name_missing_coords'::text
+FROM _missing_coord_primary_tokens primary_token
+JOIN _missing_coord_subjects subject
+  ON subject.global_station_id = primary_token.global_station_id
+JOIN _missing_coord_candidate_tokens candidate_token
+  ON candidate_token.country = subject.country
+ AND candidate_token.token = primary_token.primary_rare_token
+JOIN _station_context subject_station
+  ON subject_station.global_station_id = subject.global_station_id
+JOIN _station_context candidate
+  ON candidate.global_station_id = candidate_token.global_station_id
+WHERE primary_token.primary_rare_token IS NOT NULL
+  AND candidate.global_station_id <> subject.global_station_id
+  AND subject_station.loose_name % candidate.loose_name
+  AND similarity(subject_station.loose_name, candidate.loose_name) >= 0.88
+ON CONFLICT DO NOTHING;
+
+DO $$
+DECLARE
+  missing_coords_count bigint;
+BEGIN
+  SELECT COUNT(*) INTO missing_coords_count
+  FROM _pair_seed_reasons
+  WHERE seed_reason = 'loose_name_missing_coords';
+  RAISE NOTICE 'merge_queue_info:pair_seeds_missing_coords=%', missing_coords_count;
+END $$;
+
+DO $$
+DECLARE
+  shared_route_count bigint := 0;
+BEGIN
+  RAISE NOTICE 'merge_queue_info:pair_seeds_shared_route=%', shared_route_count;
+END $$;
+
+DO $$
+DECLARE
+  shared_adjacent_count bigint := 0;
+BEGIN
+  RAISE NOTICE 'merge_queue_info:pair_seeds_shared_adjacent=%', shared_adjacent_count;
+END $$;
+
+CREATE TEMP TABLE _pair_seeds AS
+SELECT
+  source_global_station_id,
+  target_global_station_id,
+  ARRAY_AGG(DISTINCT seed_reason ORDER BY seed_reason) AS seed_reasons
+FROM _pair_seed_reasons
+GROUP BY source_global_station_id, target_global_station_id;
+
+ANALYZE _pair_seeds;
+
+DO $$
+DECLARE
+  pair_seed_total bigint;
+BEGIN
+  SELECT COUNT(*) INTO pair_seed_total
+  FROM _pair_seeds;
+  RAISE NOTICE 'merge_queue_info:pair_seeds_total=%', pair_seed_total;
+END $$;
 
 CREATE TEMP TABLE _pair_seed_features AS
 SELECT
   ps.source_global_station_id,
   ps.target_global_station_id,
-  ARRAY_AGG(DISTINCT ps.seed_reason ORDER BY ps.seed_reason) AS seed_reasons,
+  ps.seed_reasons,
   a.display_name AS source_display_name,
   b.display_name AS target_display_name,
   a.normalized_name = b.normalized_name AS exact_name,
   similarity(a.loose_name, b.loose_name)::numeric(8,4) AS loose_similarity,
+  0::numeric(8,4) AS token_overlap,
   CASE
-    WHEN token_union.union_count = 0 THEN 0::numeric(8,4)
-    ELSE ROUND((token_inter.intersection_count::numeric / token_union.union_count::numeric), 4)::numeric(8,4)
-  END AS token_overlap,
+    WHEN a.geom_3857 IS NULL OR b.geom_3857 IS NULL THEN NULL
+    ELSE ST_Distance(a.geom_3857, b.geom_3857)
+  END AS planar_distance_meters,
   CASE
     WHEN a.geom IS NULL OR b.geom IS NULL THEN NULL
     ELSE ST_DistanceSphere(a.geom, b.geom)
   END AS distance_meters,
   provider_overlap.provider_overlap_count,
-  route_overlap.route_overlap_count,
-  adjacent_overlap.adjacent_overlap_count,
+  0::integer AS route_overlap_count,
+  0::integer AS adjacent_overlap_count,
   CASE
     WHEN a.country IS NULL OR b.country IS NULL THEN NULL
     WHEN a.country = b.country THEN true
     ELSE false
   END AS same_country,
-  (a.is_generic OR b.is_generic) AS generic_name_pair,
-  GREATEST(a.name_frequency, b.name_frequency) AS generic_name_frequency
+  (a.is_lexically_generic OR b.is_lexically_generic) AS generic_name_pair,
+  0::integer AS generic_name_frequency
 FROM _pair_seeds ps
 JOIN _station_context a
   ON a.global_station_id = ps.source_global_station_id
@@ -474,73 +558,7 @@ CROSS JOIN LATERAL (
     FROM unnest(b.provider_sources) item
   ) overlap_items
 ) provider_overlap
-CROSS JOIN LATERAL (
-  SELECT COUNT(*)::integer AS route_overlap_count
-  FROM (
-    SELECT DISTINCT item
-    FROM unnest(a.route_labels) item
-    INTERSECT
-    SELECT DISTINCT item
-    FROM unnest(b.route_labels) item
-  ) overlap_items
-) route_overlap
-CROSS JOIN LATERAL (
-  SELECT COUNT(*)::integer AS adjacent_overlap_count
-  FROM (
-    SELECT DISTINCT item
-    FROM (
-      SELECT unnest(a.incoming_labels || a.outgoing_labels) AS item
-    ) left_labels
-    INTERSECT
-    SELECT DISTINCT item
-    FROM (
-      SELECT unnest(b.incoming_labels || b.outgoing_labels) AS item
-    ) right_labels
-  ) overlap_items
-) adjacent_overlap
-CROSS JOIN LATERAL (
-  SELECT COUNT(*)::integer AS intersection_count
-  FROM (
-    SELECT DISTINCT token
-    FROM unnest(a.loose_tokens) token
-    INTERSECT
-    SELECT DISTINCT token
-    FROM unnest(b.loose_tokens) token
-  ) overlap_tokens
-) token_inter
-CROSS JOIN LATERAL (
-  SELECT COUNT(*)::integer AS union_count
-  FROM (
-    SELECT DISTINCT token
-    FROM unnest(a.loose_tokens) token
-    UNION
-    SELECT DISTINCT token
-    FROM unnest(b.loose_tokens) token
-  ) union_tokens
-) token_union
-GROUP BY
-  ps.source_global_station_id,
-  ps.target_global_station_id,
-  a.display_name,
-  b.display_name,
-  a.normalized_name = b.normalized_name,
-  similarity(a.loose_name, b.loose_name),
-  token_inter.intersection_count,
-  token_union.union_count,
-  CASE
-    WHEN a.geom IS NULL OR b.geom IS NULL THEN NULL
-    ELSE ST_DistanceSphere(a.geom, b.geom)
-  END,
-  provider_overlap.provider_overlap_count,
-  route_overlap.route_overlap_count,
-  adjacent_overlap.adjacent_overlap_count,
-  CASE
-    WHEN a.country IS NULL OR b.country IS NULL THEN NULL
-    WHEN a.country = b.country THEN true
-    ELSE false
-  END,
-  (a.is_generic OR b.is_generic),
-  GREATEST(a.name_frequency, b.name_frequency);
+;
 
 CREATE TEMP TABLE _eligible_pairs AS
 SELECT *
@@ -549,30 +567,37 @@ WHERE (
   (
     ps.exact_name = true
     AND (
-      ps.distance_meters IS NULL
-      OR ps.distance_meters <= 5000
-      OR ps.provider_overlap_count > 0
+      (ps.planar_distance_meters IS NOT NULL AND ps.planar_distance_meters <= 5000)
+      OR (ps.planar_distance_meters IS NULL AND ps.same_country = true)
       OR ps.route_overlap_count > 0
       OR ps.adjacent_overlap_count > 0
+      OR (
+        ps.same_country = true
+        AND ps.provider_overlap_count > 0
+        AND ps.loose_similarity >= 0.92
+      )
     )
   )
   OR (
     ps.loose_similarity >= 0.72
-    AND ps.distance_meters IS NOT NULL
-    AND ps.distance_meters <= 1500
+    AND ps.planar_distance_meters IS NOT NULL
+    AND ps.planar_distance_meters <= 1500
   )
   OR (
     ps.loose_similarity >= 0.88
     AND ps.same_country = true
-    AND ps.distance_meters IS NULL
+    AND ps.planar_distance_meters IS NULL
   )
   OR (
     (
-      ps.provider_overlap_count > 0
-      OR ps.route_overlap_count > 0
+      ps.route_overlap_count > 0
       OR ps.adjacent_overlap_count > 0
     )
     AND ps.loose_similarity >= 0.45
+    AND (
+      (ps.planar_distance_meters IS NOT NULL AND ps.planar_distance_meters <= 10000)
+      OR (ps.planar_distance_meters IS NULL AND ps.same_country = true)
+    )
   )
 )
 AND NOT (
@@ -656,6 +681,210 @@ FROM (
   GROUP BY c.component_key
   HAVING COUNT(*) > 1
 ) grouped;
+
+CREATE TEMP TABLE _cluster_station_ids AS
+SELECT DISTINCT sid.global_station_id
+FROM _cluster_base b
+JOIN unnest(b.station_ids) sid(global_station_id) ON true;
+
+CREATE INDEX _cluster_station_ids_station_idx
+  ON _cluster_station_ids (global_station_id);
+
+CREATE TEMP TABLE _cluster_station_route_counts AS
+SELECT
+  sp.global_station_id,
+  COALESCE(
+    NULLIF(tt.route_short_name, ''),
+    NULLIF(tt.route_long_name, ''),
+    NULLIF(tt.route_id, ''),
+    NULLIF(tt.transport_mode, ''),
+    'unlabeled'
+  ) AS route_label,
+  NULLIF(tt.transport_mode, '') AS transport_mode,
+  COUNT(*)::integer AS hits
+FROM _cluster_station_ids cs
+JOIN global_stop_points sp
+  ON sp.global_station_id = cs.global_station_id
+ AND sp.is_active = true
+JOIN timetable_trip_stop_times tts
+  ON tts.global_stop_point_id = sp.global_stop_point_id
+JOIN timetable_trips tt
+  ON tt.trip_fact_id = tts.trip_fact_id
+GROUP BY
+  sp.global_station_id,
+  COALESCE(
+    NULLIF(tt.route_short_name, ''),
+    NULLIF(tt.route_long_name, ''),
+    NULLIF(tt.route_id, ''),
+    NULLIF(tt.transport_mode, ''),
+    'unlabeled'
+  ),
+  NULLIF(tt.transport_mode, '');
+
+CREATE INDEX _cluster_station_route_counts_station_idx
+  ON _cluster_station_route_counts (global_station_id, hits DESC, route_label);
+
+CREATE TEMP TABLE _cluster_station_incoming_counts AS
+SELECT
+  sp.global_station_id,
+  prev_gs.display_name AS station_label,
+  COUNT(*)::integer AS hits
+FROM _cluster_station_ids cs
+JOIN global_stop_points sp
+  ON sp.global_station_id = cs.global_station_id
+ AND sp.is_active = true
+JOIN timetable_trip_stop_times cur
+  ON cur.global_stop_point_id = sp.global_stop_point_id
+JOIN timetable_trip_stop_times prev
+  ON prev.trip_fact_id = cur.trip_fact_id
+ AND prev.stop_sequence = cur.stop_sequence - 1
+JOIN global_stop_points prev_sp
+  ON prev_sp.global_stop_point_id = prev.global_stop_point_id
+ AND prev_sp.is_active = true
+JOIN global_stations prev_gs
+  ON prev_gs.global_station_id = prev_sp.global_station_id
+ AND prev_gs.is_active = true
+GROUP BY sp.global_station_id, prev_gs.display_name;
+
+CREATE INDEX _cluster_station_incoming_counts_station_idx
+  ON _cluster_station_incoming_counts (global_station_id, hits DESC, station_label);
+
+CREATE TEMP TABLE _cluster_station_outgoing_counts AS
+SELECT
+  sp.global_station_id,
+  next_gs.display_name AS station_label,
+  COUNT(*)::integer AS hits
+FROM _cluster_station_ids cs
+JOIN global_stop_points sp
+  ON sp.global_station_id = cs.global_station_id
+ AND sp.is_active = true
+JOIN timetable_trip_stop_times cur
+  ON cur.global_stop_point_id = sp.global_stop_point_id
+JOIN timetable_trip_stop_times nxt
+  ON nxt.trip_fact_id = cur.trip_fact_id
+ AND nxt.stop_sequence = cur.stop_sequence + 1
+JOIN global_stop_points next_sp
+  ON next_sp.global_stop_point_id = nxt.global_stop_point_id
+ AND next_sp.is_active = true
+JOIN global_stations next_gs
+  ON next_gs.global_station_id = next_sp.global_station_id
+ AND next_gs.is_active = true
+GROUP BY sp.global_station_id, next_gs.display_name;
+
+CREATE INDEX _cluster_station_outgoing_counts_station_idx
+  ON _cluster_station_outgoing_counts (global_station_id, hits DESC, station_label);
+
+CREATE TEMP TABLE _cluster_station_context AS
+SELECT
+  sc.global_station_id,
+  sc.display_name,
+  sc.normalized_name,
+  sc.loose_name,
+  COALESCE(
+    ARRAY(
+      SELECT DISTINCT token
+      FROM regexp_split_to_table(sc.loose_name, '${LOOSE_NAME_TOKEN_SPLIT_REGEX_SQL}') AS token
+      WHERE token IS NOT NULL
+        AND btrim(token) <> ''
+        AND token NOT IN (${LOOSE_NAME_TOKEN_STOP_WORDS_SQL})
+      ORDER BY token
+    ),
+    ARRAY[]::text[]
+  ) AS loose_tokens,
+  sc.country,
+  sc.latitude,
+  sc.longitude,
+  sc.geom,
+  sc.geom_3857,
+  sc.tile_2km_x,
+  sc.tile_2km_y,
+  sc.provider_sources,
+  ARRAY[]::text[] AS aliases,
+  COALESCE(
+    ARRAY(
+      SELECT rc.route_label
+      FROM _cluster_station_route_counts rc
+      WHERE rc.global_station_id = sc.global_station_id
+      ORDER BY rc.hits DESC, rc.route_label ASC
+      LIMIT 8
+    ),
+    ARRAY[]::text[]
+  ) AS route_labels,
+  COALESCE(
+    ARRAY(
+      SELECT DISTINCT rc.transport_mode
+      FROM _cluster_station_route_counts rc
+      WHERE rc.global_station_id = sc.global_station_id
+        AND rc.transport_mode IS NOT NULL
+      ORDER BY rc.transport_mode ASC
+      LIMIT 6
+    ),
+    ARRAY[]::text[]
+  ) AS transport_modes,
+  COALESCE(
+    ARRAY(
+      SELECT ic.station_label
+      FROM _cluster_station_incoming_counts ic
+      WHERE ic.global_station_id = sc.global_station_id
+      ORDER BY ic.hits DESC, ic.station_label ASC
+      LIMIT 8
+    ),
+    ARRAY[]::text[]
+  ) AS incoming_labels,
+  COALESCE(
+    ARRAY(
+      SELECT oc.station_label
+      FROM _cluster_station_outgoing_counts oc
+      WHERE oc.global_station_id = sc.global_station_id
+      ORDER BY oc.hits DESC, oc.station_label ASC
+      LIMIT 8
+    ),
+    ARRAY[]::text[]
+  ) AS outgoing_labels,
+  sc.adjacent_labels,
+  sc.stop_point_count,
+  sc.provider_source_count,
+  sc.coord_status,
+  sc.is_lexically_generic,
+  0::integer AS name_frequency,
+  sc.is_lexically_generic AS is_generic
+FROM _station_context sc
+JOIN _cluster_station_ids cs
+  ON cs.global_station_id = sc.global_station_id;
+
+UPDATE _cluster_station_context csc
+SET adjacent_labels = COALESCE(
+  ARRAY(
+    SELECT DISTINCT label
+    FROM unnest(csc.incoming_labels || csc.outgoing_labels) AS label
+    WHERE label IS NOT NULL
+      AND btrim(label) <> ''
+    ORDER BY label
+  ),
+  ARRAY[]::text[]
+);
+
+CREATE TEMP TABLE _cluster_loose_name_keys AS
+SELECT DISTINCT loose_name
+FROM _cluster_station_context;
+
+CREATE TEMP TABLE _cluster_name_frequency AS
+SELECT
+  sc.loose_name,
+  COUNT(*)::integer AS name_frequency
+FROM _station_context sc
+JOIN _cluster_loose_name_keys keys
+  ON keys.loose_name = sc.loose_name
+GROUP BY sc.loose_name;
+
+UPDATE _cluster_station_context csc
+SET
+  name_frequency = nf.name_frequency,
+  is_generic = csc.is_lexically_generic OR nf.name_frequency >= 12
+FROM _cluster_name_frequency nf
+WHERE nf.loose_name = csc.loose_name;
+
+ANALYZE _cluster_station_context;
 
 DO $$
 BEGIN
@@ -784,7 +1013,7 @@ FROM _cluster_base b
 JOIN unnest(b.station_ids) sid(global_station_id) ON true
 JOIN global_stations gs
   ON gs.global_station_id = sid.global_station_id
-JOIN _station_context sc
+JOIN _cluster_station_context sc
   ON sc.global_station_id = gs.global_station_id;
 
 DELETE FROM qa_merge_cluster_evidence e
@@ -842,9 +1071,9 @@ FROM _cluster_base cb
 JOIN unnest(cb.station_ids) left_id(global_station_id) ON true
 JOIN unnest(cb.station_ids) right_id(global_station_id)
   ON right_id.global_station_id > left_id.global_station_id
-JOIN _station_context left_station
+JOIN _cluster_station_context left_station
   ON left_station.global_station_id = left_id.global_station_id
-JOIN _station_context right_station
+JOIN _cluster_station_context right_station
   ON right_station.global_station_id = right_id.global_station_id
 LEFT JOIN _eligible_pairs seed
   ON seed.source_global_station_id = left_id.global_station_id
@@ -1267,6 +1496,8 @@ function createMergeQueueRepo(client) {
     async rebuildMergeQueue(scope, options = {}) {
       const onPhase =
         typeof options.onPhase === "function" ? options.onPhase : null;
+      const onInfo =
+        typeof options.onInfo === "function" ? options.onInfo : null;
       await ensureMergeClusterEvidenceColumns(client);
       const result = await client.runScript(
         BUILD_MERGE_QUEUE_SQL,
@@ -1279,6 +1510,10 @@ function createMergeQueueRepo(client) {
             const phase = extractPhaseFromNotice(notice);
             if (phase && onPhase) {
               onPhase(phase);
+            }
+            const info = extractInfoFromNotice(notice);
+            if (info && onInfo) {
+              onInfo(info);
             }
           },
         },
@@ -1315,5 +1550,6 @@ function createMergeQueueRepo(client) {
 module.exports = {
   BUILD_MERGE_QUEUE_SQL,
   createMergeQueueRepo,
+  extractInfoFromNotice,
   extractPhaseFromNotice,
 };

@@ -59,8 +59,9 @@ test("curation frontend includes required component structure and runtime utilit
   assert.match(pageJsx, /id="historyPanel"/);
   assert.match(pageJsx, /formatEvidenceTypeLabel/);
   assert.match(pageJsx, /formatEvidenceStatusLabel/);
-  assert.match(pageJsx, /curation-status-pill/);
-  assert.match(pageJsx, /curation-context-chips/);
+  assert.match(pageJsx, /function Badge/);
+  assert.match(pageJsx, /function StatusPill/);
+  assert.match(pageJsx, /function Tag/);
   assert.match(pageJsx, /type="checkbox"/);
   assert.match(pageJsx, /checked=\{selected\}/);
   assert.match(pageJsx, /data-station-id=\{item\.ref\}/);
@@ -104,6 +105,8 @@ test("curation frontend includes required component structure and runtime utilit
   assert.match(pageJsx, /useState/);
   assert.match(pageJsx, /useEffect/);
   assert.match(pageJsx, /useCallback/);
+  assert.match(pageJsx, /bg-surface-0/);
+  assert.match(pageJsx, /animate-fade-in/);
   assert.match(pageJsx, /map\.setStyle\(nextStyle\)/);
   assert.match(pageJsx, /dispatch\(\{ type: "map_mode", mode: "default" \}\)/);
   assert.match(

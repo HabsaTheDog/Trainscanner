@@ -259,6 +259,10 @@ CREATE TABLE IF NOT EXISTS global_stations (
 CREATE INDEX IF NOT EXISTS idx_global_stations_name
   ON global_stations (normalized_name, country);
 
+CREATE INDEX IF NOT EXISTS idx_global_stations_active_country_name
+  ON global_stations (country, normalized_name, global_station_id)
+  WHERE is_active = true;
+
 CREATE INDEX IF NOT EXISTS idx_global_stations_geom
   ON global_stations USING gist (geom)
   WHERE geom IS NOT NULL;
@@ -282,6 +286,10 @@ CREATE TABLE IF NOT EXISTS global_stop_points (
 
 CREATE INDEX IF NOT EXISTS idx_global_stop_points_station
   ON global_stop_points (global_station_id, normalized_name);
+
+CREATE INDEX IF NOT EXISTS idx_global_stop_points_active_station
+  ON global_stop_points (global_station_id, global_stop_point_id)
+  WHERE is_active = true;
 
 CREATE INDEX IF NOT EXISTS idx_global_stop_points_geom
   ON global_stop_points USING gist (geom)
@@ -309,6 +317,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_provider_global_station_mapping_active
 
 CREATE INDEX IF NOT EXISTS idx_provider_global_station_mapping_station
   ON provider_global_station_mappings (global_station_id, is_active);
+
+CREATE INDEX IF NOT EXISTS idx_provider_global_station_mapping_active_cover
+  ON provider_global_station_mappings (global_station_id)
+  INCLUDE (source_id, provider_stop_place_ref)
+  WHERE is_active = true;
 
 CREATE TABLE IF NOT EXISTS provider_global_stop_point_mappings (
   mapping_id bigserial PRIMARY KEY,

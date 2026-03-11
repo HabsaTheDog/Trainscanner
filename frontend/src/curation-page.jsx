@@ -42,6 +42,7 @@ import {
   updateGroupTransferSeconds,
 } from "./curation-page-runtime";
 import maplibregl from "./maplibre";
+import "./styles.css";
 
 function formatToneLabel(value) {
   return String(value || "")
@@ -438,6 +439,7 @@ function createMarkerElement(item, isSelected, overlapMeta, onSelectRef) {
   return shell;
 }
 
+/* ── Map Component ── */
 function CurationMap({
   items,
   selectedRefs,
@@ -521,9 +523,62 @@ function CurationMap({
     };
   }, [items, onSelectRef, selectedRefs]);
 
-  return <div ref={mapContainerRef} className="curation-map" />;
+  return (
+    <div
+      ref={mapContainerRef}
+      className="curation-map flex-1 min-h-[200px] w-full"
+    />
+  );
 }
 
+/* ── Badge Helpers ── */
+const severityColors = {
+  critical: "bg-red-dim text-red border border-red/20",
+  high: "bg-orange-dim text-orange border border-orange/20",
+  medium: "bg-yellow-dim text-yellow border border-yellow/20",
+  low: "bg-green-dim text-green border border-green/20",
+};
+
+const statusColors = {
+  open: "bg-yellow-dim text-yellow border border-yellow/20",
+  in_review: "bg-blue-dim text-blue border border-blue/20",
+  resolved: "bg-green-dim text-green border border-green/20",
+  dismissed: "bg-surface-3 text-text-muted border border-border",
+  supporting: "bg-green-dim text-green border border-green/20",
+  warning: "bg-orange-dim text-orange border border-orange/20",
+  missing: "bg-red-dim text-red border border-red/20",
+  informational: "bg-surface-3 text-text-secondary border border-border",
+};
+
+function Badge({ children, variant = "neutral", className = "" }) {
+  const base =
+    "inline-flex items-center px-2.5 py-1 rounded-md text-[0.7rem] font-semibold font-display uppercase tracking-wide whitespace-nowrap";
+  const color =
+    variant === "neutral"
+      ? "bg-surface-3 text-text-secondary border border-border"
+      : severityColors[variant] ||
+        statusColors[variant] ||
+        "bg-surface-3 text-text-secondary border border-border";
+  return <span className={`${base} ${color} ${className}`}>{children}</span>;
+}
+
+function StatusPill({ status, children }) {
+  const base =
+    "inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[0.72rem] font-bold font-display border";
+  const color =
+    statusColors[status] || "bg-surface-3 text-text-secondary border-border";
+  return <span className={`${base} ${color}`}>{children}</span>;
+}
+
+function Tag({ children, variant = "", className = "" }) {
+  const base =
+    "inline-flex items-center px-2.5 py-1 rounded-md text-[0.73rem] font-semibold border border-border bg-surface-2 text-text-secondary";
+  const merged =
+    variant === "merged" ? "border-red/20 text-red bg-red-dim" : "";
+  return <span className={`${base} ${merged} ${className}`}>{children}</span>;
+}
+
+/* ── Cluster Sidebar ── */
 function ClusterSidebar({
   clusters,
   totalCount,
@@ -539,20 +594,30 @@ function ClusterSidebar({
       ? totalCount
       : clusters.length;
   return (
-    <aside className="curation-sidebar">
-      <div className="curation-sidebar__header">
+    <aside className="bg-surface-1 border-r border-border flex flex-col overflow-hidden">
+      <div className="flex justify-between items-start px-5 pt-5 pb-3.5 border-b border-border">
         <div>
-          <p className="curation-sidebar__eyebrow">QA Workspace</p>
-          <h2 className="curation-sidebar__title">Station Curation</h2>
+          <p className="m-0 mb-1 text-[0.72rem] tracking-widest uppercase text-amber font-bold font-display">
+            QA Workspace
+          </p>
+          <h2 className="text-lg font-bold tracking-tight m-0 text-text-primary">
+            Station Curation
+          </h2>
         </div>
-        <a href="/" className="curation-sidebar__home-link">
+        <a
+          href="/"
+          className="no-underline text-amber text-[0.82rem] font-bold px-3 py-2 rounded-lg bg-amber-dim hover:bg-amber/20 transition-colors"
+        >
           Home
         </a>
       </div>
 
-      <div className="curation-sidebar__filters">
-        <div className="curation-filter-row">
-          <label htmlFor="countryFilter" className="curation-filter-label">
+      <div className="px-5 py-4 border-b border-border space-y-2.5">
+        <div className="grid grid-cols-[68px_1fr] gap-2.5 items-center">
+          <label
+            htmlFor="countryFilter"
+            className="text-[0.8rem] text-text-secondary font-semibold font-display"
+          >
             Country
           </label>
           <select
@@ -561,6 +626,7 @@ function ClusterSidebar({
             onChange={(event) =>
               onFilterChange({ ...filters, country: event.target.value })
             }
+            className="bg-surface-2 border border-border-strong rounded-lg px-2.5 py-2 text-text-primary text-sm focus:outline-none focus:border-amber/40 transition-colors"
           >
             <option value="">All</option>
             <option value="DE">DE</option>
@@ -574,8 +640,11 @@ function ClusterSidebar({
             <option value="PL">PL</option>
           </select>
         </div>
-        <div className="curation-filter-row">
-          <label htmlFor="statusFilter" className="curation-filter-label">
+        <div className="grid grid-cols-[68px_1fr] gap-2.5 items-center">
+          <label
+            htmlFor="statusFilter"
+            className="text-[0.8rem] text-text-secondary font-semibold font-display"
+          >
             Status
           </label>
           <select
@@ -584,6 +653,7 @@ function ClusterSidebar({
             onChange={(event) =>
               onFilterChange({ ...filters, status: event.target.value })
             }
+            className="bg-surface-2 border border-border-strong rounded-lg px-2.5 py-2 text-text-primary text-sm focus:outline-none focus:border-amber/40 transition-colors"
           >
             <option value="">All</option>
             <option value="open">Open</option>
@@ -595,58 +665,67 @@ function ClusterSidebar({
         <button
           id="refreshBtn"
           type="button"
-          className="curation-btn curation-btn--full"
+          className="w-full py-2.5 px-4 rounded-lg font-semibold text-sm bg-amber text-surface-0 hover:bg-amber-hover transition-all shadow-[0_4px_14px_rgba(245,158,11,0.25)] cursor-pointer border-none"
           onClick={onRefresh}
         >
           Refresh List
         </button>
       </div>
 
-      <p className="curation-sidebar__meta">
+      <p className="px-5 pt-3.5 pb-2.5 m-0 text-[0.76rem] text-text-muted tracking-wide font-display">
         {loading ? "Loading..." : formatResultsLabel(displayTotalCount)}
       </p>
 
-      <div className="curation-sidebar__list">
+      <div
+        className="flex-1 overflow-y-auto px-3.5 pb-4"
+        style={{ scrollbarWidth: "thin" }}
+      >
         {clusters.length === 0 && !loading && (
-          <p className="curation-muted">No clusters found for this filter.</p>
+          <p className="text-text-muted m-0 px-2 py-4">
+            No clusters found for this filter.
+          </p>
         )}
         {clusters.map((cluster) => (
           <button
             key={cluster.cluster_id}
             type="button"
-            className={`curation-cluster-item ${activeClusterId === cluster.cluster_id ? "curation-cluster-item--active" : ""}`}
+            className={`w-full text-left border rounded-xl p-3.5 mb-2.5 cursor-pointer transition-all duration-150 bg-surface-2 hover:bg-surface-3 hover:border-amber/30 ${activeClusterId === cluster.cluster_id ? "border-amber/40 bg-surface-3 shadow-[inset_3px_0_0_var(--color-amber),0_4px_20px_rgba(245,158,11,0.08)]" : "border-border"}`}
             onClick={() => onSelectCluster(cluster.cluster_id)}
           >
-            <div className="curation-cluster-item__top">
-              <span className="curation-cluster-item__name">
+            <div className="flex items-start justify-between gap-2.5 mb-2.5">
+              <span className="m-0 text-[0.96rem] leading-snug font-bold tracking-tight text-text-primary">
                 {cluster.display_name || cluster.cluster_id}
               </span>
-              <span
-                className={`curation-badge curation-badge--severity-${String(cluster.severity || "").toLowerCase() || "default"}`}
-              >
+              <Badge variant={String(cluster.severity || "").toLowerCase()}>
                 {formatToneLabel(cluster.severity || "Unknown")}
-              </span>
+              </Badge>
             </div>
-            <div className="curation-cluster-item__badges">
-              <span
-                className={`curation-badge curation-badge--status-${String(cluster.effective_status || cluster.status || "").toLowerCase() || "default"}`}
+            <div className="flex flex-wrap gap-1.5">
+              <Badge
+                variant={String(
+                  cluster.effective_status || cluster.status || "",
+                ).toLowerCase()}
               >
                 {formatToneLabel(
                   cluster.effective_status || cluster.status || "Unknown",
                 )}
-              </span>
+              </Badge>
               {cluster.has_workspace && (
-                <span className="curation-badge curation-badge--neutral">
+                <Badge variant="neutral">
                   ws v{cluster.workspace_version || 0}
-                </span>
+                </Badge>
               )}
-              <span className="curation-badge curation-badge--neutral">
+              <Badge variant="neutral">
                 {formatCountryLabel(cluster.country_tags, cluster.country)}
-              </span>
+              </Badge>
             </div>
-            <div className="curation-cluster-item__meta">
-              <strong>{cluster.candidate_count}</strong>
-              <span>candidates</span>
+            <div className="flex items-baseline gap-1.5 mt-3 text-[0.82rem] text-text-muted">
+              <strong className="text-base tracking-tight text-text-primary">
+                {cluster.candidate_count}
+              </strong>
+              <span className="text-[0.78rem] uppercase tracking-wider text-text-muted font-bold font-display">
+                candidates
+              </span>
             </div>
           </button>
         ))}
@@ -655,6 +734,7 @@ function ClusterSidebar({
   );
 }
 
+/* ── Candidate Rail Card ── */
 function CandidateRailCard({
   item,
   index,
@@ -692,10 +772,17 @@ function CandidateRailCard({
     onFocus(item.ref);
   };
 
+  const kindBorder =
+    item.kind === "merge"
+      ? "border-l-[4px] border-l-teal"
+      : item.kind === "group"
+        ? "border-l-[4px] border-l-orange"
+        : "";
+
   return (
     /* biome-ignore lint/a11y/useSemanticElements: the card container needs a non-button wrapper because it contains nested controls */
     <div
-      className={`curation-rail-card curation-rail-card--${item.kind} ${selected ? "curation-rail-card--selected" : ""} ${focused ? "curation-rail-card--focused" : ""}`}
+      className={`border border-border rounded-xl p-3 mb-2.5 bg-surface-2 cursor-pointer transition-all duration-150 outline-none animate-fade-in hover:translate-y-[-1px] hover:bg-surface-3 ${kindBorder} ${selected ? "border-amber/30 shadow-[0_0_20px_rgba(245,158,11,0.08)]" : ""} ${focused ? "border-text-muted/30 shadow-[0_0_0_2px_rgba(245,158,11,0.12)]" : ""}`}
       role="button"
       aria-pressed={selected}
       onClick={handleCardSelection}
@@ -707,8 +794,8 @@ function CandidateRailCard({
       }}
       tabIndex={0}
     >
-      <div className="curation-rail-card__header">
-        <label className="curation-rail-card__select">
+      <div className="flex justify-between gap-2 items-start">
+        <label className="flex gap-2.5 items-start min-w-0 cursor-pointer">
           <input
             type="checkbox"
             checked={selected}
@@ -717,56 +804,51 @@ function CandidateRailCard({
               onToggleSelection(item.ref, index, event.shiftKey)
             }
             onClick={(event) => event.stopPropagation()}
+            className="mt-1 accent-amber"
           />
         </label>
         <button
           type="button"
-          className="curation-rail-card__focus"
+          className="appearance-none border-0 bg-transparent p-0 m-0 min-w-0 text-left cursor-pointer font-[inherit] text-[inherit] flex-1"
           onClick={() => onFocus(item.ref)}
         >
-          <strong>{item.display_name}</strong>
-          <span className="curation-candidate__id">{item.ref}</span>
+          <strong className="block text-text-primary">
+            {item.display_name}
+          </strong>
+          <span className="text-text-muted text-[0.78rem] block mt-0.5 break-all truncate-id">
+            {item.ref}
+          </span>
         </button>
-        <span className="curation-tag">{item.kind}</span>
+        <Tag>{item.kind}</Tag>
       </div>
       {item.kind === "raw" ? (
         <>
-          <div className="curation-candidate__meta">
-            <span className="curation-candidate__meta-item">
-              {formatCountryLabel([candidate.metadata?.country || ""])}
-            </span>
-            <span className="curation-candidate__meta-item">
-              {(item.provider_labels || []).length} feeds
-            </span>
-            <span className="curation-status-pill">
+          <div className="flex flex-wrap gap-2 mt-3">
+            <Tag>{formatCountryLabel([candidate.metadata?.country || ""])}</Tag>
+            <Tag>{(item.provider_labels || []).length} feeds</Tag>
+            <StatusPill status={candidate.coord_status}>
               {formatCoordStatus(candidate.coord_status)}
-            </span>
+            </StatusPill>
           </div>
-          <div className="curation-context-chips">
+          <div className="flex flex-wrap gap-1.5 mt-2">
             {transportModes.slice(0, 3).map((mode) => (
-              <span key={`${item.ref}-mode-${mode}`} className="curation-tag">
-                {mode}
-              </span>
+              <Tag key={`${item.ref}-mode-${mode}`}>{mode}</Tag>
             ))}
-            <span className="curation-tag">
-              {contextSummary.stop_point_count ?? 0} stop points
-            </span>
-            <span className="curation-tag">
-              {contextSummary.route_count ?? 0} routes
-            </span>
+            <Tag>{contextSummary.stop_point_count ?? 0} stop points</Tag>
+            <Tag>{contextSummary.route_count ?? 0} routes</Tag>
           </div>
           {aliases.length > 0 && (
-            <p className="curation-muted curation-tiny curation-candidate__aliases">
+            <p className="text-text-muted text-[0.78rem] mt-2.5 m-0 leading-relaxed">
               Aliases: {aliases.slice(0, 4).join(", ")}
             </p>
           )}
-          <div className="curation-candidate__adjacency">
+          <div className="grid gap-1 mt-2 text-[0.76rem] text-text-secondary">
             <span>In: {incoming.slice(0, 2).join(", ") || "none"}</span>
             <span>Out: {outgoing.slice(0, 2).join(", ") || "none"}</span>
           </div>
         </>
       ) : (
-        <div className="curation-rail-card__summary">
+        <div className="flex items-center gap-2 flex-wrap mt-2 text-text-secondary text-sm">
           <span>{item.member_refs?.length || 0} members</span>
           {item.kind === "group" && (
             <span>{item.internal_nodes?.length || 0} nodes</span>
@@ -774,22 +856,18 @@ function CandidateRailCard({
         </div>
       )}
       {memberNames.length > 0 && (
-        <div className="curation-rail-card__members">
+        <div className="flex flex-wrap gap-1.5 mt-2.5">
           {memberNames.slice(0, 4).map((name) => (
-            <span key={`${item.ref}-${name}`} className="curation-tag">
-              {name}
-            </span>
+            <Tag key={`${item.ref}-${name}`}>{name}</Tag>
           ))}
-          {memberNames.length > 4 && (
-            <span className="curation-tag">+{memberNames.length - 4}</span>
-          )}
+          {memberNames.length > 4 && <Tag>+{memberNames.length - 4}</Tag>}
         </div>
       )}
       {item.kind !== "raw" && (
-        <div className="curation-rail-card__inline-actions">
+        <div className="flex items-center gap-2 flex-wrap mt-2">
           <button
             type="button"
-            className="curation-btn curation-btn--secondary curation-tiny"
+            className="px-2.5 py-1 rounded-lg text-[0.78rem] font-semibold bg-surface-3 border border-border text-text-secondary hover:text-text-primary hover:border-border-strong transition-colors cursor-pointer"
             onClick={(event) => {
               event.stopPropagation();
               onSplit(item.ref);
@@ -803,6 +881,7 @@ function CandidateRailCard({
   );
 }
 
+/* ── Workspace Panel ── */
 function WorkspacePanel({
   clusterDetail,
   saveState,
@@ -847,29 +926,38 @@ function WorkspacePanel({
       return type === "raw" || type === "merge";
     }).length >= 2;
 
+  const saveStateColors = {
+    Saved: "bg-green-dim text-green",
+    Saving: "bg-yellow-dim text-yellow",
+    Failed: "bg-red-dim text-red",
+  };
+
   return (
-    <section className="curation-workspace-panel">
-      <div id="contextualActionBar" className="curation-action-bar">
-        <div className="curation-action-bar__summary">
-          <strong className="curation-action-bar__title">
+    <section className="min-h-0 border border-border rounded-2xl bg-surface-1/80 backdrop-blur-sm shadow-[0_8px_32px_rgba(0,0,0,0.2)] p-4 flex flex-col gap-3.5">
+      <div
+        id="contextualActionBar"
+        className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 items-center"
+      >
+        <div className="flex items-center gap-2.5 flex-wrap min-w-0">
+          <strong className="leading-tight text-text-primary font-display">
             {clusterDetail
               ? clusterDetail.display_name || clusterDetail.cluster_id
               : "No cluster selected"}
           </strong>
           <span
             id="saveStateIndicator"
-            className={`curation-save-state curation-save-state--${saveState.toLowerCase()}`}
+            className={`inline-flex items-center px-2.5 py-1 rounded-md text-[0.72rem] font-bold font-display uppercase tracking-wide ${saveStateColors[saveState] || "bg-surface-3 text-text-muted"}`}
           >
             {saveState}
           </span>
         </div>
 
-        <div className="curation-action-bar__controls">
-          <div className="curation-action-bar__actions">
+        <div className="flex items-center gap-2.5 flex-wrap justify-end">
+          <div className="flex flex-wrap gap-2">
             <button
               id="undoWorkspaceBtn"
               type="button"
-              className="curation-btn curation-btn--secondary"
+              className="px-3.5 py-2 rounded-lg font-semibold text-[0.85rem] bg-surface-3 border border-border text-text-secondary hover:text-text-primary hover:border-border-strong transition-all cursor-pointer"
               onClick={onUndo}
             >
               Undo
@@ -877,25 +965,25 @@ function WorkspacePanel({
             <button
               id="resetWorkspaceBtn"
               type="button"
-              className="curation-btn curation-btn--secondary"
+              className="px-3.5 py-2 rounded-lg font-semibold text-[0.85rem] bg-surface-3 border border-border text-text-secondary hover:text-text-primary hover:border-border-strong transition-all cursor-pointer"
               onClick={onReset}
             >
               Reset
             </button>
             <button
               type="button"
-              className="curation-btn curation-btn--secondary"
+              className="px-3.5 py-2 rounded-lg font-semibold text-[0.85rem] bg-teal-dim border border-teal/20 text-teal hover:bg-teal/20 transition-all cursor-pointer"
               onClick={onAiScore}
             >
               AI Suggest
             </button>
           </div>
 
-          <div className="curation-action-bar__resolve">
+          <div className="flex items-center gap-2.5">
             <button
               id="dismissClusterBtn"
               type="button"
-              className="curation-btn curation-btn--danger"
+              className="min-w-[100px] inline-flex items-center justify-center px-3.5 py-2 rounded-lg font-semibold text-[0.85rem] bg-red-dim border border-red/20 text-red hover:bg-red/20 transition-all cursor-pointer"
               onClick={onDismiss}
             >
               Dismiss
@@ -903,7 +991,7 @@ function WorkspacePanel({
             <button
               id="resolveClusterBtn"
               type="button"
-              className="curation-btn curation-btn--save"
+              className="min-w-[100px] inline-flex items-center justify-center px-3.5 py-2 rounded-lg font-semibold text-[0.85rem] bg-green-dim border border-green/20 text-green hover:bg-green/20 transition-all cursor-pointer"
               onClick={canUnresolve ? onUnresolve : onResolve}
             >
               {canUnresolve ? "Unresolve" : "Resolve"}
@@ -913,7 +1001,19 @@ function WorkspacePanel({
       </div>
 
       {notice && (
-        <div className={`curation-notice curation-notice--${notice.tone}`}>
+        <div
+          className={`w-full rounded-xl px-3.5 py-3 text-[0.88rem] leading-relaxed border animate-fade-in ${
+            notice.tone === "info"
+              ? "bg-blue-dim border-blue/20 text-blue"
+              : notice.tone === "success"
+                ? "bg-green-dim border-green/20 text-green"
+                : notice.tone === "error"
+                  ? "bg-red-dim border-red/20 text-red"
+                  : notice.tone === "warning"
+                    ? "bg-yellow-dim border-yellow/20 text-yellow"
+                    : "bg-surface-3 border-border text-text-secondary"
+          }`}
+        >
           {notice.message}
         </div>
       )}
@@ -921,7 +1021,7 @@ function WorkspacePanel({
       {aiResult && (
         <div
           id="aiScoreResult"
-          className="curation-notice curation-notice--info"
+          className="w-full rounded-xl px-3.5 py-3 text-[0.88rem] leading-relaxed bg-teal-dim border border-teal/20 text-teal animate-fade-in"
         >
           <strong>AI {(aiResult.confidence_score * 100).toFixed(0)}%</strong>{" "}
           suggests {String(aiResult.suggested_action || "").toUpperCase()}.{" "}
@@ -929,16 +1029,16 @@ function WorkspacePanel({
         </div>
       )}
 
-      <div className="curation-tool-panel">
+      <div className="border border-border rounded-2xl p-3.5 bg-surface-2/80">
         <div
-          className="curation-tool-tabs"
+          className="flex gap-2 justify-start"
           role="tablist"
           aria-label="Curation tools"
         >
           <button
             id="mergeToolTabBtn"
             type="button"
-            className={`curation-tool-tab ${toolMode === "merge" ? "curation-tool-tab--active" : ""}`}
+            className={`border rounded-full px-3 py-1.5 font-bold text-sm cursor-pointer transition-all font-display ${toolMode === "merge" ? "bg-amber-dim border-amber/30 text-amber" : "bg-surface-3 border-border text-text-muted hover:text-text-secondary hover:bg-surface-4"}`}
             onClick={() => onToolModeChange("merge")}
           >
             Merge
@@ -946,7 +1046,7 @@ function WorkspacePanel({
           <button
             id="groupToolTabBtn"
             type="button"
-            className={`curation-tool-tab ${toolMode === "group" ? "curation-tool-tab--active" : ""}`}
+            className={`border rounded-full px-3 py-1.5 font-bold text-sm cursor-pointer transition-all font-display ${toolMode === "group" ? "bg-amber-dim border-amber/30 text-amber" : "bg-surface-3 border-border text-text-muted hover:text-text-secondary hover:bg-surface-4"}`}
             onClick={() => onToolModeChange("group")}
           >
             Group
@@ -954,12 +1054,12 @@ function WorkspacePanel({
         </div>
 
         {toolMode === "merge" && (
-          <div className="curation-tool-body">
-            <div className="curation-tool-body__actions">
+          <div className="flex flex-col gap-2.5 mt-3">
+            <div className="flex gap-2 flex-wrap">
               <button
                 id="mergeSelectedActionBtn"
                 type="button"
-                className="curation-btn"
+                className="px-3.5 py-2 rounded-lg font-semibold text-sm bg-amber text-surface-0 hover:bg-amber-hover transition-all cursor-pointer shadow-[0_2px_10px_rgba(245,158,11,0.2)] disabled:opacity-40 disabled:cursor-not-allowed border-none"
                 onClick={onMergeSelection}
                 disabled={!canMerge}
               >
@@ -968,7 +1068,7 @@ function WorkspacePanel({
               <button
                 id="keepSeparateActionBtn"
                 type="button"
-                className="curation-btn curation-btn--secondary"
+                className="px-3.5 py-2 rounded-lg font-semibold text-sm bg-surface-3 border border-border text-text-secondary hover:text-text-primary hover:border-border-strong transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                 onClick={onKeepSeparate}
                 disabled={selectedArray.length < 2}
               >
@@ -978,14 +1078,14 @@ function WorkspacePanel({
                 <button
                   id="splitCompositeActionBtn"
                   type="button"
-                  className="curation-btn curation-btn--secondary"
+                  className="px-3.5 py-2 rounded-lg font-semibold text-sm bg-surface-3 border border-border text-text-secondary hover:text-text-primary hover:border-border-strong transition-all cursor-pointer"
                   onClick={onSplitFocused}
                 >
                   Split
                 </button>
               )}
             </div>
-            <p className="curation-muted curation-tiny">
+            <p className="text-text-muted text-[0.82rem] m-0">
               Select at least two raw candidates to merge them into one station
               draft.
             </p>
@@ -993,12 +1093,12 @@ function WorkspacePanel({
         )}
 
         {toolMode === "group" && (
-          <div className="curation-tool-body">
-            <div className="curation-tool-body__actions">
+          <div className="flex flex-col gap-2.5 mt-3">
+            <div className="flex gap-2 flex-wrap">
               <button
                 id="createGroupActionBtn"
                 type="button"
-                className="curation-btn"
+                className="px-3.5 py-2 rounded-lg font-semibold text-sm bg-amber text-surface-0 hover:bg-amber-hover transition-all cursor-pointer shadow-[0_2px_10px_rgba(245,158,11,0.2)] disabled:opacity-40 disabled:cursor-not-allowed border-none"
                 onClick={onCreateGroup}
                 disabled={!canGroup}
               >
@@ -1007,7 +1107,7 @@ function WorkspacePanel({
               <button
                 id="groupEditorActionBtn"
                 type="button"
-                className="curation-btn curation-btn--secondary"
+                className="px-3.5 py-2 rounded-lg font-semibold text-sm bg-surface-3 border border-border text-text-secondary hover:text-text-primary hover:border-border-strong transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                 onClick={onAddSelectionToGroup}
                 disabled={
                   focusedItem?.kind !== "group" || selectedArray.length === 0
@@ -1018,14 +1118,14 @@ function WorkspacePanel({
               {focusedItem?.kind === "group" && (
                 <button
                   type="button"
-                  className="curation-btn curation-btn--secondary"
+                  className="px-3.5 py-2 rounded-lg font-semibold text-sm bg-surface-3 border border-border text-text-secondary hover:text-text-primary hover:border-border-strong transition-all cursor-pointer"
                   onClick={onSplitFocused}
                 >
                   Split group
                 </button>
               )}
             </div>
-            <p className="curation-muted curation-tiny">
+            <p className="text-text-muted text-[0.82rem] m-0">
               Use groups for one station with multiple internal stop points and
               transfer times.
             </p>
@@ -1047,15 +1147,23 @@ function WorkspacePanel({
   );
 }
 
+/* ── Expandable Panel ── */
 function ExpandablePanel({ id, title, children, defaultOpen = false }) {
   return (
-    <details id={id} className="curation-expandable" open={defaultOpen}>
-      <summary className="curation-expandable__summary">{title}</summary>
-      <div className="curation-expandable__body">{children}</div>
+    <details
+      id={id}
+      className="min-h-0 border border-border rounded-2xl bg-surface-1/80 backdrop-blur-sm shadow-[0_8px_32px_rgba(0,0,0,0.2)] overflow-hidden"
+      open={defaultOpen}
+    >
+      <summary className="list-none cursor-pointer px-5 py-3.5 text-[0.92rem] font-bold tracking-tight font-display text-text-primary hover:text-amber transition-colors select-none [&::-webkit-details-marker]:hidden">
+        {title}
+      </summary>
+      <div className="px-5 pb-5 pt-0 border-t border-border">{children}</div>
     </details>
   );
 }
 
+/* ── Draft Tab ── */
 function DraftTab({
   workspace,
   focusedItem,
@@ -1080,16 +1188,23 @@ function DraftTab({
         )
       : null;
 
+  const inputClasses =
+    "w-full bg-surface-2 border border-border-strong rounded-lg px-3 py-2 text-text-primary text-sm focus:outline-none focus:border-amber/40 transition-colors font-[inherit]";
+
   return (
-    <div id="draftTabPanel" className="curation-draft-stack">
+    <div id="draftTabPanel" className="min-h-0 flex flex-col gap-3">
       {focusedItem?.kind === "raw" && (
-        <div className="curation-edit-panel">
-          <label className="curation-tiny" htmlFor="rawRenameInput">
+        <div className="border border-border rounded-2xl p-3.5 bg-surface-2/80 animate-fade-in">
+          <label
+            className="text-[0.78rem] text-text-muted font-display font-semibold"
+            htmlFor="rawRenameInput"
+          >
             Rename candidate
           </label>
           <input
             id="rawRenameInput"
             type="text"
+            className={`${inputClasses} mt-1.5`}
             value={
               getRenameValue(workspace, focusedRef) || focusedItem.display_name
             }
@@ -1099,37 +1214,48 @@ function DraftTab({
       )}
 
       {focusedMerge && (
-        <div className="curation-edit-panel">
-          <label className="curation-tiny" htmlFor="mergeRenameInput">
+        <div className="border border-border rounded-2xl p-3.5 bg-surface-2/80 animate-fade-in">
+          <label
+            className="text-[0.78rem] text-text-muted font-display font-semibold"
+            htmlFor="mergeRenameInput"
+          >
             Rename merged entity
           </label>
           <input
             id="mergeRenameInput"
             type="text"
+            className={`${inputClasses} mt-1.5`}
             value={focusedMerge.display_name}
             onChange={(event) =>
               onRenameComposite(focusedRef, event.target.value)
             }
           />
-          <div className="curation-rail-card__members">
+          <div className="flex flex-wrap gap-1.5 mt-2.5">
             {focusedMerge.member_refs.map((ref) => (
-              <span key={ref} className="curation-tag">
+              <Tag key={ref}>
                 {resolveDisplayNameForRef(ref, workspace, candidateMap)}
-              </span>
+              </Tag>
             ))}
           </div>
         </div>
       )}
 
       {focusedGroup && (
-        <div id="groupEditorPanel" className="curation-group-editor">
-          <div className="curation-edit-panel">
-            <label className="curation-tiny" htmlFor="groupRenameInput">
+        <div
+          id="groupEditorPanel"
+          className="flex flex-col gap-3 animate-fade-in"
+        >
+          <div className="border border-border rounded-2xl p-3.5 bg-surface-2/80">
+            <label
+              className="text-[0.78rem] text-text-muted font-display font-semibold"
+              htmlFor="groupRenameInput"
+            >
               Group name
             </label>
             <input
               id="groupRenameInput"
               type="text"
+              className={`${inputClasses} mt-1.5`}
               value={focusedGroup.display_name}
               onChange={(event) =>
                 onRenameComposite(focusedRef, event.target.value)
@@ -1137,13 +1263,19 @@ function DraftTab({
             />
           </div>
 
-          <div className="curation-group-editor__section">
-            <div className="curation-group-editor__heading">Internal nodes</div>
-            <div className="curation-group-node-list">
+          <div className="border border-border rounded-2xl p-3.5 bg-surface-2/60">
+            <div className="text-[0.78rem] font-extrabold tracking-widest uppercase text-text-muted font-display mb-2.5">
+              Internal nodes
+            </div>
+            <div className="grid gap-2 content-start">
               {focusedGroup.internal_nodes.map((node) => (
-                <div key={node.node_id} className="curation-group-node-row">
+                <div
+                  key={node.node_id}
+                  className="flex items-center gap-2 flex-wrap border border-border rounded-xl px-3 py-2.5 bg-surface-2/90"
+                >
                   <input
                     type="text"
+                    className={`${inputClasses} min-w-[180px] flex-1`}
                     value={node.label}
                     onChange={(event) =>
                       onUpdateGroupNodeLabel(
@@ -1153,7 +1285,7 @@ function DraftTab({
                       )
                     }
                   />
-                  <span className="curation-muted curation-tiny">
+                  <span className="text-text-muted text-[0.78rem]">
                     {resolveDisplayNameForRef(
                       node.source_ref,
                       workspace,
@@ -1162,7 +1294,7 @@ function DraftTab({
                   </span>
                   <button
                     type="button"
-                    className="curation-btn curation-btn--danger curation-tiny"
+                    className="px-2.5 py-1 rounded-lg text-[0.78rem] font-semibold bg-red-dim border border-red/20 text-red hover:bg-red/20 transition-colors cursor-pointer"
                     onClick={() =>
                       onRemoveGroupMember(
                         focusedGroup.entity_id,
@@ -1170,24 +1302,24 @@ function DraftTab({
                       )
                     }
                   >
-                    Remove member
+                    Remove
                   </button>
                 </div>
               ))}
             </div>
           </div>
 
-          <div className="curation-group-editor__section">
-            <div className="curation-group-editor__heading">
+          <div className="border border-border rounded-2xl p-3.5 bg-surface-2/60">
+            <div className="text-[0.78rem] font-extrabold tracking-widest uppercase text-text-muted font-display mb-2.5">
               Transfer matrix
             </div>
-            <div id="groupTransferMatrix" className="curation-transfer-matrix">
+            <div id="groupTransferMatrix" className="grid gap-2 content-start">
               {focusedGroup.transfer_matrix.map((row) => (
                 <div
                   key={`${row.from_node_id}-${row.to_node_id}`}
-                  className="curation-transfer-matrix__row"
+                  className="flex items-center gap-2 flex-wrap border border-border rounded-xl px-3 py-2.5 bg-surface-2/90"
                 >
-                  <span>
+                  <span className="text-text-secondary text-sm">
                     {focusedGroup.internal_nodes.find(
                       (node) => node.node_id === row.from_node_id,
                     )?.label || row.from_node_id}{" "}
@@ -1200,6 +1332,7 @@ function DraftTab({
                     type="number"
                     min="0"
                     step="10"
+                    className="w-[92px] bg-surface-2 border border-border-strong rounded-lg px-2 py-1.5 text-text-primary text-sm focus:outline-none focus:border-amber/40 transition-colors"
                     value={row.min_walk_seconds}
                     onChange={(event) =>
                       onUpdateGroupTransfer(
@@ -1210,7 +1343,9 @@ function DraftTab({
                       )
                     }
                   />
-                  <span className="curation-muted curation-tiny">sec</span>
+                  <span className="text-text-muted text-[0.78rem] font-display">
+                    sec
+                  </span>
                 </div>
               ))}
             </div>
@@ -1221,6 +1356,7 @@ function DraftTab({
   );
 }
 
+/* ── Evidence Tab ── */
 function EvidenceTab({ clusterDetail, focusedItem, workspace }) {
   const focusedStationIds = focusedItem
     ? resolveRefMemberStationIds(focusedItem.ref, workspace)
@@ -1242,47 +1378,54 @@ function EvidenceTab({ clusterDetail, focusedItem, workspace }) {
   const typeCounts = getTypeCounts(clusterDetail?.evidence_summary);
 
   return (
-    <div id="evidenceTabPanel" className="curation-tab-panel">
-      <div className="curation-evidence-summary">
+    <div id="evidenceTabPanel" className="min-h-0 flex flex-col gap-3 pt-3">
+      <div className="flex flex-wrap gap-1.5">
         {["supporting", "warning", "missing", "informational"].map((status) => (
-          <span
-            key={status}
-            className={`curation-status-pill curation-status-pill--${status}`}
-          >
+          <StatusPill key={status} status={status}>
             {formatEvidenceStatusLabel(status)}{" "}
             {getSummaryCounts(clusterDetail?.evidence_summary, status)}
-          </span>
+          </StatusPill>
         ))}
       </div>
       {typeCounts.length > 0 && (
-        <div className="curation-context-chips">
+        <div className="flex flex-wrap gap-1.5">
           {typeCounts.slice(0, 6).map((entry) => (
-            <span key={entry.type} className="curation-tag">
+            <Tag key={entry.type}>
               {formatEvidenceTypeLabel(entry.type)} {entry.count}
-            </span>
+            </Tag>
           ))}
         </div>
       )}
       {pairSummaries.length > 0 && (
-        <div className="curation-pair-summary-list">
+        <div className="grid gap-2 mb-3">
           {pairSummaries.slice(0, 8).map((row) => (
             <div
               key={`${row.source_global_station_id}-${row.target_global_station_id}`}
-              className="curation-pair-summary"
+              className="border border-border rounded-xl p-2.5 bg-surface-2/80"
             >
-              <div className="curation-pair-summary__header">
-                <strong>
+              <div className="grid gap-1 mb-1.5">
+                <strong className="text-text-primary text-sm font-display">
                   {row.source_global_station_id} ↔{" "}
                   {row.target_global_station_id}
                 </strong>
-                <span>{row.summary || "Evidence summary"}</span>
+                <span className="text-text-secondary text-sm">
+                  {row.summary || "Evidence summary"}
+                </span>
               </div>
-              <div className="curation-pair-summary__metrics">
-                <span>support {row.supporting_count || 0}</span>
-                <span>warn {row.warning_count || 0}</span>
-                <span>missing {row.missing_count || 0}</span>
-                <span>context {row.informational_count || 0}</span>
-                <span>
+              <div className="flex flex-wrap gap-2.5 text-[0.76rem] text-text-muted font-display">
+                <span className="text-green">
+                  support {row.supporting_count || 0}
+                </span>
+                <span className="text-orange">
+                  warn {row.warning_count || 0}
+                </span>
+                <span className="text-red">
+                  missing {row.missing_count || 0}
+                </span>
+                <span className="text-text-secondary">
+                  context {row.informational_count || 0}
+                </span>
+                <span className="text-text-primary">
                   score{" "}
                   {Number.isFinite(Number(row.score))
                     ? Number(row.score).toFixed(2)
@@ -1294,23 +1437,25 @@ function EvidenceTab({ clusterDetail, focusedItem, workspace }) {
         </div>
       )}
       {evidenceRows.length === 0 ? (
-        <p className="curation-muted">No evidence for the current focus.</p>
+        <p className="text-text-muted m-0">
+          No evidence for the current focus.
+        </p>
       ) : (
-        <div id="evidenceList" className="curation-evidence-list">
+        <div id="evidenceList" className="grid gap-2 content-start">
           {evidenceRows.map((row) => (
             <div
               key={`${row.evidence_type}-${row.source_global_station_id}-${row.target_global_station_id}-${row.score ?? "na"}`}
-              className="curation-evidence-row"
+              className="border border-border rounded-xl px-3 py-2.5 bg-surface-2/80 text-sm"
             >
-              <div className="curation-evidence-row__top">
-                <strong>{formatEvidenceTypeLabel(row.evidence_type)}</strong>
-                <span
-                  className={`curation-status-pill curation-status-pill--${row.status || "informational"}`}
-                >
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <strong className="text-text-primary font-display">
+                  {formatEvidenceTypeLabel(row.evidence_type)}
+                </strong>
+                <StatusPill status={row.status || "informational"}>
                   {formatEvidenceStatusLabel(row.status)}
-                </span>
+                </StatusPill>
               </div>
-              <div className="curation-evidence-row__meta">
+              <div className="flex flex-wrap gap-2.5 mb-1 text-text-secondary">
                 <span>
                   {row.source_global_station_id} ↔{" "}
                   {row.target_global_station_id}
@@ -1324,7 +1469,7 @@ function EvidenceTab({ clusterDetail, focusedItem, workspace }) {
                 </span>
               </div>
               {formatEvidenceDetails(row.details) && (
-                <div className="curation-muted curation-tiny">
+                <div className="text-text-muted text-[0.78rem]">
                   {formatEvidenceDetails(row.details)}
                 </div>
               )}
@@ -1336,17 +1481,20 @@ function EvidenceTab({ clusterDetail, focusedItem, workspace }) {
   );
 }
 
+/* ── History Tab ── */
 function HistoryTab({ clusterDetail }) {
   return (
-    <div id="historyTabPanel" className="curation-tab-panel">
-      <div className="curation-history-list">
+    <div id="historyTabPanel" className="min-h-0 flex flex-col gap-3 pt-3">
+      <div className="grid gap-2 content-start">
         {(clusterDetail?.edit_history || []).map((row, index) => (
           <div
             key={`${row.event_type}-${row.created_at}-${index}`}
-            className="curation-history-row"
+            className="border border-border rounded-xl px-3 py-2.5 bg-surface-2/80 text-sm text-text-secondary"
           >
-            <strong>{row.event_type}</strong> · {row.requested_by} ·{" "}
-            {row.created_at}
+            <strong className="text-text-primary font-display">
+              {row.event_type}
+            </strong>{" "}
+            · {row.requested_by} · {row.created_at}
           </div>
         ))}
       </div>
@@ -1354,6 +1502,7 @@ function HistoryTab({ clusterDetail }) {
   );
 }
 
+/* ── Main Page ── */
 export function CurationPage() {
   const [clusters, setClusters] = useState([]);
   const [clusterTotalCount, setClusterTotalCount] = useState(0);
@@ -1797,7 +1946,7 @@ export function CurationPage() {
   ]);
 
   return (
-    <div className="curation-layout">
+    <div className="min-h-screen grid grid-cols-[320px_430px_minmax(0,1fr)] bg-surface-0">
       <ClusterSidebar
         clusters={clusters}
         totalCount={clusterTotalCount}
@@ -1809,21 +1958,28 @@ export function CurationPage() {
         loading={loading}
       />
 
-      <aside className="curation-rail">
-        <div className="curation-candidates-header">
-          <div>
-            <h4>Candidate Rail</h4>
-            <p id="selectionSummary" className="curation-muted curation-tiny">
-              {uiState.selectedRefs.size === 0
-                ? "No items selected."
-                : `Selected: ${uiState.selectedRefs.size} item(s).`}
-            </p>
+      <aside className="border-r border-border bg-surface-1/60 flex flex-col min-w-0">
+        <div className="sticky top-0 z-[2] px-4 pt-5 pb-3 bg-surface-1/95 backdrop-blur-sm border-b border-border">
+          <div className="flex justify-between items-start">
+            <div>
+              <h4 className="m-0 text-base tracking-tight font-display text-text-primary">
+                Candidate Rail
+              </h4>
+              <p
+                id="selectionSummary"
+                className="text-text-muted text-[0.78rem] m-0 mt-1 font-display"
+              >
+                {uiState.selectedRefs.size === 0
+                  ? "No items selected."
+                  : `Selected: ${uiState.selectedRefs.size} item(s).`}
+              </p>
+            </div>
           </div>
-          <div className="curation-candidates-actions">
+          <div className="flex gap-2 mt-2">
             <button
               id="candidateSelectAllBtn"
               type="button"
-              className="curation-btn curation-btn--secondary curation-tiny"
+              className="px-2.5 py-1 rounded-lg text-[0.78rem] font-semibold bg-surface-3 border border-border text-text-secondary hover:text-text-primary hover:border-border-strong transition-colors cursor-pointer"
               onClick={() =>
                 dispatch({
                   type: "set_selection",
@@ -1837,7 +1993,7 @@ export function CurationPage() {
             <button
               id="candidateClearBtn"
               type="button"
-              className="curation-btn curation-btn--secondary curation-tiny"
+              className="px-2.5 py-1 rounded-lg text-[0.78rem] font-semibold bg-surface-3 border border-border text-text-secondary hover:text-text-primary hover:border-border-strong transition-colors cursor-pointer"
               onClick={() => dispatch({ type: "clear_selection" })}
             >
               Clear
@@ -1845,11 +2001,12 @@ export function CurationPage() {
           </div>
         </div>
 
-        <div className="curation-candidates-scroll">
+        <div
+          className="min-h-0 overflow-auto px-3.5 py-3 pb-5"
+          style={{ scrollbarWidth: "thin" }}
+        >
           {railItems.length === 0 && (
-            <p className="curation-muted" style={{ padding: "12px" }}>
-              No cluster selected.
-            </p>
+            <p className="text-text-muted m-0 p-3">No cluster selected.</p>
           )}
           {railItems.map((item, index) => (
             <CandidateRailCard
@@ -1868,22 +2025,22 @@ export function CurationPage() {
         </div>
       </aside>
 
-      <main className="curation-workspace">
-        <section className="curation-map-shell">
-          <div className="curation-map-toolbar">
+      <main className="min-w-0 grid grid-rows-[minmax(360px,52vh)_auto_auto] gap-3.5 p-5 content-start overflow-y-auto">
+        <section className="min-h-0 border border-border rounded-2xl bg-surface-1/80 backdrop-blur-sm shadow-[0_8px_32px_rgba(0,0,0,0.2)] overflow-hidden grid grid-rows-[auto_minmax(0,1fr)]">
+          <div className="flex justify-between items-center px-4 py-3 border-b border-border bg-surface-2/60">
             <span
               id="curationMapStatus"
-              className="curation-muted curation-tiny"
+              className="text-text-muted text-[0.78rem] font-display"
             >
               {mapItems.length > 0
                 ? `${plottedMapItems.length}/${mapItems.length} workspace items plotted · v${workspaceVersion || 0}.`
                 : "Select a cluster."}
             </span>
-            <div className="curation-map-mode-toggle">
+            <div className="flex gap-1.5">
               <button
                 id="mapModeDefaultBtn"
                 type="button"
-                className="curation-btn curation-btn--secondary curation-tiny"
+                className={`px-2.5 py-1 rounded-lg text-[0.78rem] font-semibold border cursor-pointer transition-all ${uiState.mapMode === "default" ? "bg-amber-dim border-amber/30 text-amber" : "bg-surface-3 border-border text-text-secondary hover:text-text-primary"}`}
                 aria-pressed={uiState.mapMode === "default"}
                 disabled={uiState.mapMode === "default"}
                 onClick={() => dispatch({ type: "map_mode", mode: "default" })}
@@ -1893,7 +2050,7 @@ export function CurationPage() {
               <button
                 id="mapModeSatelliteBtn"
                 type="button"
-                className="curation-btn curation-btn--secondary curation-tiny"
+                className={`px-2.5 py-1 rounded-lg text-[0.78rem] font-semibold border cursor-pointer transition-all ${uiState.mapMode === "satellite" ? "bg-amber-dim border-amber/30 text-amber" : "bg-surface-3 border-border text-text-secondary hover:text-text-primary"}`}
                 aria-pressed={uiState.mapMode === "satellite"}
                 disabled={uiState.mapMode === "satellite"}
                 onClick={() =>
@@ -1966,7 +2123,7 @@ export function CurationPage() {
           onToolModeChange={(tool) => dispatch({ type: "tool", tool })}
         />
 
-        <section className="curation-expandable-stack">
+        <section className="grid gap-3">
           <ExpandablePanel id="evidencePanel" title="Evidence">
             <EvidenceTab
               clusterDetail={clusterDetail}

@@ -43,21 +43,38 @@ BEGIN;
 
 CREATE TEMP TABLE _candidate AS
 SELECT
-  rp.source_id,
-  rp.provider_stop_place_ref,
-  rp.country,
-  rp.stop_name,
-  rp.normalized_name,
-  rp.latitude,
-  rp.longitude,
-  rp.geom,
-  NULLIF(rp.hard_id, '') AS hard_key
-FROM raw_provider_stop_places rp
-JOIN provider_datasets pd
-  ON pd.dataset_id = rp.dataset_id
-WHERE (NULLIF(:'country_filter', '') IS NULL OR rp.country = NULLIF(:'country_filter', '')::char(2))
-  AND (NULLIF(:'source_id_scope', '') IS NULL OR rp.source_id = NULLIF(:'source_id_scope', ''))
-  AND (NULLIF(:'as_of', '') IS NULL OR pd.snapshot_date <= NULLIF(:'as_of', '')::date);
+  latest.source_id,
+  latest.provider_stop_place_ref,
+  latest.country,
+  latest.stop_name,
+  latest.normalized_name,
+  latest.latitude,
+  latest.longitude,
+  latest.geom,
+  latest.hard_key
+FROM (
+  SELECT
+    rp.source_id,
+    rp.provider_stop_place_ref,
+    rp.country,
+    rp.stop_name,
+    rp.normalized_name,
+    rp.latitude,
+    rp.longitude,
+    rp.geom,
+    NULLIF(rp.hard_id, '') AS hard_key,
+    ROW_NUMBER() OVER (
+      PARTITION BY rp.source_id, rp.provider_stop_place_ref
+      ORDER BY pd.snapshot_date DESC, rp.dataset_id DESC, rp.updated_at DESC, rp.stop_place_id DESC
+    ) AS row_num
+  FROM raw_provider_stop_places rp
+  JOIN provider_datasets pd
+    ON pd.dataset_id = rp.dataset_id
+  WHERE (NULLIF(:'country_filter', '') IS NULL OR rp.country = NULLIF(:'country_filter', '')::char(2))
+    AND (NULLIF(:'source_id_scope', '') IS NULL OR rp.source_id = NULLIF(:'source_id_scope', ''))
+    AND (NULLIF(:'as_of', '') IS NULL OR pd.snapshot_date <= NULLIF(:'as_of', '')::date)
+) latest
+WHERE latest.row_num = 1;
 
 DO $$
 BEGIN
@@ -278,29 +295,46 @@ FROM _assignments a;
 
 CREATE TEMP TABLE _candidate_stop_points AS
 SELECT
-  rpp.source_id,
-  rpp.provider_stop_point_ref,
-  rpp.provider_stop_place_ref,
-  rpp.stop_name,
-  rpp.normalized_name,
-  rpp.country,
-  COALESCE(rpp.latitude, gs.latitude) AS latitude,
-  COALESCE(rpp.longitude, gs.longitude) AS longitude,
-  COALESCE(rpp.geom, gs.geom) AS geom,
+  latest.source_id,
+  latest.provider_stop_point_ref,
+  latest.provider_stop_place_ref,
+  latest.stop_name,
+  latest.normalized_name,
+  latest.country,
+  COALESCE(latest.latitude, gs.latitude) AS latitude,
+  COALESCE(latest.longitude, gs.longitude) AS longitude,
+  COALESCE(latest.geom, gs.geom) AS geom,
   m.global_station_id
-FROM raw_provider_stop_points rpp
-JOIN provider_datasets pd
-  ON pd.dataset_id = rpp.dataset_id
+FROM (
+  SELECT
+    rpp.source_id,
+    rpp.provider_stop_point_ref,
+    rpp.provider_stop_place_ref,
+    rpp.stop_name,
+    rpp.normalized_name,
+    rpp.country,
+    rpp.latitude,
+    rpp.longitude,
+    rpp.geom,
+    ROW_NUMBER() OVER (
+      PARTITION BY rpp.source_id, rpp.provider_stop_point_ref
+      ORDER BY pd.snapshot_date DESC, rpp.dataset_id DESC, rpp.updated_at DESC, rpp.stop_point_id DESC
+    ) AS row_num
+  FROM raw_provider_stop_points rpp
+  JOIN provider_datasets pd
+    ON pd.dataset_id = rpp.dataset_id
+  WHERE (NULLIF(:'country_filter', '') IS NULL OR rpp.country = NULLIF(:'country_filter', '')::char(2))
+    AND (NULLIF(:'source_id_scope', '') IS NULL OR rpp.source_id = NULLIF(:'source_id_scope', ''))
+    AND (NULLIF(:'as_of', '') IS NULL OR pd.snapshot_date <= NULLIF(:'as_of', '')::date)
+) latest
 JOIN provider_global_station_mappings m
-  ON m.source_id = rpp.source_id
- AND m.provider_stop_place_ref = rpp.provider_stop_place_ref
+  ON m.source_id = latest.source_id
+ AND m.provider_stop_place_ref = latest.provider_stop_place_ref
  AND m.is_active = true
 JOIN global_stations gs
   ON gs.global_station_id = m.global_station_id
  AND gs.is_active = true
-WHERE (NULLIF(:'country_filter', '') IS NULL OR rpp.country = NULLIF(:'country_filter', '')::char(2))
-  AND (NULLIF(:'source_id_scope', '') IS NULL OR rpp.source_id = NULLIF(:'source_id_scope', ''))
-  AND (NULLIF(:'as_of', '') IS NULL OR pd.snapshot_date <= NULLIF(:'as_of', '')::date);
+WHERE latest.row_num = 1;
 
 CREATE INDEX _candidate_stop_points_source_point_idx
   ON _candidate_stop_points (source_id, provider_stop_point_ref);
