@@ -24,7 +24,11 @@ function normalizeTier(value) {
 
 function resolveRepoRoot(config) {
   const base = path.resolve(config.rootDir || process.cwd());
-  const candidates = [base, path.resolve(base, "..")];
+  const candidates = [
+    base,
+    path.resolve(base, ".."),
+    path.resolve(base, "..", ".."),
+  ];
 
   for (const candidate of candidates) {
     const exportScript = path.join(
