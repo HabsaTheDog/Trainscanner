@@ -29,6 +29,10 @@ async function runCli() {
   }
 }
 
-void runCli().then((exitCode) => {
-  process.exitCode = exitCode;
-});
+function startCli() {
+  void runCli().then((exitCode) => {
+    process.exitCode = exitCode;
+  });
+}
+
+startCli();
