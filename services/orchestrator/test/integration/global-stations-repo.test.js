@@ -1,102 +1,23 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { execFileSync, spawnSync } = require("node:child_process");
-const fs = require("node:fs");
 const path = require("node:path");
-const { Pool } = require("pg");
 
 const { createPostgisClient } = require("../../src/data/postgis/client");
 const {
   createGlobalStationsRepo,
 } = require("../../src/data/postgis/repositories/global-stations-repo");
-
-const BASH_PATH = fs.existsSync("/usr/bin/bash")
-  ? "/usr/bin/bash"
-  : "/bin/bash";
-const DOCKER_PATH = ["/usr/bin/docker", "/bin/docker"].find((filePath) =>
-  fs.existsSync(filePath),
-);
-const hasDocker =
-  Boolean(DOCKER_PATH) && spawnSync(DOCKER_PATH, ["--version"]).status === 0;
-const shouldRun = hasDocker && process.env.ENABLE_POSTGIS_TESTS === "1";
-
-function createDbEnv(dbName) {
-  return {
-    ...process.env,
-    CANONICAL_DB_MODE: "docker-compose",
-    CANONICAL_DB_DOCKER_PROFILE: "pan-europe-data",
-    CANONICAL_DB_DOCKER_SERVICE: "postgis",
-    CANONICAL_DB_NAME: dbName,
-  };
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function ensureBootstrapped(repoRoot, dbEnv) {
-  const scriptPath = path.join(repoRoot, "scripts", "data", "db-bootstrap.sh");
-
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
-    try {
-      execFileSync(BASH_PATH, [scriptPath, "--quiet", "--if-ready"], {
-        cwd: repoRoot,
-        env: dbEnv,
-        encoding: "utf8",
-      });
-      return;
-    } catch (error) {
-      const output = `${error.stdout || ""}\n${error.stderr || ""}`;
-      if (attempt < 3 && output.includes("tuple concurrently updated")) {
-        await sleep(500 * attempt);
-        continue;
-      }
-      throw error;
-    }
-  }
-}
-
-async function createDatabase(dbEnv) {
-  const pool = new Pool({
-    host: dbEnv.CANONICAL_DB_HOST || "localhost",
-    port: Number.parseInt(dbEnv.CANONICAL_DB_PORT || "55432", 10),
-    user: dbEnv.CANONICAL_DB_USER || "trainscanner",
-    password: dbEnv.CANONICAL_DB_PASSWORD || "trainscanner",
-    database: "postgres",
-  });
-
-  try {
-    await pool.query(`CREATE DATABASE "${dbEnv.CANONICAL_DB_NAME}"`);
-  } catch (error) {
-    if (error?.code !== "42P04") {
-      throw error;
-    }
-  } finally {
-    await pool.end();
-  }
-}
-
-async function dropDatabase(dbEnv) {
-  const pool = new Pool({
-    host: dbEnv.CANONICAL_DB_HOST || "localhost",
-    port: Number.parseInt(dbEnv.CANONICAL_DB_PORT || "55432", 10),
-    user: dbEnv.CANONICAL_DB_USER || "trainscanner",
-    password: dbEnv.CANONICAL_DB_PASSWORD || "trainscanner",
-    database: "postgres",
-  });
-
-  try {
-    await pool.query(
-      `DROP DATABASE IF EXISTS "${dbEnv.CANONICAL_DB_NAME}" WITH (FORCE)`,
-    );
-  } finally {
-    await pool.end();
-  }
-}
+const {
+  createDatabase,
+  createDbEnv,
+  dropDatabase,
+  ensureDockerServiceRunning,
+  ensureBootstrapped,
+  shouldRunPostgisTests,
+} = require("../helpers/postgis-test-db");
 
 test(
   "buildGlobalStations keeps one active mapping when historical datasets coexist",
-  { skip: !shouldRun },
+  { skip: !shouldRunPostgisTests },
   async () => {
     const servicesRoot = path.resolve(__dirname, "../../..");
     const repoRoot = path.resolve(servicesRoot, "..");
@@ -104,6 +25,7 @@ test(
     const dbEnv = createDbEnv(dbName);
     let client;
 
+    ensureDockerServiceRunning(repoRoot, dbEnv);
     await createDatabase(dbEnv);
     test.after(async () => {
       if (client) {
@@ -357,7 +279,7 @@ test(
 
 test(
   "buildGlobalStations derives child stop place coordinates from child stop points and records provenance",
-  { skip: !shouldRun },
+  { skip: !shouldRunPostgisTests },
   async () => {
     const servicesRoot = path.resolve(__dirname, "../../..");
     const repoRoot = path.resolve(servicesRoot, "..");
@@ -365,6 +287,7 @@ test(
     const dbEnv = createDbEnv(dbName);
     let client;
 
+    ensureDockerServiceRunning(repoRoot, dbEnv);
     await createDatabase(dbEnv);
     test.after(async () => {
       if (client) {

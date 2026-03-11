@@ -3,6 +3,9 @@ const assert = require("node:assert/strict");
 
 const {
   BUILD_MERGE_QUEUE_SQL,
+  DEFAULT_MERGE_QUEUE_MAINTENANCE_WORK_MEM,
+  DEFAULT_MERGE_QUEUE_MAX_PARALLEL_WORKERS,
+  DEFAULT_MERGE_QUEUE_WORK_MEM,
   createMergeQueueRepo,
   extractInfoFromNotice,
   extractPhaseFromNotice,
@@ -36,6 +39,23 @@ test("extractInfoFromNotice returns merge queue info payloads", () => {
 });
 
 test("build sql preserves phase markers and ported evidence primitives", () => {
+  assert.match(
+    BUILD_MERGE_QUEUE_SQL,
+    new RegExp(
+      `SET LOCAL max_parallel_workers_per_gather = ${DEFAULT_MERGE_QUEUE_MAX_PARALLEL_WORKERS};`,
+    ),
+  );
+  assert.match(
+    BUILD_MERGE_QUEUE_SQL,
+    new RegExp(`SET LOCAL work_mem = '${DEFAULT_MERGE_QUEUE_WORK_MEM}';`),
+  );
+  assert.match(
+    BUILD_MERGE_QUEUE_SQL,
+    new RegExp(
+      `SET LOCAL maintenance_work_mem = '${DEFAULT_MERGE_QUEUE_MAINTENANCE_WORK_MEM}';`,
+    ),
+  );
+
   for (const phase of [
     "initializing",
     "building_station_context",

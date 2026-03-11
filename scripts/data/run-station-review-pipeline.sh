@@ -41,9 +41,9 @@ Run a full station-review data pipeline in one command:
   5) build global merge queue clusters
 
 Options:
-  --country <ISO2>            Restrict refresh scope to one country
+  --country <ISO2>            Restrict fetch/ingest scope to one country
   --as-of YYYY-MM-DD          Snapshot date override for refresh stages
-  --source-id <id>            Restrict fetch/ingest/global-stations to one source id
+  --source-id <id>            Restrict fetch/ingest scope to one source id
   --only <list>               Comma-separated steps: fetch,ingest,global-stations,merge-queue
   --from-step <step>          Start from step: fetch|ingest|global-stations|merge-queue
   --to-step <step>            Stop after step: fetch|ingest|global-stations|merge-queue
@@ -60,6 +60,7 @@ Examples:
   scripts/data/run-station-review-pipeline.sh
   scripts/data/run-station-review-pipeline.sh --country CH
   scripts/data/run-station-review-pipeline.sh --country DE --as-of 2026-02-20
+  scripts/data/run-station-review-pipeline.sh --country DE --source-id delfi-de --dry-run
   scripts/data/run-station-review-pipeline.sh --skip-db-bootstrap --from-step global-stations
 USAGE
   return 0

@@ -36,7 +36,7 @@ async function stationReviewPipeline(args = {}) {
     await runDbBootstrap();
   }
 
-  // 1. Fetch ZIPs (Node.js Bash Wrapper)
+  // 1. Fetch source data for the requested import scope.
   await runFetchSources(refreshArgs);
 
   // 2. Extract NeTEx (Rust Worker natively via Postgres COPY stream)
@@ -51,7 +51,7 @@ async function stationReviewPipeline(args = {}) {
     manifest_sha256: "",
   });
 
-  // 3. Build Global Stations and QA Merge Clusters (Node.js Bash Wrapper)
+  // 3. Rebuild the global station model and merge queue over the full active dataset.
   await buildGlobalModel(refreshArgs);
 
   // 4. Post-pipeline health check

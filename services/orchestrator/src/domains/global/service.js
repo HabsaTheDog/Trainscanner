@@ -16,10 +16,7 @@ const {
   createMergeQueueRepo,
 } = require("../../data/postgis/repositories/merge-queue-repo");
 const { isStrictIsoDate } = require("../../core/date");
-const {
-  parseIntegerEnv,
-  readJobExecutionConfig,
-} = require("../../core/runtime");
+const { readJobExecutionConfig } = require("../../core/runtime");
 
 function parseCountryScope(value) {
   const normalized = String(value || "")
@@ -194,10 +191,6 @@ async function closeClient(client) {
   }
 }
 
-function parsePositiveInt(value, fallback) {
-  return parseIntegerEnv(value, fallback, { min: 1 });
-}
-
 function createMergeQueueCallbacks(writeMergeQueueNotice, scopeCountry) {
   return {
     onPhase(phase) {
@@ -207,27 +200,6 @@ function createMergeQueueCallbacks(writeMergeQueueNotice, scopeCountry) {
       writeMergeQueueNotice(`${info.key}=${info.value}`, scopeCountry);
     },
   };
-}
-
-async function runWithConcurrency(items, limit, worker) {
-  const results = new Array(items.length);
-  let cursor = 0;
-
-  async function runNext() {
-    while (cursor < items.length) {
-      const index = cursor;
-      cursor += 1;
-      results[index] = await worker(items[index], index);
-    }
-  }
-
-  const workers = Array.from(
-    { length: Math.min(Math.max(limit, 1), items.length) },
-    () => runNext(),
-  );
-
-  await Promise.all(workers);
-  return results;
 }
 
 function createGlobalService(deps = {}) {
@@ -402,101 +374,25 @@ function createGlobalService(deps = {}) {
             }
           }
 
-          const discoveryClient = createClient({ rootDir });
-          let countries = [];
+          const client = createClient({ rootDir });
           try {
-            await discoveryClient.ensureReady();
-            const rows = await discoveryClient.queryRows(
-              `
-              SELECT DISTINCT country::text AS country
-              FROM global_stations
-              WHERE is_active = true
-                AND country IS NOT NULL
-              ORDER BY country
-              `,
+            await client.ensureReady();
+            const queueRepo = createQueueRepo(client);
+            const summary = await queueRepo.rebuildMergeQueue(
+              {
+                country: "",
+                asOf: parsed.scope.asOf,
+              },
+              createMergeQueueCallbacks(writeMergeQueueNotice, ""),
             );
-            countries = rows
-              .map((row) =>
-                String(row.country || "")
-                  .trim()
-                  .toUpperCase(),
-              )
-              .filter(Boolean);
-          } finally {
-            await closeClient(discoveryClient);
-          }
-
-          if (countries.length === 0) {
-            const summary = {
-              scopeCountry: "",
-              scopeAsOf: parsed.scope.asOf || "",
-              scopeTag: parsed.scope.asOf || "latest",
-              clusters: 0,
-              candidates: 0,
-              evidence: 0,
-            };
             process.stdout.write(`${JSON.stringify(summary)}\n`);
             return {
               ok: true,
               summary,
             };
+          } finally {
+            await closeClient(client);
           }
-
-          const concurrency = parsePositiveInt(
-            options.env?.GLOBAL_MERGE_QUEUE_COUNTRY_CONCURRENCY ||
-              process.env.GLOBAL_MERGE_QUEUE_COUNTRY_CONCURRENCY ||
-              "1",
-            1,
-          );
-          process.stdout.write(
-            `[merge-queue] batching countries=${countries.join(",")} concurrency=${concurrency} scope=${parsed.scope.asOf || "latest"}\n`,
-          );
-
-          const summaries = await runWithConcurrency(
-            countries,
-            concurrency,
-            async (country) => {
-              const client = createClient({ rootDir });
-              try {
-                await client.ensureReady();
-                const queueRepo = createQueueRepo(client);
-                return await queueRepo.rebuildMergeQueue(
-                  {
-                    country,
-                    asOf: parsed.scope.asOf,
-                  },
-                  createMergeQueueCallbacks(writeMergeQueueNotice, country),
-                );
-              } finally {
-                await closeClient(client);
-              }
-            },
-          );
-
-          const summary = summaries.reduce(
-            (acc, item) => ({
-              scopeCountry: "",
-              scopeAsOf: acc.scopeAsOf || item.scopeAsOf || "",
-              scopeTag: acc.scopeTag || item.scopeTag || "latest",
-              clusters: acc.clusters + item.clusters,
-              candidates: acc.candidates + item.candidates,
-              evidence: acc.evidence + item.evidence,
-            }),
-            {
-              scopeCountry: "",
-              scopeAsOf: "",
-              scopeTag: "",
-              clusters: 0,
-              candidates: 0,
-              evidence: 0,
-            },
-          );
-
-          process.stdout.write(`${JSON.stringify(summary)}\n`);
-          return {
-            ok: true,
-            summary,
-          };
         },
       });
     },

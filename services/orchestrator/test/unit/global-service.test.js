@@ -147,9 +147,6 @@ test("job-orchestrated global build closes both orchestration and execution clie
       createPostgisClient: () => {
         const client = {
           async ensureReady() {},
-          async queryRows() {
-            return [{ country: "DE" }];
-          },
           async end() {
             client.ended = true;
           },
@@ -198,13 +195,12 @@ test("job-orchestrated global build closes both orchestration and execution clie
     stdout.restore();
   }
 
-  assert.equal(createdClients.length, 3);
+  assert.equal(createdClients.length, 2);
   assert.equal(createdClients[0].ended, true);
   assert.equal(createdClients[1].ended, true);
-  assert.equal(createdClients[2].ended, true);
 });
 
-test("all-scope merge queue batches by country and aggregates summaries", async () => {
+test("all-scope merge queue rebuild runs once globally", async () => {
   const stdout = captureStdout();
   const seenScopes = [];
 
@@ -212,9 +208,6 @@ test("all-scope merge queue batches by country and aggregates summaries", async 
     const service = createGlobalService({
       createPostgisClient: () => ({
         async ensureReady() {},
-        async queryRows() {
-          return [{ country: "AT" }, { country: "DE" }];
-        },
         async end() {},
       }),
       createMergeQueueRepo: () => ({
@@ -222,12 +215,12 @@ test("all-scope merge queue batches by country and aggregates summaries", async 
           seenScopes.push(scope);
           options.onPhase("building_pair_seeds");
           return {
-            scopeCountry: scope.country,
+            scopeCountry: "",
             scopeAsOf: scope.asOf || "",
             scopeTag: "latest",
-            clusters: scope.country === "DE" ? 3 : 1,
-            candidates: scope.country === "DE" ? 5 : 2,
-            evidence: scope.country === "DE" ? 8 : 3,
+            clusters: 4,
+            candidates: 7,
+            evidence: 11,
           };
         },
       }),
@@ -242,13 +235,10 @@ test("all-scope merge queue batches by country and aggregates summaries", async 
     stdout.restore();
   }
 
-  assert.deepEqual(seenScopes, [
-    { country: "AT", asOf: "" },
-    { country: "DE", asOf: "" },
-  ]);
-  assert.match(
+  assert.deepEqual(seenScopes, [{ country: "", asOf: "" }]);
+  assert.doesNotMatch(
     stdout.writes.join(""),
-    /\[merge-queue\] batching countries=AT,DE concurrency=1 scope=latest/,
+    /\[merge-queue\] batching countries=/,
   );
   assert.match(stdout.writes.join(""), /"clusters":4/);
   assert.match(stdout.writes.join(""), /"candidates":7/);

@@ -9,6 +9,7 @@ import {
   formatEvidenceTypeLabel,
   formatEvidenceValue,
   formatLabel,
+  formatProviderFeedsTooltip,
   formatSeedReasonLabel,
   getEvidenceCategoryCounts,
   getEvidenceTypeCounts,
@@ -33,6 +34,11 @@ test("curation formatters normalize labels and evidence summaries", () => {
   );
   assert.equal(formatSeedReasonLabel("shared_route"), "Shared Route");
   assert.equal(formatCoordinateStatusLabel("coordinates_present"), "Coords");
+  assert.equal(
+    formatProviderFeedsTooltip([" DB ", "SBB", "DB", "", null]),
+    "Feeds used: DB, SBB",
+  );
+  assert.equal(formatProviderFeedsTooltip([]), "No feeds available");
   assert.equal(
     formatEvidenceValue({
       evidence_type: "geographic_distance",

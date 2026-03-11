@@ -15,6 +15,7 @@ import {
   formatEvidenceTypeLabel,
   formatEvidenceValue,
   formatLabel,
+  formatProviderFeedsTooltip,
   formatSeedReasonLabel,
   getEvidenceCategoryCounts,
   getEvidenceTypeCounts,
@@ -456,12 +457,32 @@ function Pill({ children, v = "neutral", className = "" }) {
 function StatusPill(props) {
   return <Pill {...props} />;
 }
-function Tag({ children, className = "" }) {
+function Tag({ children, className = "", ...props }) {
   return (
     <span
+      {...props}
       className={`inline-flex items-center px-2 py-0.5 rounded text-[0.72rem] font-medium border border-border bg-surface-2 text-text-secondary ${className}`}
     >
       {children}
+    </span>
+  );
+}
+
+function TooltipTag({ children, tooltip, className = "" }) {
+  return (
+    <span className="relative inline-flex group">
+      <Tag
+        className={`cursor-default ${className}`}
+        aria-label={tooltip}
+        tabIndex={tooltip ? 0 : undefined}
+      >
+        {children}
+      </Tag>
+      {tooltip ? (
+        <span className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 hidden w-max max-w-80 -translate-x-1/2 rounded-md border border-border-strong bg-surface-0 px-2.5 py-1.5 text-[0.7rem] leading-snug text-text-primary shadow-lg group-hover:block group-focus-within:block">
+          {tooltip}
+        </span>
+      ) : null}
     </span>
   );
 }
@@ -628,6 +649,8 @@ function CandidateCard({
   const ctx = c.context_summary || {};
   const kB = resolveKindAccent(item.kind);
   const ref = item.ref;
+  const providerLabels = item.provider_labels || [];
+  const providerFeedsTooltip = formatProviderFeedsTooltip(providerLabels);
   const fg =
     item.kind === "group" ? findWorkspaceEntity("group", workspace, ref) : null;
   const fm =
@@ -675,7 +698,9 @@ function CandidateCard({
               <Tag>{ctx.stop_point_count ?? 0} stops</Tag>
               <Tag>{ctx.route_count ?? 0} routes</Tag>
               <Tag>{formatCoordinateStatusLabel(c.coord_status)}</Tag>
-              <Tag>{(item.provider_labels || []).length} feeds</Tag>
+              <TooltipTag tooltip={providerFeedsTooltip}>
+                {providerLabels.length} feeds
+              </TooltipTag>
             </div>
           )}
           {isComposite && !expanded && (

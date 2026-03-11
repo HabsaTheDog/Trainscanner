@@ -30,6 +30,24 @@ async function runShellScript(execRunner, scriptPath, args = [], options = {}) {
   return execRunner("bash", [scriptPath, ...(args || [])], options);
 }
 
+function selectGlobalBuildArgs(args = []) {
+  const safeArgs = Array.isArray(args) ? args : [];
+  const selected = [];
+
+  for (let index = 0; index < safeArgs.length; index += 1) {
+    const token = String(safeArgs[index] || "");
+    if (token === "--as-of") {
+      const value = safeArgs[index + 1];
+      if (value !== undefined) {
+        selected.push(token, value);
+      }
+      index += 1;
+    }
+  }
+
+  return selected;
+}
+
 function createIngestionActivities(_dbClient, config = {}) {
   const execRunner = config.execFileAsync || execFileAsync;
   const repoRoot = resolveRepoRoot(config);
@@ -64,7 +82,7 @@ function createIngestionActivities(_dbClient, config = {}) {
     },
 
     async buildGlobalModel(args) {
-      const safeArgs = args || [];
+      const safeArgs = selectGlobalBuildArgs(args);
       const globalStationsResult = await runShellScript(
         execRunner,
         path.join(scriptsDir, "build-global-stations.sh"),

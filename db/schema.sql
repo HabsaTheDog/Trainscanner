@@ -278,6 +278,9 @@ CREATE INDEX IF NOT EXISTS idx_raw_stop_places_geom
   ON raw_provider_stop_places USING gist (geom)
   WHERE geom IS NOT NULL;
 
+ALTER TABLE raw_provider_stop_places
+  ADD COLUMN IF NOT EXISTS topographic_place_ref text;
+
 CREATE TABLE IF NOT EXISTS raw_provider_stop_points (
   stop_point_id text PRIMARY KEY,
   dataset_id bigint NOT NULL REFERENCES provider_datasets(dataset_id) ON DELETE CASCADE,
@@ -318,6 +321,9 @@ CREATE INDEX IF NOT EXISTS idx_raw_stop_points_country_name
 CREATE INDEX IF NOT EXISTS idx_raw_stop_points_geom
   ON raw_provider_stop_points USING gist (geom)
   WHERE geom IS NOT NULL;
+
+ALTER TABLE raw_provider_stop_points
+  ADD COLUMN IF NOT EXISTS topographic_place_ref text;
 
 CREATE TABLE IF NOT EXISTS global_stations (
   global_station_id text PRIMARY KEY,

@@ -8,6 +8,7 @@ const {
   saveGlobalClusterWorkspace,
   undoGlobalClusterWorkspace,
 } = require("../domains/qa/api");
+const { resolveSourceLabels } = require("../domains/source-discovery/catalog");
 
 async function requestAiScoreBridge(clusterId, candidates) {
   const aiServiceUrl = process.env.AI_SCORING_URL || "http://localhost:8000";
@@ -47,7 +48,7 @@ async function requestAiScoreBridge(clusterId, candidates) {
 function mapClusterCandidate(candidate) {
   const toInt = (value) => Number.parseInt(String(value ?? 0), 10) || 0;
   const labels = Array.isArray(candidate.provider_labels)
-    ? candidate.provider_labels
+    ? resolveSourceLabels(candidate.provider_labels)
     : [];
   const aliases = Array.isArray(candidate.aliases) ? candidate.aliases : [];
   const serviceContext =

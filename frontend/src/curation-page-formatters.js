@@ -68,6 +68,14 @@ function trimStringArray(value) {
   return value.map((entry) => String(entry || "").trim()).filter(Boolean);
 }
 
+export function formatProviderFeedsTooltip(value) {
+  const labels = Array.from(new Set(trimStringArray(value)));
+  if (labels.length === 0) {
+    return "No feeds available";
+  }
+  return `Feeds used: ${labels.join(", ")}`;
+}
+
 export function formatEvidenceTypeLabel(value) {
   return EVIDENCE_LABELS[value] || formatLabel(value || "unknown");
 }

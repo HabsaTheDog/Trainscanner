@@ -18,6 +18,50 @@ const MERGE_QUEUE_SUMMARY_SCHEMA = {
   additionalProperties: true,
 };
 
+const DEFAULT_MERGE_QUEUE_MAX_PARALLEL_WORKERS = 2;
+const DEFAULT_MERGE_QUEUE_WORK_MEM = "64MB";
+const DEFAULT_MERGE_QUEUE_MAINTENANCE_WORK_MEM = "256MB";
+
+function resolvePositiveIntegerEnv(name, fallback) {
+  const rawValue = String(process.env[name] || "").trim();
+  if (!rawValue) {
+    return fallback;
+  }
+
+  const parsed = Number.parseInt(rawValue, 10);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    return fallback;
+  }
+
+  return parsed;
+}
+
+function resolveMemoryEnv(name, fallback) {
+  const rawValue = String(process.env[name] || "").trim();
+  if (!rawValue) {
+    return fallback;
+  }
+
+  if (!/^\d+(kB|MB|GB)$/i.test(rawValue)) {
+    return fallback;
+  }
+
+  return rawValue.toUpperCase();
+}
+
+const MERGE_QUEUE_MAX_PARALLEL_WORKERS = resolvePositiveIntegerEnv(
+  "GLOBAL_MERGE_QUEUE_MAX_PARALLEL_WORKERS",
+  DEFAULT_MERGE_QUEUE_MAX_PARALLEL_WORKERS,
+);
+const MERGE_QUEUE_WORK_MEM = resolveMemoryEnv(
+  "GLOBAL_MERGE_QUEUE_WORK_MEM",
+  DEFAULT_MERGE_QUEUE_WORK_MEM,
+);
+const MERGE_QUEUE_MAINTENANCE_WORK_MEM = resolveMemoryEnv(
+  "GLOBAL_MERGE_QUEUE_MAINTENANCE_WORK_MEM",
+  DEFAULT_MERGE_QUEUE_MAINTENANCE_WORK_MEM,
+);
+
 function extractJsonLine(stdout) {
   const lines = String(stdout || "")
     .split(/\r?\n/)
@@ -113,9 +157,9 @@ trim(
 const BUILD_MERGE_QUEUE_SQL = `
 BEGIN;
 
-SET LOCAL max_parallel_workers_per_gather = 6;
-SET LOCAL work_mem = '256MB';
-SET LOCAL maintenance_work_mem = '1GB';
+SET LOCAL max_parallel_workers_per_gather = ${MERGE_QUEUE_MAX_PARALLEL_WORKERS};
+SET LOCAL work_mem = '${MERGE_QUEUE_WORK_MEM}';
+SET LOCAL maintenance_work_mem = '${MERGE_QUEUE_MAINTENANCE_WORK_MEM}';
 SET LOCAL jit = off;
 
 DO $$
@@ -1557,6 +1601,9 @@ function createMergeQueueRepo(client) {
 
 module.exports = {
   BUILD_MERGE_QUEUE_SQL,
+  DEFAULT_MERGE_QUEUE_MAINTENANCE_WORK_MEM,
+  DEFAULT_MERGE_QUEUE_MAX_PARALLEL_WORKERS,
+  DEFAULT_MERGE_QUEUE_WORK_MEM,
   createMergeQueueRepo,
   extractInfoFromNotice,
   extractPhaseFromNotice,

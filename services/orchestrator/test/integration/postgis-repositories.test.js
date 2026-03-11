@@ -1,7 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { execFileSync, spawnSync } = require("node:child_process");
-const fs = require("node:fs");
+const { execFileSync } = require("node:child_process");
 const path = require("node:path");
 const crypto = require("node:crypto");
 
@@ -12,20 +11,14 @@ const {
 const {
   createPipelineJobsRepo,
 } = require("../../src/data/postgis/repositories/pipeline-jobs-repo");
-
-const BASH_PATH = fs.existsSync("/usr/bin/bash")
-  ? "/usr/bin/bash"
-  : "/bin/bash";
-const DOCKER_PATH = ["/usr/bin/docker", "/bin/docker"].find((filePath) =>
-  fs.existsSync(filePath),
-);
-const hasDocker =
-  Boolean(DOCKER_PATH) && spawnSync(DOCKER_PATH, ["--version"]).status === 0;
-const shouldRun = hasDocker && process.env.ENABLE_POSTGIS_TESTS === "1";
+const {
+  BASH_PATH,
+  shouldRunPostgisTests,
+} = require("../helpers/postgis-test-db");
 
 test(
   "postgis repositories operate against local docker-compose postgis service",
-  { skip: !shouldRun },
+  { skip: !shouldRunPostgisTests },
   async () => {
     const servicesRoot = path.resolve(__dirname, "../../..");
     const repoRoot = path.resolve(servicesRoot, "..");

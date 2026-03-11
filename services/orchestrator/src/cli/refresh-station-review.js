@@ -53,13 +53,13 @@ function printUsage() {
   process.stdout.write("\n");
   process.stdout.write("Options:\n");
   process.stdout.write(
-    "  --country <ISO2>            Restrict refresh scope to one country\n",
+    "  --country <ISO2>            Restrict fetch/ingest scope to one country\n",
   );
   process.stdout.write(
     "  --as-of YYYY-MM-DD          Snapshot date override for all stages\n",
   );
   process.stdout.write(
-    "  --source-id <id>            Restrict fetch/ingest/global-stations to one source id\n",
+    "  --source-id <id>            Restrict fetch/ingest scope to one source id\n",
   );
   process.stdout.write(
     "  --only <list>               Comma-separated steps: fetch,ingest,global-stations,merge-queue\n",
@@ -269,12 +269,10 @@ function appendArgIfSet(args, key, value) {
 function buildStepArgs(options, stepId) {
   const args = [];
   appendArgIfSet(args, "--as-of", options.asOf);
-  appendArgIfSet(args, "--country", options.country);
-
-  if (stepId !== "merge-queue") {
+  if (stepId === "fetch" || stepId === "ingest") {
+    appendArgIfSet(args, "--country", options.country);
     appendArgIfSet(args, "--source-id", options.sourceId);
   }
-
   return args;
 }
 
@@ -349,7 +347,10 @@ function run() {
 
       process.stdout.write(`[refresh-station-review] runId=${runIdBase}\n`);
       process.stdout.write(
-        `[refresh-station-review] scope country=${options.country || "ALL"} as-of=${options.asOf || "latest"} source-id=${options.sourceId || "ALL"}\n`,
+        `[refresh-station-review] import scope country=${options.country || "ALL"} as-of=${options.asOf || "latest"} source-id=${options.sourceId || "ALL"}\n`,
+      );
+      process.stdout.write(
+        `[refresh-station-review] rebuild scope global-stations=GLOBAL merge-queue=GLOBAL as-of=${options.asOf || "latest"}\n`,
       );
       process.stdout.write(
         `[refresh-station-review] selected steps: ${selectedSteps.join(" -> ")}\n`,

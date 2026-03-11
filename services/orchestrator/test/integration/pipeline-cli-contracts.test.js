@@ -100,3 +100,54 @@ test("refresh station review CLI validates selected steps", async () => {
     },
   );
 });
+
+test("refresh station review dry-run scopes fetch and ingest locally but rebuilds globally", async () => {
+  const orchestratorRoot = path.resolve(__dirname, "../..");
+  const repoRoot = path.resolve(orchestratorRoot, "../..");
+  const cliPath = path.join(
+    orchestratorRoot,
+    "src",
+    "cli",
+    "refresh-station-review.js",
+  );
+
+  const result = await execFileAsync(
+    process.execPath,
+    [
+      cliPath,
+      "--root",
+      repoRoot,
+      "--country",
+      "DE",
+      "--source-id",
+      "foo",
+      "--as-of",
+      "2026-03-10",
+      "--dry-run",
+    ],
+    {
+      cwd: repoRoot,
+    },
+  );
+
+  assert.match(
+    result.stdout,
+    /dry-run fetch: Fetch source datasets --as-of 2026-03-10 --country DE --source-id foo/,
+  );
+  assert.match(
+    result.stdout,
+    /dry-run ingest: Ingest NeTEx snapshots --as-of 2026-03-10 --country DE --source-id foo/,
+  );
+  assert.match(
+    result.stdout,
+    /dry-run global-stations: Build global stations --as-of 2026-03-10/,
+  );
+  assert.match(
+    result.stdout,
+    /dry-run merge-queue: Build global merge queue --as-of 2026-03-10/,
+  );
+  assert.doesNotMatch(
+    result.stdout,
+    /dry-run global-stations: .*--country|dry-run global-stations: .*--source-id|dry-run merge-queue: .*--country|dry-run merge-queue: .*--source-id/,
+  );
+});
