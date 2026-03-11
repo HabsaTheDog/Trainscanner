@@ -103,6 +103,44 @@ function resolveClusterCount(totalCount, clusters) {
   return clusters.length;
 }
 
+function applyWorkspaceResponseToClusterDetail(
+  previous,
+  response,
+  workspace,
+  extra = {},
+) {
+  if (!previous) {
+    return previous;
+  }
+  return {
+    ...previous,
+    workspace,
+    workspace_version: response.workspace_version,
+    has_workspace: true,
+    effective_status: response.effective_status,
+    ...extra,
+  };
+}
+
+function applyWorkspaceResponseToClusters(
+  clusters,
+  activeClusterId,
+  response,
+  extra = {},
+) {
+  return clusters.map((cluster) =>
+    cluster.cluster_id === activeClusterId
+      ? {
+          ...cluster,
+          effective_status: response.effective_status,
+          has_workspace: true,
+          workspace_version: response.workspace_version,
+          ...extra,
+        }
+      : cluster,
+  );
+}
+
 function resolveKindAccent(kind) {
   if (kind === "merge") {
     return "border-l-[3px] border-l-teal";
@@ -1179,27 +1217,10 @@ export function CurationPage() {
         lsRef.current = serializeWorkspace(r.workspace);
         setWorkspaceVersion(r.workspace_version || 0);
         setClusterDetail((p) =>
-          p
-            ? {
-                ...p,
-                workspace: r.workspace,
-                workspace_version: r.workspace_version,
-                has_workspace: true,
-                effective_status: r.effective_status,
-              }
-            : p,
+          applyWorkspaceResponseToClusterDetail(p, r, r.workspace),
         );
         setClusters((p) =>
-          p.map((c) =>
-            c.cluster_id === activeClusterId
-              ? {
-                  ...c,
-                  effective_status: r.effective_status,
-                  has_workspace: true,
-                  workspace_version: r.workspace_version,
-                }
-              : c,
-          ),
+          applyWorkspaceResponseToClusters(p, activeClusterId, r),
         );
         setSaveState("Saved");
       } catch (e) {
@@ -1328,15 +1349,9 @@ export function CurationPage() {
       setWorkspaceVersion(r.workspace_version || 0);
       setSaveState("Saved");
       setClusterDetail((p) =>
-        p
-          ? {
-              ...p,
-              workspace: w,
-              workspace_version: r.workspace_version,
-              has_workspace: Boolean(r.workspace),
-              effective_status: r.effective_status,
-            }
-          : p,
+        applyWorkspaceResponseToClusterDetail(p, r, w, {
+          has_workspace: Boolean(r.workspace),
+        }),
       );
       showNotice("Reverted.", "success");
     } catch (e) {
@@ -1353,29 +1368,16 @@ export function CurationPage() {
       setWorkspaceVersion(r.workspace_version || 0);
       setSaveState("Saved");
       setClusterDetail((p) =>
-        p
-          ? {
-              ...p,
-              workspace: w,
-              workspace_version: r.workspace_version,
-              has_workspace: r.workspace_version > 0,
-              effective_status: r.effective_status,
-              status: r.effective_status,
-            }
-          : p,
+        applyWorkspaceResponseToClusterDetail(p, r, w, {
+          has_workspace: r.workspace_version > 0,
+          status: r.effective_status,
+        }),
       );
       setClusters((p) =>
-        p.map((c) =>
-          c.cluster_id === activeClusterId
-            ? {
-                ...c,
-                effective_status: r.effective_status,
-                status: r.effective_status,
-                has_workspace: r.workspace_version > 0,
-                workspace_version: r.workspace_version,
-              }
-            : c,
-        ),
+        applyWorkspaceResponseToClusters(p, activeClusterId, r, {
+          status: r.effective_status,
+          has_workspace: r.workspace_version > 0,
+        }),
       );
       showNotice("Reopened.", "success");
     } catch (e) {

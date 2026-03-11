@@ -94,7 +94,7 @@ test("rebuildMergeQueue ensures evidence columns before running the script", asy
   const infos = [];
   const client = {
     async runSql(sql) {
-      calls.push(String(sql).trim().replace(/\s+/g, " "));
+      calls.push(String(sql).trim().replaceAll(/\s+/g, " "));
       return { rows: [] };
     },
     async runScript(_sql, _params, options) {

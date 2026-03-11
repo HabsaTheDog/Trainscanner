@@ -66,8 +66,8 @@ function mapClusterCandidate(candidate) {
     ...candidate,
     lat: candidate.latitude,
     lon: candidate.longitude,
-    provider_labels: labels.map((item) => String(item)),
-    aliases: aliases.map((item) => String(item)),
+    provider_labels: labels.map(String),
+    aliases: aliases.map(String),
     coord_status: candidate.coord_status || "missing_coordinates",
     service_context: {
       lines: Array.isArray(serviceContext.lines) ? serviceContext.lines : [],

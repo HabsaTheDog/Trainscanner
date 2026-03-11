@@ -14,6 +14,7 @@ import re
 import shutil
 import sys
 import zipfile
+from dataclasses import dataclass
 from typing import NoReturn
 
 TIER_CHOICES = ("all", "high-speed", "regional", "local")
@@ -57,6 +58,16 @@ HIGH_SPEED_TOKEN_RE = re.compile(
     re.IGNORECASE,
 )
 MOTIS_DATASET_TAG = "active-gtfs"
+
+
+@dataclass
+class MacroTripState:
+    trip_id: str
+    is_active: bool
+    first_stop_id: str = ""
+    last_stop_id: str = ""
+    departure_time: str = ""
+    stop_count: int = 0
 
 
 def fail(message: str, code: int = 1) -> "NoReturn":
@@ -1007,6 +1018,42 @@ def _append_macro_query(
     return True
 
 
+def _create_macro_trip_state(trip_id: str, active_trip_ids: set[str]) -> MacroTripState:
+    return MacroTripState(trip_id=trip_id, is_active=trip_id in active_trip_ids)
+
+
+def _append_macro_query_from_state(
+    queries: list[dict[str, object]],
+    seen_pairs: set[tuple[str, str]],
+    target_date: str,
+    state: MacroTripState,
+) -> bool:
+    return _append_macro_query(
+        queries,
+        seen_pairs,
+        state.trip_id,
+        target_date,
+        state.first_stop_id,
+        state.last_stop_id,
+        state.departure_time,
+        state.stop_count,
+        state.is_active,
+    )
+
+
+def _consume_macro_stop_time_row(state: MacroTripState, row: dict[str, str]) -> None:
+    stop_id = normalize_stop_id(row.get("stop_id"))
+    if not stop_id:
+        return
+    if state.stop_count == 0:
+        state.first_stop_id = stop_id
+        state.departure_time = _row_value(row, "departure_time") or _row_value(
+            row, "arrival_time"
+        )
+    state.last_stop_id = stop_id
+    state.stop_count += 1
+
+
 def _build_macro_queries_from_streams(
     zf: zipfile.ZipFile,
     calendar_rows: list[dict[str, str]],
@@ -1027,12 +1074,7 @@ def _build_macro_queries_from_streams(
 
     queries: list[dict[str, object]] = []
     seen_pairs: set[tuple[str, str]] = set()
-    current_trip = ""
-    current_is_active = False
-    first_stop_id = ""
-    last_stop_id = ""
-    departure_time = ""
-    stop_count = 0
+    current_state: MacroTripState | None = None
 
     with zf.open(STOP_TIMES_FILE) as fp:
         reader = csv.DictReader(io.TextIOWrapper(fp, encoding="utf-8-sig"))
@@ -1040,52 +1082,20 @@ def _build_macro_queries_from_streams(
             trip_id = _row_value(row, "trip_id")
             if not trip_id:
                 continue
-            if trip_id != current_trip:
-                if current_trip:
-                    appended = _append_macro_query(
-                        queries,
-                        seen_pairs,
-                        current_trip,
-                        target_date,
-                        first_stop_id,
-                        last_stop_id,
-                        departure_time,
-                        stop_count,
-                        current_is_active,
+            if current_state is None or trip_id != current_state.trip_id:
+                if current_state is not None:
+                    appended = _append_macro_query_from_state(
+                        queries, seen_pairs, target_date, current_state
                     )
                     if appended and len(queries) >= 2:
                         break
-                current_trip = trip_id
-                current_is_active = trip_id in active_trip_ids
-                first_stop_id = ""
-                last_stop_id = ""
-                departure_time = ""
-                stop_count = 0
-            if not current_is_active:
+                current_state = _create_macro_trip_state(trip_id, active_trip_ids)
+            if not current_state.is_active:
                 continue
-            stop_id = normalize_stop_id(row.get("stop_id"))
-            if not stop_id:
-                continue
-            if stop_count == 0:
-                first_stop_id = stop_id
-                departure_time = _row_value(row, "departure_time") or _row_value(
-                    row, "arrival_time"
-                )
-            last_stop_id = stop_id
-            stop_count += 1
+            _consume_macro_stop_time_row(current_state, row)
 
-    if len(queries) < 2 and current_trip:
-        _append_macro_query(
-            queries,
-            seen_pairs,
-            current_trip,
-            target_date,
-            first_stop_id,
-            last_stop_id,
-            departure_time,
-            stop_count,
-            current_is_active,
-        )
+    if len(queries) < 2 and current_state is not None:
+        _append_macro_query_from_state(queries, seen_pairs, target_date, current_state)
     if len(queries) < 2:
         fail("macro mode produced fewer than 2 active in-feed route queries")
     return queries[:2]

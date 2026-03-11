@@ -197,10 +197,8 @@ done
 if [[ ! "$PROGRESS_INTERVAL_SEC" =~ ^[0-9]+$ ]]; then
   fail "Invalid --progress-interval-sec '$PROGRESS_INTERVAL_SEC' (expected integer >= 0)"
 fi
-if [[ -n "$PARALLEL_GATHER_WORKERS" ]]; then
-  if [[ ! "$PARALLEL_GATHER_WORKERS" =~ ^[0-9]+$ ]]; then
-    fail "Invalid --parallel-gather-workers '$PARALLEL_GATHER_WORKERS' (expected integer >= 0)"
-  fi
+if [[ -n "$PARALLEL_GATHER_WORKERS" && ! "$PARALLEL_GATHER_WORKERS" =~ ^[0-9]+$ ]]; then
+  fail "Invalid --parallel-gather-workers '$PARALLEL_GATHER_WORKERS' (expected integer >= 0)"
 fi
 
 command -v python3 >/dev/null 2>&1 || fail "python3 is required"

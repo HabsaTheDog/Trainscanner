@@ -133,7 +133,7 @@ async function readOptionalFileStat(filePath) {
   try {
     return await fs.stat(filePath);
   } catch (err) {
-    if (err && err.code === "ENOENT") {
+    if (err?.code === "ENOENT") {
       return null;
     }
     throw err;

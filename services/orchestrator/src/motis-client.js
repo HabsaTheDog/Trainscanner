@@ -19,11 +19,27 @@ function uniqueList(values) {
   return out;
 }
 
+function extractTrailingBracketParts(value) {
+  const input = String(value || "").trim();
+  if (!input.endsWith("]")) {
+    return null;
+  }
+  const closeIndex = input.length - 1;
+  const openIndex = input.lastIndexOf("[", closeIndex);
+  if (openIndex === -1 || openIndex >= closeIndex) {
+    return null;
+  }
+  return {
+    prefix: input.slice(0, openIndex).trim(),
+    bracketValue: input.slice(openIndex + 1, closeIndex).trim(),
+  };
+}
+
 function parseStationInput(value) {
   const input = String(value || "").trim();
-  const bracketMatch = /\[(.+?)\]\s*$/.exec(input);
-  if (bracketMatch) {
-    return bracketMatch[1].trim();
+  const bracketParts = extractTrailingBracketParts(input);
+  if (bracketParts?.bracketValue) {
+    return bracketParts.bracketValue;
   }
   return input;
 }
@@ -31,10 +47,10 @@ function parseStationInput(value) {
 function stationCandidates(value) {
   const input = String(value || "").trim();
   const out = [];
-  const bracketMatch = /^(.*?)\s*\[(.+?)\]\s*$/.exec(input);
-  if (bracketMatch) {
-    const name = bracketMatch[1].trim();
-    const id = bracketMatch[2].trim();
+  const bracketParts = extractTrailingBracketParts(input);
+  if (bracketParts) {
+    const name = bracketParts.prefix;
+    const id = bracketParts.bracketValue;
     if (name) {
       out.push(name);
     }
@@ -61,8 +77,8 @@ function isEndpointNotFound(response) {
   if (response.status === 404) {
     return true;
   }
-  const text = responseText(response);
-  return /not found/i.test(text);
+  const text = responseText(response).toLowerCase();
+  return text.includes("not found");
 }
 
 async function requestJson(url, options = {}, timeoutMs = 10000) {

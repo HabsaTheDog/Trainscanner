@@ -494,15 +494,17 @@ resolve_generic_manual_redirect() {
   fi
 
   local best_url="" best_ts="0" fallback_url="" u abs_u name ts
+  local ts_12_pattern='[0-9]{12}'
+  local ts_8_pattern='[0-9]{8}'
   for u in "${raw_urls[@]}"; do
     abs_u="$(normalize_url "$endpoint" "$u")"
     [[ -n "$fallback_url" ]] || fallback_url="$abs_u"
     name="${abs_u##*/}"
     name="${name%%\?*}"
 
-    ts="$(printf '%s' "$name" | grep -oE '[0-9]{12}' | head -1 || true)"
+    ts="$(printf '%s' "$name" | grep -oE "$ts_12_pattern" | head -1 || true)"
     if [[ -z "$ts" ]]; then
-      ts="$(printf '%s' "$name" | grep -oE '[0-9]{8}' | head -1 || true)"
+      ts="$(printf '%s' "$name" | grep -oE "$ts_8_pattern" | head -1 || true)"
       [[ -n "$ts" ]] && ts="${ts}0000"
     fi
     [[ -n "$ts" ]] || continue

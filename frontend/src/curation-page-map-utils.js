@@ -101,10 +101,10 @@ export function buildMarkerOverlapLayout(map, items) {
         findProjectedStackGroup(projectedGroups, point) ||
         createProjectedGroup(point, item);
 
-      if (!projectedGroups.includes(existingGroup)) {
-        projectedGroups.push(existingGroup);
-      } else {
+      if (projectedGroups.includes(existingGroup)) {
         updateProjectedGroup(existingGroup, point, item);
+      } else {
+        projectedGroups.push(existingGroup);
       }
     }
   }

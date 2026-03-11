@@ -31,6 +31,14 @@ function defaultStateDir(cwd) {
   return path.join(normalizedCwd, "services", "orchestrator", "state");
 }
 
+function resolveMotisBaseUrl(env = process.env) {
+  const explicit = String(env.MOTIS_BASE_URL || "").trim();
+  if (explicit) {
+    return explicit.replace(/\/$/, "");
+  }
+  return "https://motis:8080";
+}
+
 function validateRuntimeConfig(config) {
   validateOrThrow(
     config,
@@ -125,10 +133,7 @@ function loadConfig() {
       process.env.MOTIS_ACTIVE_GTFS_PATH,
       path.join(dataDir, "motis", "active-gtfs.zip"),
     ),
-    motisBaseUrl: (process.env.MOTIS_BASE_URL || "http://motis:8080").replace(
-      /\/$/,
-      "",
-    ),
+    motisBaseUrl: resolveMotisBaseUrl(process.env),
     motisHealthPath: process.env.MOTIS_HEALTH_PATH || "/health",
     motisHealthAccept404: toBool(process.env.MOTIS_HEALTH_ACCEPT_404, true),
     motisRoutePath: process.env.MOTIS_ROUTE_PATH || "/api/v5/plan",
@@ -163,5 +168,6 @@ function loadConfig() {
 
 module.exports = {
   loadConfig,
+  resolveMotisBaseUrl,
   validateRuntimeConfig,
 };

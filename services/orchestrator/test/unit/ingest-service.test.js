@@ -3,6 +3,8 @@ const assert = require("node:assert/strict");
 
 const { createIngestService } = require("../../src/domains/ingest/service");
 
+const SAFE_REPO_ROOT = `${process.cwd()}/.test-fixtures/repo`;
+
 test("ingestNetex delegates to ingest script with explicit error code", async () => {
   const calls = [];
   const service = createIngestService({
@@ -13,7 +15,7 @@ test("ingestNetex delegates to ingest script with explicit error code", async ()
   });
 
   await service.ingestNetex({
-    rootDir: "/tmp/repo",
+    rootDir: SAFE_REPO_ROOT,
     runId: "run-ingest-1",
     args: ["--country", "DE", "--as-of", "2026-02-19"],
     jobOrchestrationEnabled: false,

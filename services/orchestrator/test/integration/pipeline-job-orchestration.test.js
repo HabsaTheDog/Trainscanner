@@ -3,6 +3,8 @@ const assert = require("node:assert/strict");
 
 const { createIngestService } = require("../../src/domains/ingest/service");
 
+const SAFE_REPO_ROOT = `${process.cwd()}/.test-fixtures/repo`;
+
 function cloneJob(job) {
   return job ? structuredClone(job) : null;
 }
@@ -114,12 +116,12 @@ test("ingest service job orchestration reuses completed job for same args", asyn
   });
 
   const first = await ingestService.ingestNetex({
-    rootDir: "/tmp/repo",
+    rootDir: SAFE_REPO_ROOT,
     args: ["--country", "DE", "--as-of", "2026-02-19"],
     jobOrchestrationEnabled: true,
   });
   const second = await ingestService.ingestNetex({
-    rootDir: "/tmp/repo",
+    rootDir: SAFE_REPO_ROOT,
     args: ["--country", "DE", "--as-of", "2026-02-19"],
     jobOrchestrationEnabled: true,
   });
@@ -151,7 +153,7 @@ test("ingest service enforces backpressure on concurrent start attempts", async 
   });
 
   const firstRunPromise = ingestService.ingestNetex({
-    rootDir: "/tmp/repo",
+    rootDir: SAFE_REPO_ROOT,
     args: ["--country", "DE", "--as-of", "2026-02-19"],
     jobOrchestrationEnabled: true,
   });
@@ -163,7 +165,7 @@ test("ingest service enforces backpressure on concurrent start attempts", async 
 
   await assert.rejects(
     ingestService.ingestNetex({
-      rootDir: "/tmp/repo",
+      rootDir: SAFE_REPO_ROOT,
       args: ["--country", "AT", "--as-of", "2026-02-19"],
       jobOrchestrationEnabled: true,
     }),

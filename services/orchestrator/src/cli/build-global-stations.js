@@ -2,7 +2,7 @@
 const { buildGlobalStations } = require("../domains/global/service");
 const { parsePipelineCliArgs, printCliError } = require("./pipeline-common");
 
-async function run() {
+async function runCli() {
   try {
     const parsed = parsePipelineCliArgs(process.argv.slice(2));
     await buildGlobalStations({
@@ -12,8 +12,11 @@ async function run() {
     });
   } catch (err) {
     printCliError("build-global-stations", err, "Build global stations failed");
-    process.exit(1);
+    return 1;
   }
+  return 0;
 }
 
-void run();
+void (async () => {
+  process.exitCode = await runCli();
+})();

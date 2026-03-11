@@ -13,6 +13,8 @@ const {
 } = require("../../src/server");
 const { mkTempDir } = require("../helpers/test-utils");
 
+const SAFE_FRONTEND_ROOT = `${process.cwd()}/.test-fixtures/frontend`;
+
 function createResponseRecorder() {
   return {
     statusCode: 0,
@@ -29,15 +31,15 @@ function createResponseRecorder() {
 }
 
 test("resolveStaticAssetPath keeps requests inside the frontend root", () => {
-  const resolved = resolveStaticAssetPath("/tmp/frontend", "/assets/app.js");
+  const resolved = resolveStaticAssetPath(SAFE_FRONTEND_ROOT, "/assets/app.js");
   assert.equal(resolved.forbidden, false);
   assert.equal(
     resolved.filePath,
-    path.resolve("/tmp/frontend", "assets/app.js"),
+    path.resolve(SAFE_FRONTEND_ROOT, "assets/app.js"),
   );
 
   const traversal = resolveStaticAssetPath(
-    "/tmp/frontend",
+    SAFE_FRONTEND_ROOT,
     "/../../secret.txt",
   );
   assert.equal(traversal.forbidden, true);

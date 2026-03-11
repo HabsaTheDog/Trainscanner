@@ -56,7 +56,8 @@ export async function runCli() {
 }
 
 if (require.main === module) {
-  void runCli().then((exitCode) => {
+  void (async () => {
+    const exitCode = await runCli();
     process.exitCode = exitCode;
-  });
+  })();
 }

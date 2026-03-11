@@ -421,8 +421,24 @@ export function uniqueStrings(values) {
   return out;
 }
 
+function randomHex(bytes = 4) {
+  const cryptoObject = globalThis.crypto;
+  if (cryptoObject?.getRandomValues) {
+    const values = new Uint8Array(bytes);
+    cryptoObject.getRandomValues(values);
+    return Array.from(values, (value) =>
+      value.toString(16).padStart(2, "0"),
+    ).join("");
+  }
+  const perfNow = globalThis.performance?.now?.() ?? 0;
+  return `${Date.now().toString(16)}${perfNow.toString(16).replace(".", "")}`.slice(
+    0,
+    bytes * 2,
+  );
+}
+
 export function createDraftId(prefix) {
-  return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+  return `${prefix}_${Date.now()}_${randomHex(3)}`;
 }
 
 export function createEmptyWorkspace() {
@@ -787,7 +803,7 @@ export function createMergeFromSelection(
   );
   if (rawRefs.length < 2) return next;
 
-  const orderedRawRefs = rawRefs.sort((left, right) => {
+  const orderedRawRefs = rawRefs.toSorted((left, right) => {
     const candidateLeft = candidateMap.get(parseRef(left).id) || {};
     const candidateRight = candidateMap.get(parseRef(right).id) || {};
     return compareCandidateRank(candidateLeft, candidateRight);

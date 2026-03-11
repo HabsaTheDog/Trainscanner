@@ -6,11 +6,13 @@ const {
   resolveConnectionConfig,
 } = require("../../src/data/postgis/client");
 
+const SAFE_REPO_ROOT = `${process.cwd()}/.test-fixtures/repo`;
+
 test("resolveConnectionConfig resolves defaults and explicit fields", () => {
   const passwordField = ["CANONICAL_DB", "PASSWORD"].join("_");
   const credential = "unit-test-secret";
   const cfg = resolveConnectionConfig({
-    rootDir: "/tmp/repo",
+    rootDir: SAFE_REPO_ROOT,
     env: {
       CANONICAL_DB_MODE: "direct",
       CANONICAL_DB_HOST: "db.local",
@@ -21,7 +23,7 @@ test("resolveConnectionConfig resolves defaults and explicit fields", () => {
     },
   });
 
-  assert.equal(cfg.rootDir, "/tmp/repo");
+  assert.equal(cfg.rootDir, SAFE_REPO_ROOT);
   assert.equal(cfg.mode, "direct");
   assert.equal(cfg.host, "db.local");
   assert.equal(cfg.port, "5433");
@@ -32,7 +34,7 @@ test("resolveConnectionConfig resolves defaults and explicit fields", () => {
 
 test("resolveConnectionConfig defaults host-side direct access to the docker-mapped port", () => {
   const cfg = resolveConnectionConfig({
-    rootDir: "/tmp/repo",
+    rootDir: SAFE_REPO_ROOT,
     env: {},
   });
 

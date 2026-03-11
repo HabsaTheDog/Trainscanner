@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { execFileSync, spawnSync } = require("node:child_process");
+const fs = require("node:fs");
 const path = require("node:path");
 const { Pool } = require("pg");
 
@@ -9,8 +10,14 @@ const {
   createGlobalStationsRepo,
 } = require("../../src/data/postgis/repositories/global-stations-repo");
 
+const BASH_PATH = fs.existsSync("/usr/bin/bash")
+  ? "/usr/bin/bash"
+  : "/bin/bash";
+const DOCKER_PATH = ["/usr/bin/docker", "/bin/docker"].find((filePath) =>
+  fs.existsSync(filePath),
+);
 const hasDocker =
-  spawnSync("bash", ["-lc", "command -v docker >/dev/null 2>&1"]).status === 0;
+  Boolean(DOCKER_PATH) && spawnSync(DOCKER_PATH, ["--version"]).status === 0;
 const shouldRun = hasDocker && process.env.ENABLE_POSTGIS_TESTS === "1";
 
 function createDbEnv(dbName) {
@@ -32,7 +39,7 @@ async function ensureBootstrapped(repoRoot, dbEnv) {
 
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
-      execFileSync("bash", [scriptPath, "--quiet", "--if-ready"], {
+      execFileSync(BASH_PATH, [scriptPath, "--quiet", "--if-ready"], {
         cwd: repoRoot,
         env: dbEnv,
         encoding: "utf8",

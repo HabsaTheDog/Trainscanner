@@ -70,13 +70,22 @@ function parseCoordinateToken(value) {
   return `${lat},${lon}`;
 }
 
-function parseBracketId(value) {
+function extractTrailingBracketValue(value) {
   const input = String(value || "").trim();
-  const match = /\[(.+?)\]\s*$/.exec(input);
-  if (!match) {
+  const closeIndex = input.lastIndexOf("]");
+  if (closeIndex !== input.length - 1) {
     return null;
   }
-  return match[1].trim() || null;
+  const openIndex = input.lastIndexOf("[", closeIndex);
+  if (openIndex === -1 || openIndex >= closeIndex) {
+    return null;
+  }
+  const bracketValue = input.slice(openIndex + 1, closeIndex).trim();
+  return bracketValue || null;
+}
+
+function parseBracketId(value) {
+  return extractTrailingBracketValue(value);
 }
 
 function toTaggedStopId(tag, stopId) {

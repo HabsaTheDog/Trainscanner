@@ -19,6 +19,22 @@ MAX_XML_ENTRIES_TO_SCAN = 120_000
 MAX_XML_ENTRY_BYTES = 1_000_000_000  # 1GB uncompressed guardrail
 
 
+@dataclass(frozen=True)
+class TripRowContext:
+    provider_trip_ref: str
+    trip_fact_id: str
+    route_id: str
+    route_short_name: str
+    route_long_name: str
+    trip_headsign: str
+    transport_mode: str
+    service_id: str
+    pattern_ref: str
+    line_ref: str
+    day_type_refs: list[str]
+    availability_refs: list[str]
+
+
 def local_name(tag: str) -> str:
     if "}" in tag:
         return tag.split("}", 1)[1]
@@ -65,7 +81,7 @@ def parse_int(value: str, default: int) -> int:
 
 
 def stable_id(prefix: str, value: str) -> str:
-    digest = hashlib.sha1(value.encode("utf-8")).hexdigest()[:24]
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:24]
     return f"{prefix}_{digest}"
 
 
@@ -332,11 +348,11 @@ def _resolve_service_id(
 ) -> tuple[list[str], list[str], str]:
     day_type_refs = parse_service_journey_day_types(journey_elem)
     availability_refs = parse_service_journey_availability_refs(journey_elem)
-    service_id = (
-        day_type_refs[0]
-        if day_type_refs
-        else (availability_refs[0] if availability_refs else "")
-    )
+    service_id = ""
+    if day_type_refs:
+        service_id = day_type_refs[0]
+    elif availability_refs:
+        service_id = availability_refs[0]
     return day_type_refs, availability_refs, service_id
 
 
@@ -363,33 +379,21 @@ def _write_trip_row(
     *,
     args: argparse.Namespace,
     entry: str,
-    journey_elem: etree._Element,
     trip_writer: csv.DictWriter,
     summary: Summary,
     seen_trip_ids: set[str],
-    provider_trip_ref: str,
-    trip_fact_id: str,
-    route_id: str,
-    route_short_name: str,
-    route_long_name: str,
-    trip_headsign: str,
-    transport_mode: str,
-    service_id: str,
-    pattern_ref: str,
-    line_ref: str,
-    day_type_refs: list[str],
-    availability_refs: list[str],
+    trip: TripRowContext,
 ) -> None:
-    if trip_fact_id in seen_trip_ids:
+    if trip.trip_fact_id in seen_trip_ids:
         summary.duplicate_trips_skipped += 1
         return
 
     payload = {
         "source_file": entry,
-        "service_journey_pattern_ref": pattern_ref,
-        "line_ref": line_ref,
-        "day_type_refs": day_type_refs,
-        "availability_condition_refs": availability_refs,
+        "service_journey_pattern_ref": trip.pattern_ref,
+        "line_ref": trip.line_ref,
+        "day_type_refs": trip.day_type_refs,
+        "availability_condition_refs": trip.availability_refs,
         "import_run_id": args.import_run_id,
         "provider_slug": args.provider_slug,
         "country": args.country,
@@ -398,16 +402,16 @@ def _write_trip_row(
     }
     trip_writer.writerow(
         {
-            "trip_fact_id": trip_fact_id,
+            "trip_fact_id": trip.trip_fact_id,
             "dataset_id": args.dataset_id,
             "source_id": args.source_id,
-            "provider_trip_ref": provider_trip_ref,
-            "service_id": service_id,
-            "route_id": route_id,
-            "route_short_name": route_short_name,
-            "route_long_name": route_long_name,
-            "trip_headsign": trip_headsign,
-            "transport_mode": transport_mode,
+            "provider_trip_ref": trip.provider_trip_ref,
+            "service_id": trip.service_id,
+            "route_id": trip.route_id,
+            "route_short_name": trip.route_short_name,
+            "route_long_name": trip.route_long_name,
+            "trip_headsign": trip.trip_headsign,
+            "transport_mode": trip.transport_mode,
             "trip_start_date": "",
             "trip_end_date": "",
             "raw_payload": json.dumps(
@@ -415,7 +419,7 @@ def _write_trip_row(
             ),
         }
     )
-    seen_trip_ids.add(trip_fact_id)
+    seen_trip_ids.add(trip.trip_fact_id)
     summary.trips_written += 1
 
 
@@ -568,22 +572,23 @@ def append_trip_rows(
     _write_trip_row(
         args=args,
         entry=entry,
-        journey_elem=journey_elem,
         trip_writer=trip_writer,
         summary=summary,
         seen_trip_ids=seen_trip_ids,
-        provider_trip_ref=provider_trip_ref,
-        trip_fact_id=trip_fact_id,
-        route_id=route_id,
-        route_short_name=route_short_name,
-        route_long_name=route_long_name,
-        trip_headsign=trip_headsign,
-        transport_mode=transport_mode,
-        service_id=service_id,
-        pattern_ref=pattern_ref,
-        line_ref=line_ref,
-        day_type_refs=day_type_refs,
-        availability_refs=availability_refs,
+        trip=TripRowContext(
+            provider_trip_ref=provider_trip_ref,
+            trip_fact_id=trip_fact_id,
+            route_id=route_id,
+            route_short_name=route_short_name,
+            route_long_name=route_long_name,
+            trip_headsign=trip_headsign,
+            transport_mode=transport_mode,
+            service_id=service_id,
+            pattern_ref=pattern_ref,
+            line_ref=line_ref,
+            day_type_refs=day_type_refs,
+            availability_refs=availability_refs,
+        ),
     )
 
     raw_stop_times = _build_pattern_stop_times(

@@ -5,8 +5,29 @@ const path = require("node:path");
 const http = require("node:http");
 const { spawn } = require("node:child_process");
 
+function resolveExecutablePath(candidates) {
+  for (const candidate of candidates) {
+    if (fsSync.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  throw new Error(`Missing executable; tried: ${candidates.join(", ")}`);
+}
+
+const PRIVATE_TEMP_ROOT = path.join(
+  os.homedir(),
+  ".cache",
+  "trainscanner-tests",
+);
+const PYTHON3_PATH = resolveExecutablePath([
+  "/usr/bin/python3",
+  "/bin/python3",
+]);
+
 async function mkTempDir(prefix = "trainscanner-test-") {
-  return fs.mkdtemp(path.join(os.tmpdir(), prefix));
+  await fs.mkdir(PRIVATE_TEMP_ROOT, { recursive: true, mode: 0o700 });
+  await fs.chmod(PRIVATE_TEMP_ROOT, 0o700);
+  return fs.mkdtemp(path.join(PRIVATE_TEMP_ROOT, prefix));
 }
 
 async function waitFor(checkFn, options = {}) {
@@ -158,7 +179,7 @@ with zipfile.ZipFile(zip_path, 'w') as zf:
     zf.writestr(name, out.getvalue())
 `;
   await new Promise((resolve, reject) => {
-    const proc = spawn("python3", ["-c", script, zipPath], {
+    const proc = spawn(PYTHON3_PATH, ["-c", script, zipPath], {
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stderr = "";
@@ -179,6 +200,7 @@ module.exports = {
   createGtfsZip,
   httpJson,
   mkTempDir,
+  resolveExecutablePath,
   startHttpServer,
   startNodeProcess,
   stopHttpServer,

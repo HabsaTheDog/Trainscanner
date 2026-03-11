@@ -3,6 +3,8 @@ const assert = require("node:assert/strict");
 
 const { createGlobalService } = require("../../src/domains/global/service");
 
+const SAFE_REPO_ROOT = `${process.cwd()}/.test-fixtures/repo`;
+
 function captureStdout() {
   const writes = [];
   const originalStdoutWrite = process.stdout.write;
@@ -58,7 +60,7 @@ test("buildGlobalStations closes the db client and prints summary JSON", async (
     });
 
     await service.buildGlobalStations({
-      rootDir: "/tmp/repo",
+      rootDir: SAFE_REPO_ROOT,
       args: [
         "--country",
         "DE",
@@ -115,7 +117,7 @@ test("buildGlobalMergeQueue prints phase and info notices and closes the client"
     });
 
     await service.buildGlobalMergeQueue({
-      rootDir: "/tmp/repo",
+      rootDir: SAFE_REPO_ROOT,
       args: ["--country", "AT", "--as-of", "2026-03-10"],
       jobOrchestrationEnabled: false,
     });
@@ -188,7 +190,7 @@ test("job-orchestrated global build closes both orchestration and execution clie
     });
 
     await service.buildGlobalMergeQueue({
-      rootDir: "/tmp/repo",
+      rootDir: SAFE_REPO_ROOT,
       args: [],
       jobOrchestrationEnabled: true,
     });
@@ -232,7 +234,7 @@ test("all-scope merge queue batches by country and aggregates summaries", async 
     });
 
     await service.buildGlobalMergeQueue({
-      rootDir: "/tmp/repo",
+      rootDir: SAFE_REPO_ROOT,
       args: [],
       jobOrchestrationEnabled: false,
     });

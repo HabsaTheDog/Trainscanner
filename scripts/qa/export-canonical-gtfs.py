@@ -23,17 +23,23 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT_DIR = SCRIPT_DIR.parent.parent
 PSQL_ON_ERROR_STOP = "ON_ERROR_STOP=1"
 TRANSFERS_FILE = "transfers.txt"
+AGENCY_FILE = "agency.txt"
+STOPS_FILE = "stops.txt"
+ROUTES_FILE = "routes.txt"
+TRIPS_FILE = "trips.txt"
+STOP_TIMES_FILE = "stop_times.txt"
+CALENDAR_FILE = "calendar.txt"
 VALID_TIERS = {"high-speed", "regional", "local", "all"}
 VALID_QUERY_MODES = {"legacy", "optimized"}
 DEFAULT_PROGRESS_INTERVAL_SEC = 20
 PARALLEL_SHM_ERROR_TOKEN = "could not resize shared memory segment"
 GTFS_CORE_FILES = [
-    "agency.txt",
-    "stops.txt",
-    "routes.txt",
-    "trips.txt",
-    "stop_times.txt",
-    "calendar.txt",
+    AGENCY_FILE,
+    STOPS_FILE,
+    ROUTES_FILE,
+    TRIPS_FILE,
+    STOP_TIMES_FILE,
+    CALENDAR_FILE,
 ]
 
 
@@ -1030,12 +1036,12 @@ def export_from_db_batched(options: ExportBatchOptions):
 
     with tempfile.TemporaryDirectory(prefix="export-gtfs-batch-") as tmp_dir_raw:
         tmp_dir = Path(tmp_dir_raw)
-        agency_path = tmp_dir / "agency.txt"
-        stops_path = tmp_dir / "stops.txt"
-        routes_path = tmp_dir / "routes.txt"
-        trips_path = tmp_dir / "trips.txt"
-        stop_times_path = tmp_dir / "stop_times.txt"
-        calendar_path = tmp_dir / "calendar.txt"
+        agency_path = tmp_dir / AGENCY_FILE
+        stops_path = tmp_dir / STOPS_FILE
+        routes_path = tmp_dir / ROUTES_FILE
+        trips_path = tmp_dir / TRIPS_FILE
+        stop_times_path = tmp_dir / STOP_TIMES_FILE
+        calendar_path = tmp_dir / CALENDAR_FILE
         transfers_path = tmp_dir / TRANSFERS_FILE
         sqlite_path = tmp_dir / "gtfs-build.sqlite3"
 
@@ -1298,12 +1304,12 @@ def export_from_db_batched(options: ExportBatchOptions):
             profiling["csvWriteMs"] += (time.perf_counter() - calendar_started) * 1000.0
 
         file_paths = {
-            "agency.txt": agency_path,
-            "stops.txt": stops_path,
-            "routes.txt": routes_path,
-            "trips.txt": trips_path,
-            "stop_times.txt": stop_times_path,
-            "calendar.txt": calendar_path,
+            AGENCY_FILE: agency_path,
+            STOPS_FILE: stops_path,
+            ROUTES_FILE: routes_path,
+            TRIPS_FILE: trips_path,
+            STOP_TIMES_FILE: stop_times_path,
+            CALENDAR_FILE: calendar_path,
         }
         if transfers_rows:
             file_paths[TRANSFERS_FILE] = transfers_path
@@ -1490,47 +1496,18 @@ def _build_calendar_rows(service_ids: set[str]) -> list[list[str]]:
     ]
 
 
-def build_tables(
-    profile: str, requested_tier: str, stops, trips, transfers, agency_url: str
-):
-    stop_map = {}
-    for row in stops:
-        stop_id = str(row.get("stop_id") or "").strip()
-        if not stop_id:
-            continue
-        stop_map[stop_id] = row
-
-    agency_rows = []
-    countries = sorted(
-        {
-            str(row.get("country") or "").strip()
-            for row in stops
-            if str(row.get("country") or "").strip()
-        }
-    )
-    if not countries:
-        countries = ["EU"]
-    for country in countries:
-        tz = "Europe/Berlin"
-        if country == "AT":
-            tz = "Europe/Vienna"
-        elif country == "CH":
-            tz = "Europe/Zurich"
-        agency_rows.append(
-            [
-                f"agency_{country.lower()}",
-                f"Pan-European {country} Transit",
-                agency_url,
-                tz,
-                "en",
-            ]
-        )
-    agency_rows.sort(key=lambda r: r[0])
-
+def _collect_trip_table_rows(
+    *,
+    profile: str,
+    requested_tier: str,
+    stop_map,
+    trips,
+    countries: list[str],
+) -> tuple[dict[str, list[str]], dict[str, list[str]], list[list[str]], set[str]]:
     route_defs = {}
     trip_defs = {}
-    stop_time_rows = []
-    service_ids = set()
+    stop_time_rows: list[list[str]] = []
+    service_ids: set[str] = set()
 
     grouped = defaultdict(list)
     for row in trips:
@@ -1564,6 +1541,106 @@ def build_tables(
             departure = ensure_time(stop.get("departure_time") or "", fallback)
             stop_time_rows.append([trip_id, arrival, departure, stop_id, str(idx)])
 
+    return route_defs, trip_defs, stop_time_rows, service_ids
+
+
+def _build_table_files(
+    agency_rows,
+    stop_rows,
+    route_rows,
+    trip_rows,
+    stop_time_rows,
+    calendar_rows,
+    transfer_rows,
+):
+    files = {
+        AGENCY_FILE: csv_text(
+            [
+                "agency_id",
+                "agency_name",
+                "agency_url",
+                "agency_timezone",
+                "agency_lang",
+            ],
+            agency_rows,
+        ),
+        STOPS_FILE: csv_text(
+            [
+                "stop_id",
+                "stop_name",
+                "stop_lat",
+                "stop_lon",
+                "location_type",
+                "parent_station",
+            ],
+            stop_rows,
+        ),
+        ROUTES_FILE: csv_text(
+            [
+                "route_id",
+                "agency_id",
+                "route_short_name",
+                "route_long_name",
+                "route_type",
+                "route_desc",
+            ],
+            route_rows,
+        ),
+        TRIPS_FILE: csv_text(
+            ["route_id", "service_id", "trip_id", "trip_headsign"],
+            trip_rows,
+        ),
+        STOP_TIMES_FILE: csv_text(
+            ["trip_id", "arrival_time", "departure_time", "stop_id", "stop_sequence"],
+            stop_time_rows,
+        ),
+        CALENDAR_FILE: csv_text(
+            [
+                "service_id",
+                "monday",
+                "tuesday",
+                "wednesday",
+                "thursday",
+                "friday",
+                "saturday",
+                "sunday",
+                "start_date",
+                "end_date",
+            ],
+            calendar_rows,
+        ),
+    }
+
+    if transfer_rows:
+        transfer_rows.sort(key=lambda row: (row[0], row[1], int(row[3])))
+        files[TRANSFERS_FILE] = csv_text(
+            ["from_stop_id", "to_stop_id", "transfer_type", "min_transfer_time"],
+            transfer_rows,
+        )
+
+    return files
+
+
+def build_tables(
+    profile: str, requested_tier: str, stops, trips, transfers, agency_url: str
+):
+    stop_map = {}
+    for row in stops:
+        stop_id = str(row.get("stop_id") or "").strip()
+        if not stop_id:
+            continue
+        stop_map[stop_id] = row
+
+    countries = _resolve_scope_countries(stops)
+    agency_rows = _build_agency_rows(countries, agency_url)
+    route_defs, trip_defs, stop_time_rows, service_ids = _collect_trip_table_rows(
+        profile=profile,
+        requested_tier=requested_tier,
+        stop_map=stop_map,
+        trips=trips,
+        countries=countries,
+    )
+
     if not stop_time_rows:
         if len(stop_map) < 2:
             fail("export scope produced fewer than 2 stops and no timetable rows")
@@ -1585,71 +1662,15 @@ def build_tables(
     trip_rows = sorted(trip_defs.values(), key=lambda r: r[2])
     stop_time_rows.sort(key=lambda r: (r[0], int(r[4]), r[3]))
     calendar_rows = _build_calendar_rows(service_ids)
-
-    files = {
-        "agency.txt": csv_text(
-            [
-                "agency_id",
-                "agency_name",
-                "agency_url",
-                "agency_timezone",
-                "agency_lang",
-            ],
-            agency_rows,
-        ),
-        "stops.txt": csv_text(
-            [
-                "stop_id",
-                "stop_name",
-                "stop_lat",
-                "stop_lon",
-                "location_type",
-                "parent_station",
-            ],
-            stop_rows,
-        ),
-        "routes.txt": csv_text(
-            [
-                "route_id",
-                "agency_id",
-                "route_short_name",
-                "route_long_name",
-                "route_type",
-                "route_desc",
-            ],
-            route_rows,
-        ),
-        "trips.txt": csv_text(
-            ["route_id", "service_id", "trip_id", "trip_headsign"],
-            trip_rows,
-        ),
-        "stop_times.txt": csv_text(
-            ["trip_id", "arrival_time", "departure_time", "stop_id", "stop_sequence"],
-            stop_time_rows,
-        ),
-        "calendar.txt": csv_text(
-            [
-                "service_id",
-                "monday",
-                "tuesday",
-                "wednesday",
-                "thursday",
-                "friday",
-                "saturday",
-                "sunday",
-                "start_date",
-                "end_date",
-            ],
-            calendar_rows,
-        ),
-    }
-
-    if transfer_rows:
-        transfer_rows.sort(key=lambda r: (r[0], r[1], int(r[3])))
-        files[TRANSFERS_FILE] = csv_text(
-            ["from_stop_id", "to_stop_id", "transfer_type", "min_transfer_time"],
-            transfer_rows,
-        )
+    files = _build_table_files(
+        agency_rows,
+        stop_rows,
+        route_rows,
+        trip_rows,
+        stop_time_rows,
+        calendar_rows,
+        transfer_rows,
+    )
 
     summary = {
         "profile": profile,
@@ -1676,14 +1697,7 @@ def write_deterministic_zip(files, output_zip: str, as_of: str):
     except Exception:
         timestamp = (2024, 1, 1, 0, 0, 0)
 
-    ordered_names = [
-        "agency.txt",
-        "stops.txt",
-        "routes.txt",
-        "trips.txt",
-        "stop_times.txt",
-        "calendar.txt",
-    ]
+    ordered_names = list(GTFS_CORE_FILES)
     if TRANSFERS_FILE in files:
         ordered_names.append(TRANSFERS_FILE)
 

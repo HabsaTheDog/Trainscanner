@@ -52,7 +52,7 @@ function uniqueStrings(values) {
 
 function stableHash(prefix, parts) {
   const hash = crypto
-    .createHash("md5")
+    .createHash("sha256")
     .update((Array.isArray(parts) ? parts : [parts]).join("|"))
     .digest("hex")
     .slice(0, 24);
@@ -1079,6 +1079,139 @@ async function materializeMergeEntity(
   return targetStationId;
 }
 
+async function ensureGroupInternalNodeStopPoints(
+  client,
+  clusterId,
+  group,
+  workspace,
+  targetStationId,
+  aggregate,
+) {
+  for (const node of group.internal_nodes || []) {
+    const nodeStationIds = uniqueStrings(
+      node.member_global_station_ids?.length > 0
+        ? node.member_global_station_ids
+        : expandRefMembers(node.source_ref, workspace),
+    );
+    await moveStopPoints(client, nodeStationIds, targetStationId, {
+      generated_by: "qa_workspace_resolve",
+      cluster_id: clusterId,
+      group_entity_id: group.entity_id,
+      internal_node_id: node.node_id,
+      internal_node_label: node.label,
+    });
+
+    const stopPointIds = await getNodeStopPointIds(
+      client,
+      targetStationId,
+      group.entity_id,
+      node.node_id,
+    );
+    if (stopPointIds.length > 0) {
+      continue;
+    }
+
+    await createOrUpdateSyntheticStopPoint(client, {
+      stopPointId: stableHash("gsp_grp_", [
+        clusterId,
+        group.entity_id,
+        node.node_id,
+      ]),
+      targetStationId,
+      displayName: node.label || group.display_name || targetStationId,
+      country: aggregate.country,
+      lat: Number.isFinite(node.lat) ? node.lat : aggregate.lat,
+      lon: Number.isFinite(node.lon) ? node.lon : aggregate.lon,
+      metadata: {
+        generated_by: "qa_workspace_resolve",
+        cluster_id: clusterId,
+        group_entity_id: group.entity_id,
+        internal_node_id: node.node_id,
+        internal_node_label: node.label,
+        synthetic: true,
+        member_station_ids: nodeStationIds,
+      },
+    });
+  }
+}
+
+async function upsertGroupTransferPair(
+  client,
+  clusterId,
+  groupEntityId,
+  transfer,
+  fromStopPointId,
+  toStopPointId,
+) {
+  const metadata = {
+    generated_by: "qa_workspace_resolve",
+    cluster_id: clusterId,
+    composite_entity_id: groupEntityId,
+    composite_type: "group",
+    from_node_id: transfer.from_node_id,
+    to_node_id: transfer.to_node_id,
+  };
+  await upsertTransferEdge(client, {
+    fromStopPointId,
+    toStopPointId,
+    minWalkSeconds: transfer.min_walk_seconds,
+    metadata,
+    bidirectional: transfer.bidirectional,
+  });
+  if (!transfer.bidirectional) {
+    return;
+  }
+  await upsertTransferEdge(client, {
+    fromStopPointId: toStopPointId,
+    toStopPointId: fromStopPointId,
+    minWalkSeconds: transfer.min_walk_seconds,
+    metadata: {
+      ...metadata,
+      from_node_id: transfer.to_node_id,
+      to_node_id: transfer.from_node_id,
+    },
+    bidirectional: true,
+  });
+}
+
+async function applyGroupTransferMatrix(
+  client,
+  clusterId,
+  group,
+  targetStationId,
+) {
+  for (const transfer of group.transfer_matrix || []) {
+    const fromStopPointIds = await getNodeStopPointIds(
+      client,
+      targetStationId,
+      group.entity_id,
+      transfer.from_node_id,
+    );
+    const toStopPointIds = await getNodeStopPointIds(
+      client,
+      targetStationId,
+      group.entity_id,
+      transfer.to_node_id,
+    );
+
+    for (const fromStopPointId of fromStopPointIds) {
+      for (const toStopPointId of toStopPointIds) {
+        if (fromStopPointId === toStopPointId) {
+          continue;
+        }
+        await upsertGroupTransferPair(
+          client,
+          clusterId,
+          group.entity_id,
+          transfer,
+          fromStopPointId,
+          toStopPointId,
+        );
+      }
+    }
+  }
+}
+
 async function materializeGroupEntity(
   client,
   clusterId,
@@ -1117,53 +1250,14 @@ async function materializeGroupEntity(
   );
 
   await moveProviderMappings(client, memberStationIds, targetStationId);
-
-  for (const node of group.internal_nodes || []) {
-    const nodeStationIds = uniqueStrings(
-      node.member_global_station_ids?.length > 0
-        ? node.member_global_station_ids
-        : expandRefMembers(node.source_ref, workspace),
-    );
-    await moveStopPoints(client, nodeStationIds, targetStationId, {
-      generated_by: "qa_workspace_resolve",
-      cluster_id: clusterId,
-      group_entity_id: group.entity_id,
-      internal_node_id: node.node_id,
-      internal_node_label: node.label,
-    });
-
-    let stopPointIds = await getNodeStopPointIds(
-      client,
-      targetStationId,
-      group.entity_id,
-      node.node_id,
-    );
-    if (stopPointIds.length === 0) {
-      const syntheticId = stableHash("gsp_grp_", [
-        clusterId,
-        group.entity_id,
-        node.node_id,
-      ]);
-      await createOrUpdateSyntheticStopPoint(client, {
-        stopPointId: syntheticId,
-        targetStationId,
-        displayName: node.label || group.display_name || targetStationId,
-        country: aggregate.country,
-        lat: Number.isFinite(node.lat) ? node.lat : aggregate.lat,
-        lon: Number.isFinite(node.lon) ? node.lon : aggregate.lon,
-        metadata: {
-          generated_by: "qa_workspace_resolve",
-          cluster_id: clusterId,
-          group_entity_id: group.entity_id,
-          internal_node_id: node.node_id,
-          internal_node_label: node.label,
-          synthetic: true,
-          member_station_ids: nodeStationIds,
-        },
-      });
-      stopPointIds = [syntheticId];
-    }
-  }
+  await ensureGroupInternalNodeStopPoints(
+    client,
+    clusterId,
+    group,
+    workspace,
+    targetStationId,
+    aggregate,
+  );
 
   await deactivateSourceStations(
     client,
@@ -1174,57 +1268,7 @@ async function materializeGroupEntity(
   );
   await updateTargetStation(client, targetStationId, aggregate);
   await deleteGeneratedTransferEdgesForStation(client, targetStationId);
-
-  for (const transfer of group.transfer_matrix || []) {
-    const fromStopPointIds = await getNodeStopPointIds(
-      client,
-      targetStationId,
-      group.entity_id,
-      transfer.from_node_id,
-    );
-    const toStopPointIds = await getNodeStopPointIds(
-      client,
-      targetStationId,
-      group.entity_id,
-      transfer.to_node_id,
-    );
-
-    for (const fromStopPointId of fromStopPointIds) {
-      for (const toStopPointId of toStopPointIds) {
-        if (fromStopPointId === toStopPointId) {
-          continue;
-        }
-        const metadata = {
-          generated_by: "qa_workspace_resolve",
-          cluster_id: clusterId,
-          composite_entity_id: group.entity_id,
-          composite_type: "group",
-          from_node_id: transfer.from_node_id,
-          to_node_id: transfer.to_node_id,
-        };
-        await upsertTransferEdge(client, {
-          fromStopPointId,
-          toStopPointId,
-          minWalkSeconds: transfer.min_walk_seconds,
-          metadata,
-          bidirectional: transfer.bidirectional,
-        });
-        if (transfer.bidirectional) {
-          await upsertTransferEdge(client, {
-            fromStopPointId: toStopPointId,
-            toStopPointId: fromStopPointId,
-            minWalkSeconds: transfer.min_walk_seconds,
-            metadata: {
-              ...metadata,
-              from_node_id: transfer.to_node_id,
-              to_node_id: transfer.from_node_id,
-            },
-            bidirectional: true,
-          });
-        }
-      }
-    }
-  }
+  await applyGroupTransferMatrix(client, clusterId, group, targetStationId);
 
   return targetStationId;
 }

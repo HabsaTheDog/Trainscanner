@@ -67,6 +67,21 @@ BEGIN
   END IF;
 END $$;
 
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_type WHERE typname = 'pipeline_job_status'
+  ) THEN
+    CREATE TYPE pipeline_job_status AS ENUM (
+      'queued',
+      'running',
+      'retry_wait',
+      'succeeded',
+      'failed'
+    );
+  END IF;
+END $$;
+
 CREATE OR REPLACE FUNCTION normalize_station_name(input_name text)
 RETURNS text
 LANGUAGE sql
@@ -121,7 +136,7 @@ CREATE TABLE IF NOT EXISTS pipeline_jobs (
   job_id uuid PRIMARY KEY,
   job_type text NOT NULL,
   idempotency_key text NOT NULL,
-  status text NOT NULL CHECK (status IN ('queued', 'running', 'retry_wait', 'succeeded', 'failed')),
+  status pipeline_job_status NOT NULL,
   attempt integer NOT NULL DEFAULT 0 CHECK (attempt >= 0),
   run_context jsonb NOT NULL DEFAULT jsonb_build_object(),
   checkpoint jsonb NOT NULL DEFAULT jsonb_build_object(),

@@ -1,7 +1,7 @@
 export function formatLabel(value) {
   return String(value || "")
     .replaceAll("_", " ")
-    .replace(/\b\w/g, (char) => char.toUpperCase());
+    .replaceAll(/\b\w/g, (char) => char.toUpperCase());
 }
 
 const EVIDENCE_LABELS = {

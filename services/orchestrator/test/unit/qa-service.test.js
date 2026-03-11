@@ -3,6 +3,8 @@ const assert = require("node:assert/strict");
 
 const { createQaService } = require("../../src/domains/qa/service");
 
+const SAFE_REPO_ROOT = `${process.cwd()}/.test-fixtures/repo`;
+
 test("reportReviewQueue runs repository-backed report generator", async () => {
   const ensureReadyCalls = [];
   const queryOneCalls = [];
@@ -43,7 +45,7 @@ test("reportReviewQueue runs repository-backed report generator", async () => {
     });
 
     await service.reportReviewQueue({
-      rootDir: "/tmp/repo",
+      rootDir: SAFE_REPO_ROOT,
       runId: "run-review-report-1",
       args: ["--country", "DE", "--limit", "10"],
       jobOrchestrationEnabled: false,

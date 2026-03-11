@@ -38,8 +38,12 @@
   --color-orange: #f97316;
   --color-orange-dim: rgba(249, 115, 22, 0.12);
 
-  --font-display: "JetBrains Mono", ui-monospace, monospace;
-  --font-body: "DM Sans", system-ui, sans-serif;
+  --font-display:
+    "SFMono-Regular", "Cascadia Code", "Liberation Mono", ui-monospace,
+    monospace;
+  --font-body:
+    "Segoe UI Variable", "Avenir Next", "Helvetica Neue", ui-sans-serif,
+    system-ui, sans-serif;
 }
 
 /* ── Global Resets ── */

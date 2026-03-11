@@ -10,7 +10,7 @@ test("ensureMergeClusterEvidenceColumns adds compatibility columns", async () =>
   const statements = [];
   const client = {
     async runSql(sql) {
-      statements.push(String(sql).trim().replace(/\s+/g, " "));
+      statements.push(String(sql).trim().replaceAll(/\s+/g, " "));
       return { rows: [] };
     },
   };

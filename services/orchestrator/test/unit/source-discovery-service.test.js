@@ -5,6 +5,8 @@ const {
   createSourceDiscoveryService,
 } = require("../../src/domains/source-discovery/service");
 
+const SAFE_REPO_ROOT = `${process.cwd()}/.test-fixtures/repo`;
+
 test("fetchSources delegates to fetch script with explicit error code", async () => {
   const calls = [];
   const service = createSourceDiscoveryService({
@@ -15,7 +17,7 @@ test("fetchSources delegates to fetch script with explicit error code", async ()
   });
 
   await service.fetchSources({
-    rootDir: "/tmp/repo",
+    rootDir: SAFE_REPO_ROOT,
     runId: "run-fetch-1",
     args: ["--as-of", "2026-02-19"],
   });
@@ -37,7 +39,7 @@ test("verifySources delegates to verify script with explicit error code", async 
   });
 
   await service.verifySources({
-    rootDir: "/tmp/repo",
+    rootDir: SAFE_REPO_ROOT,
     runId: "run-verify-1",
     args: ["--country", "DE"],
   });
@@ -72,7 +74,7 @@ test("fetchSources uses circuit breaker execution wrapper", async () => {
   });
 
   await service.fetchSources({
-    rootDir: "/tmp/repo",
+    rootDir: SAFE_REPO_ROOT,
     runId: "run-fetch-2",
     args: ["--country", "CH"],
   });

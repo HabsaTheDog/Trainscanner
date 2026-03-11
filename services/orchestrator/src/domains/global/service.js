@@ -198,6 +198,17 @@ function parsePositiveInt(value, fallback) {
   return parseIntegerEnv(value, fallback, { min: 1 });
 }
 
+function createMergeQueueCallbacks(writeMergeQueueNotice, scopeCountry) {
+  return {
+    onPhase(phase) {
+      writeMergeQueueNotice(`phase=${phase}`, scopeCountry);
+    },
+    onInfo(info) {
+      writeMergeQueueNotice(`${info.key}=${info.value}`, scopeCountry);
+    },
+  };
+}
+
 async function runWithConcurrency(items, limit, worker) {
   const results = new Array(items.length);
   let cursor = 0;
@@ -374,17 +385,13 @@ function createGlobalService(deps = {}) {
             try {
               await client.ensureReady();
               const queueRepo = createQueueRepo(client);
-              const summary = await queueRepo.rebuildMergeQueue(parsed.scope, {
-                onPhase(phase) {
-                  writeMergeQueueNotice(`phase=${phase}`, parsed.scope.country);
-                },
-                onInfo(info) {
-                  writeMergeQueueNotice(
-                    `${info.key}=${info.value}`,
-                    parsed.scope.country,
-                  );
-                },
-              });
+              const summary = await queueRepo.rebuildMergeQueue(
+                parsed.scope,
+                createMergeQueueCallbacks(
+                  writeMergeQueueNotice,
+                  parsed.scope.country,
+                ),
+              );
               process.stdout.write(`${JSON.stringify(summary)}\n`);
               return {
                 ok: true,
@@ -458,17 +465,7 @@ function createGlobalService(deps = {}) {
                     country,
                     asOf: parsed.scope.asOf,
                   },
-                  {
-                    onPhase(phase) {
-                      writeMergeQueueNotice(`phase=${phase}`, country);
-                    },
-                    onInfo(info) {
-                      writeMergeQueueNotice(
-                        `${info.key}=${info.value}`,
-                        country,
-                      );
-                    },
-                  },
+                  createMergeQueueCallbacks(writeMergeQueueNotice, country),
                 );
               } finally {
                 await closeClient(client);

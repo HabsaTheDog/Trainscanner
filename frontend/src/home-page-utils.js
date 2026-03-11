@@ -1,4 +1,15 @@
-const BRACKET_ID_PATTERN = /\[(.+?)\]\s*$/;
+function extractTrailingBracketValue(value) {
+  const input = String(value || "").trim();
+  const closeIndex = input.lastIndexOf("]");
+  if (closeIndex !== input.length - 1) {
+    return "";
+  }
+  const openIndex = input.lastIndexOf("[", closeIndex);
+  if (openIndex === -1 || openIndex >= closeIndex) {
+    return "";
+  }
+  return input.slice(openIndex + 1, closeIndex).trim();
+}
 
 export function pretty(payload) {
   return JSON.stringify(payload, null, 2);
@@ -40,9 +51,7 @@ export function durationToText(seconds) {
 }
 
 export function parseBracketId(value) {
-  const input = String(value || "").trim();
-  const match = BRACKET_ID_PATTERN.exec(input);
-  return match ? match[1].trim() : "";
+  return extractTrailingBracketValue(value);
 }
 
 async function readJsonPayload(response) {

@@ -19,4 +19,11 @@ async function main() {
   await client.end();
 }
 
-main().catch(console.error);
+void (async () => {
+  try {
+    await main();
+  } catch (error) {
+    console.error(error);
+    process.exitCode = 1;
+  }
+})();
