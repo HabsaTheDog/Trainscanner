@@ -76,6 +76,40 @@ export function formatProviderFeedsTooltip(value) {
   return `Feeds used: ${labels.join(", ")}`;
 }
 
+export function formatCandidateProvenanceTooltip(value) {
+  const provenance =
+    value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const activeSources = trimStringArray(
+    provenance.active_source_labels || provenance.active_source_ids,
+  );
+  const historicalSources = trimStringArray(
+    provenance.historical_source_labels || provenance.historical_source_ids,
+  );
+  const activeRefs = trimStringArray(provenance.active_stop_place_refs);
+  const historicalRefs = trimStringArray(provenance.historical_stop_place_refs);
+  const coordRefs = trimStringArray(provenance.coord_input_stop_place_refs);
+  const sections = [
+    activeSources.length > 0
+      ? `Active sources: ${activeSources.join(", ")}`
+      : "No active source mappings",
+  ];
+
+  if (historicalSources.length > 0) {
+    sections.push(`Historical sources: ${historicalSources.join(", ")}`);
+  }
+  if (activeRefs.length > 0) {
+    sections.push(`Active refs: ${activeRefs.join(", ")}`);
+  }
+  if (historicalRefs.length > 0) {
+    sections.push(`Historical refs: ${historicalRefs.join(", ")}`);
+  }
+  if (coordRefs.length > 0) {
+    sections.push(`Coord refs: ${coordRefs.join(", ")}`);
+  }
+
+  return sections.join(" | ");
+}
+
 export function formatEvidenceTypeLabel(value) {
   return EVIDENCE_LABELS[value] || formatLabel(value || "unknown");
 }

@@ -131,12 +131,25 @@ const schema = buildSchema(`
     coord_status: String
     service_context: GlobalCandidateServiceContext
     context_summary: GlobalCandidateContextSummary
+    provenance: GlobalCandidateProvenance
+  }
+
+  type GlobalCandidateProvenance {
+    has_active_source_mappings: Boolean
+    active_source_ids: [String!]
+    active_source_labels: [String!]
+    active_stop_place_refs: [String!]
+    historical_source_ids: [String!]
+    historical_source_labels: [String!]
+    historical_stop_place_refs: [String!]
+    coord_input_stop_place_refs: [String!]
   }
 
   type GlobalCandidateServiceContext {
     lines: [String!]
     incoming: [String!]
     outgoing: [String!]
+    stop_points: [String!]
     transport_modes: [String!]
   }
 

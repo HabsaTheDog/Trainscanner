@@ -99,6 +99,10 @@ test("build sql preserves phase markers and ported evidence primitives", () => {
     /CREATE OR REPLACE FUNCTION qa_loose_station_name/,
   );
   assert.match(BUILD_MERGE_QUEUE_SQL, /_scope_stations/);
+  assert.match(
+    BUILD_MERGE_QUEUE_SQL,
+    /WHERE gs\.is_active = true\s+AND EXISTS \(\s+SELECT 1\s+FROM provider_global_station_mappings m\s+WHERE m\.global_station_id = gs\.global_station_id\s+AND m\.is_active = true\s+\)/,
+  );
   assert.match(BUILD_MERGE_QUEUE_SQL, /_pair_seed_reasons/);
   assert.match(BUILD_MERGE_QUEUE_SQL, /_station_context_geo_tile_idx/);
   assert.match(BUILD_MERGE_QUEUE_SQL, /primary_rare_token/);

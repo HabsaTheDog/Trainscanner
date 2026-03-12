@@ -14,7 +14,21 @@ export const candidateShape = PropTypes.shape({
   global_station_id: PropTypes.string,
   coord_status: PropTypes.string,
   provider_labels: PropTypes.arrayOf(PropTypes.string),
+  provenance: PropTypes.shape({
+    has_active_source_mappings: PropTypes.bool,
+    active_source_ids: PropTypes.arrayOf(PropTypes.string),
+    active_source_labels: PropTypes.arrayOf(PropTypes.string),
+    active_stop_place_refs: PropTypes.arrayOf(PropTypes.string),
+    historical_source_ids: PropTypes.arrayOf(PropTypes.string),
+    historical_source_labels: PropTypes.arrayOf(PropTypes.string),
+    historical_stop_place_refs: PropTypes.arrayOf(PropTypes.string),
+    coord_input_stop_place_refs: PropTypes.arrayOf(PropTypes.string),
+  }),
   service_context: PropTypes.shape({
+    lines: PropTypes.arrayOf(PropTypes.string),
+    incoming: PropTypes.arrayOf(PropTypes.string),
+    outgoing: PropTypes.arrayOf(PropTypes.string),
+    stop_points: PropTypes.arrayOf(PropTypes.string),
     transport_modes: PropTypes.arrayOf(PropTypes.string),
   }),
   context_summary: PropTypes.shape({

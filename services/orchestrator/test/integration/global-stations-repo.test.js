@@ -476,3 +476,299 @@ test(
     assert.equal(childStation.rows[0].hierarchy_role, "child");
   },
 );
+
+test(
+  "buildGlobalStations deactivates stations left without active mappings or stop points after remapping",
+  { skip: !shouldRunPostgisTests },
+  async () => {
+    const servicesRoot = path.resolve(__dirname, "../../..");
+    const repoRoot = path.resolve(servicesRoot, "..");
+    const dbName = `itest_global_station_orphan_cleanup_${Date.now()}`;
+    const dbEnv = createDbEnv(dbName);
+    let client;
+
+    ensureDockerServiceRunning(repoRoot, dbEnv);
+    await createDatabase(dbEnv);
+    test.after(async () => {
+      if (client) {
+        await client.end();
+      }
+      await dropDatabase(dbEnv);
+    });
+    await ensureBootstrapped(repoRoot, dbEnv);
+
+    client = createPostgisClient({
+      rootDir: repoRoot,
+      env: dbEnv,
+    });
+    await client.ensureReady();
+
+    const repo = createGlobalStationsRepo(client);
+    const sourceId = `integration_orphan_cleanup_${Date.now()}`;
+    const placeRef = "cleanup_place";
+    const pointRef = "cleanup_point";
+
+    const initialDataset = await client.runSql(
+      `
+      INSERT INTO provider_datasets (
+        source_id,
+        provider_slug,
+        country,
+        format,
+        snapshot_date,
+        ingestion_status
+      )
+      VALUES (
+        :'source_id',
+        'integration-provider',
+        'DE',
+        'netex',
+        DATE '2026-03-05',
+        'ingested'
+      )
+      RETURNING dataset_id
+      `,
+      { source_id: sourceId },
+    );
+
+    const initialDatasetId = initialDataset.rows[0].dataset_id;
+
+    await client.runSql(
+      `
+      INSERT INTO raw_provider_stop_places (
+        stop_place_id,
+        dataset_id,
+        source_id,
+        provider_stop_place_ref,
+        country,
+        stop_name,
+        latitude,
+        longitude,
+        raw_payload,
+        updated_at
+      )
+      VALUES (
+        'cleanup_place_initial_' || :'source_id',
+        :'dataset_id',
+        :'source_id',
+        :'place_ref',
+        'DE',
+        'Legacy Square',
+        52.5200,
+        13.4050,
+        '{}'::jsonb,
+        TIMESTAMPTZ '2026-03-05 09:00:00+00'
+      )
+      `,
+      {
+        source_id: sourceId,
+        dataset_id: initialDatasetId,
+        place_ref: placeRef,
+      },
+    );
+
+    await client.runSql(
+      `
+      INSERT INTO raw_provider_stop_points (
+        stop_point_id,
+        dataset_id,
+        source_id,
+        provider_stop_point_ref,
+        provider_stop_place_ref,
+        stop_place_id,
+        country,
+        stop_name,
+        latitude,
+        longitude,
+        raw_payload,
+        updated_at
+      )
+      VALUES (
+        'cleanup_point_initial_' || :'source_id',
+        :'dataset_id',
+        :'source_id',
+        :'point_ref',
+        :'place_ref',
+        'cleanup_place_initial_' || :'source_id',
+        'DE',
+        'Legacy Square Gleis 1',
+        52.5201,
+        13.4051,
+        '{}'::jsonb,
+        TIMESTAMPTZ '2026-03-05 09:05:00+00'
+      )
+      `,
+      {
+        source_id: sourceId,
+        dataset_id: initialDatasetId,
+        place_ref: placeRef,
+        point_ref: pointRef,
+      },
+    );
+
+    await repo.buildGlobalStations({
+      country: "DE",
+      asOf: "2026-03-05",
+      sourceId,
+    });
+
+    const initialStation = await client.runSql(
+      `
+      SELECT global_station_id
+      FROM provider_global_station_mappings
+      WHERE source_id = :'source_id'
+        AND provider_stop_place_ref = :'place_ref'
+        AND is_active = true
+      `,
+      {
+        source_id: sourceId,
+        place_ref: placeRef,
+      },
+    );
+
+    const legacyStationId = initialStation.rows[0].global_station_id;
+
+    const remappedDataset = await client.runSql(
+      `
+      INSERT INTO provider_datasets (
+        source_id,
+        provider_slug,
+        country,
+        format,
+        snapshot_date,
+        ingestion_status
+      )
+      VALUES (
+        :'source_id',
+        'integration-provider',
+        'DE',
+        'netex',
+        DATE '2026-03-09',
+        'ingested'
+      )
+      RETURNING dataset_id
+      `,
+      { source_id: sourceId },
+    );
+
+    const remappedDatasetId = remappedDataset.rows[0].dataset_id;
+
+    await client.runSql(
+      `
+      INSERT INTO raw_provider_stop_places (
+        stop_place_id,
+        dataset_id,
+        source_id,
+        provider_stop_place_ref,
+        country,
+        stop_name,
+        latitude,
+        longitude,
+        raw_payload,
+        updated_at
+      )
+      VALUES (
+        'cleanup_place_remapped_' || :'source_id',
+        :'dataset_id',
+        :'source_id',
+        :'place_ref',
+        'DE',
+        'Modern Square',
+        52.5200,
+        13.4050,
+        '{}'::jsonb,
+        TIMESTAMPTZ '2026-03-09 09:00:00+00'
+      )
+      `,
+      {
+        source_id: sourceId,
+        dataset_id: remappedDatasetId,
+        place_ref: placeRef,
+      },
+    );
+
+    await client.runSql(
+      `
+      INSERT INTO raw_provider_stop_points (
+        stop_point_id,
+        dataset_id,
+        source_id,
+        provider_stop_point_ref,
+        provider_stop_place_ref,
+        stop_place_id,
+        country,
+        stop_name,
+        latitude,
+        longitude,
+        raw_payload,
+        updated_at
+      )
+      VALUES (
+        'cleanup_point_remapped_' || :'source_id',
+        :'dataset_id',
+        :'source_id',
+        :'point_ref',
+        :'place_ref',
+        'cleanup_place_remapped_' || :'source_id',
+        'DE',
+        'Modern Square Gleis 1',
+        52.5202,
+        13.4052,
+        '{}'::jsonb,
+        TIMESTAMPTZ '2026-03-09 09:05:00+00'
+      )
+      `,
+      {
+        source_id: sourceId,
+        dataset_id: remappedDatasetId,
+        place_ref: placeRef,
+        point_ref: pointRef,
+      },
+    );
+
+    await repo.buildGlobalStations({
+      country: "DE",
+      asOf: "2026-03-09",
+      sourceId,
+    });
+
+    const legacyStationState = await client.runSql(
+      `
+      SELECT
+        is_active,
+        metadata ->> 'deactivation_reason' AS deactivation_reason
+      FROM global_stations
+      WHERE global_station_id = :'global_station_id'
+      `,
+      { global_station_id: legacyStationId },
+    );
+
+    const activeMappingCount = await client.runSql(
+      `
+      SELECT COUNT(*)::integer AS count
+      FROM provider_global_station_mappings
+      WHERE global_station_id = :'global_station_id'
+        AND is_active = true
+      `,
+      { global_station_id: legacyStationId },
+    );
+
+    const activeStopPointCount = await client.runSql(
+      `
+      SELECT COUNT(*)::integer AS count
+      FROM global_stop_points
+      WHERE global_station_id = :'global_station_id'
+        AND is_active = true
+      `,
+      { global_station_id: legacyStationId },
+    );
+
+    assert.equal(legacyStationState.rows[0].is_active, false);
+    assert.equal(
+      legacyStationState.rows[0].deactivation_reason,
+      "orphaned_without_active_source_or_stop_points",
+    );
+    assert.equal(activeMappingCount.rows[0].count, 0);
+    assert.equal(activeStopPointCount.rows[0].count, 0);
+  },
+);

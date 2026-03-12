@@ -3,7 +3,9 @@ const assert = require("node:assert/strict");
 
 const {
   _internal: {
+    buildEditHistoryQuery,
     buildWorkspaceMutationResponse,
+    normalizeCandidateMetadata,
     normalizeEvidenceRow,
     resolveUpdatedBy,
   },
@@ -52,4 +54,46 @@ test("buildWorkspaceMutationResponse shapes stable mutation payloads", () => {
       workspace: { merges: [] },
     },
   );
+});
+
+test("normalizeCandidateMetadata exposes active and historical provenance", () => {
+  const normalized = normalizeCandidateMetadata({
+    latitude: null,
+    longitude: null,
+    metadata: {
+      service_context: {
+        stop_points: ["Platform 1", " Platform 1 ", "Platform 2"],
+      },
+      context_summary: {
+        provider_source_count: "0",
+      },
+    },
+    active_source_ids: ["db-regio", " db-regio "],
+    active_stop_place_refs: ["de:123"],
+    historical_source_ids: ["delfi-de"],
+    historical_stop_place_refs: ["de:old:123"],
+    coord_input_stop_place_refs: ["de:123", ""],
+  });
+
+  assert.equal(normalized.coord_status, "missing_coordinates");
+  assert.deepEqual(normalized.service_context.stop_points, [
+    "Platform 1",
+    "Platform 2",
+  ]);
+  assert.deepEqual(normalized.provenance, {
+    active_source_ids: ["db-regio"],
+    active_stop_place_refs: ["de:123"],
+    historical_source_ids: ["delfi-de"],
+    historical_stop_place_refs: ["de:old:123"],
+    coord_input_stop_place_refs: ["de:123"],
+    has_active_source_mappings: true,
+  });
+});
+
+test("buildEditHistoryQuery casts workspace and decision enums to text", () => {
+  const query = buildEditHistoryQuery();
+
+  assert.match(query, /v\.action::text AS event_type/);
+  assert.match(query, /d\.operation::text AS event_type/);
+  assert.match(query, /UNION ALL/);
 });

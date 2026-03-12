@@ -1152,6 +1152,60 @@ JOIN global_stop_points sp
   ON sp.global_stop_point_id =
     'gsp_' || substr(md5(c.source_id || '|' || c.provider_stop_point_ref), 1, 24);
 
+CREATE TEMP TABLE _cleanup_station_candidates AS
+SELECT DISTINCT gs.global_station_id
+FROM global_stations gs
+WHERE gs.is_active = true
+  AND (
+    NULLIF(:'country_filter', '') IS NULL
+    OR gs.country = NULLIF(:'country_filter', '')::char(2)
+  )
+  AND (
+    NULLIF(:'source_id_scope', '') IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM provider_global_station_mappings m
+      WHERE m.global_station_id = gs.global_station_id
+        AND m.source_id = NULLIF(:'source_id_scope', '')
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM global_stop_points sp
+      WHERE sp.global_station_id = gs.global_station_id
+        AND sp.metadata ? 'source_id'
+        AND sp.metadata ->> 'source_id' = NULLIF(:'source_id_scope', '')
+    )
+  );
+
+UPDATE global_stations gs
+SET
+  is_active = false,
+  metadata = gs.metadata || jsonb_build_object(
+    'deactivated_by',
+    'global_station_build',
+    'deactivation_reason',
+    'orphaned_without_active_source_or_stop_points',
+    'deactivated_at',
+    now()
+  ),
+  updated_at = now()
+WHERE gs.global_station_id IN (
+    SELECT candidate.global_station_id
+    FROM _cleanup_station_candidates candidate
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM provider_global_station_mappings m
+    WHERE m.global_station_id = gs.global_station_id
+      AND m.is_active = true
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM global_stop_points sp
+    WHERE sp.global_station_id = gs.global_station_id
+      AND sp.is_active = true
+  );
+
 DELETE FROM transfer_edges te
 USING global_stop_points fsp, global_stop_points tsp
 WHERE te.from_global_stop_point_id = fsp.global_stop_point_id

@@ -39,6 +39,7 @@ const SOURCE_SCHEMA = {
     fallbackReason: { type: "string" },
     notes: { type: "string" },
     lastVerifiedAt: { type: "string" },
+    pipelineEnabled: { type: "boolean" },
   },
   additionalProperties: false,
 };

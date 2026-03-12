@@ -101,6 +101,11 @@ log() {
   return 0
 }
 
+warn() {
+  printf '[fetch-sources] WARN: %s\n' "$*" >&2
+  return 0
+}
+
 fail() {
   write_fetch_progress "failed" \
     "$FETCH_PROGRESS_SOURCE_ID" \
@@ -659,7 +664,11 @@ main() {
   retrieval_ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
   # shellcheck disable=SC2016
-  local jq_filter='(.sources[] | select((($country == "") or (.country == $country)) and (($source_id == "") or (.id == $source_id))))'
+  local jq_filter='
+    (.sources[]
+      | select((($country == "") or (.country == $country)) and (($source_id == "") or (.id == $source_id)))
+      | select(($source_id != "") or (.pipelineEnabled != false)))
+  '
   mapfile -t selected_sources < <(jq -c --arg country "$COUNTRY_FILTER" --arg source_id "$SOURCE_ID_FILTER" "$jq_filter" "$CONFIG_FILE")
 
   [[ ${#selected_sources[@]} -gt 0 ]] || fail "No sources matched the provided filters"
@@ -670,199 +679,216 @@ main() {
 
   log "Selected ${#selected_sources[@]} source(s); run_date=$run_date${AS_OF:+ (as-of mode)}"
 
-  local source_json source_index
+  local source_json source_index source_id
+  local successful_sources=()
+  local failed_sources=()
   source_index=0
   for source_json in "${selected_sources[@]}"; do
     source_index=$((source_index + 1))
-    local source_id country provider format access_type
+    local country provider format access_type
     source_id="$(jq -r '.id' <<<"$source_json")"
     country="$(jq -r '.country' <<<"$source_json")"
     provider="$(jq -r '.provider' <<<"$source_json")"
     format="$(jq -r '.format' <<<"$source_json")"
     access_type="$(jq -r '.accessType' <<<"$source_json")"
 
-    FETCH_PROGRESS_SOURCE_ID="$source_id"
-    FETCH_PROGRESS_SOURCE_INDEX="$source_index"
-    FETCH_PROGRESS_FILE_NAME=""
-    FETCH_PROGRESS_DOWNLOADED_BYTES=0
-    FETCH_PROGRESS_TOTAL_BYTES=0
-    write_fetch_progress "resolving" \
-      "$FETCH_PROGRESS_SOURCE_ID" \
-      "$FETCH_PROGRESS_SOURCE_INDEX" \
-      "$FETCH_PROGRESS_TOTAL_SOURCES" \
-      "" \
-      0 \
-      0 \
-      "Resolving source '$source_id'"
+    if (
+      FETCH_PROGRESS_SOURCE_ID="$source_id"
+      FETCH_PROGRESS_SOURCE_INDEX="$source_index"
+      FETCH_PROGRESS_FILE_NAME=""
+      FETCH_PROGRESS_DOWNLOADED_BYTES=0
+      FETCH_PROGRESS_TOTAL_BYTES=0
+      write_fetch_progress "resolving" \
+        "$FETCH_PROGRESS_SOURCE_ID" \
+        "$FETCH_PROGRESS_SOURCE_INDEX" \
+        "$FETCH_PROGRESS_TOTAL_SOURCES" \
+        "" \
+        0 \
+        0 \
+        "Resolving source '$source_id'"
 
-    log "Resolving source '$source_id' ($country/$format)"
-    build_auth_args "$source_id" "$access_type" "$(jq -r '.downloadUrlOrEndpoint' <<<"$source_json")"
+      log "Resolving source '$source_id' ($country/$format)"
+      build_auth_args "$source_id" "$access_type" "$(jq -r '.downloadUrlOrEndpoint' <<<"$source_json")"
 
-    local resolved_url
-    resolved_url="$(resolve_download_url "$source_json" "$source_id")" || {
-      if [[ "$format" == "netex" ]]; then
-        fail "NeTEx source '$source_id' resolution failed (hard failure)"
-      fi
-      fail "Source '$source_id' resolution failed"
-    }
-
-    [[ -n "$resolved_url" ]] || fail "Source '$source_id' did not resolve a download URL"
-    log "Resolved URL: $resolved_url"
-
-    local http_code
-    http_code="$(probe_http_code "$resolved_url" "${AUTH_ARGS[@]}")"
-    if [[ -z "$http_code" || "$http_code" == "000" || "$http_code" -ge 400 ]]; then
-      if [[ "$format" == "netex" ]]; then
-        fail "NeTEx source '$source_id' HTTP error for $resolved_url (status=$http_code)"
-      fi
-      fail "HTTP error for source '$source_id' (status=$http_code, url=$resolved_url)"
-    fi
-
-    local head_headers
-    head_headers="$(curl -sSI -L "${AUTH_ARGS[@]}" "$resolved_url" || true)"
-
-    local file_name
-    file_name="${resolved_url##*/}"
-    file_name="${file_name%%\?*}"
-    [[ -n "$file_name" && "$file_name" != */ ]] || file_name="${source_id}_${run_date}.bin"
-
-    local provider_slug dest_dir out_file tmp_file
-    provider_slug="$(slugify "$provider")"
-    dest_dir="data/raw/${country}/${provider_slug}/${format}/${run_date}"
-    mkdir -p "$dest_dir"
-
-    out_file="${dest_dir}/${file_name}"
-    tmp_file="${dest_dir}/.${file_name}.tmp.$$"
-    FETCH_PROGRESS_FILE_NAME="$file_name"
-
-    local expected_size
-    expected_size="$(printf '%s\n' "$head_headers" | awk -F': ' 'tolower($1)=="content-length"{print $2; exit}' | tr -d '\r' || true)"
-    [[ "$expected_size" =~ ^[0-9]+$ ]] || expected_size=0
-    FETCH_PROGRESS_TOTAL_BYTES="$expected_size"
-    FETCH_PROGRESS_DOWNLOADED_BYTES=0
-    write_fetch_progress "downloading" \
-      "$FETCH_PROGRESS_SOURCE_ID" \
-      "$FETCH_PROGRESS_SOURCE_INDEX" \
-      "$FETCH_PROGRESS_TOTAL_SOURCES" \
-      "$FETCH_PROGRESS_FILE_NAME" \
-      0 \
-      "$FETCH_PROGRESS_TOTAL_BYTES" \
-      "Downloading '$file_name'"
-
-    local progress_watcher_pid=""
-    (
-      while true; do
-        bytes=0
-        if [[ -f "$tmp_file" ]]; then
-          bytes="$(stat -c '%s' "$tmp_file" 2>/dev/null || printf '0')"
+      local resolved_url
+      resolved_url="$(resolve_download_url "$source_json" "$source_id")" || {
+        if [[ "$format" == "netex" ]]; then
+          fail "NeTEx source '$source_id' resolution failed (hard failure)"
         fi
-        [[ "$bytes" =~ ^[0-9]+$ ]] || bytes=0
-        
-        # Update progress file for external tools
-        write_fetch_progress \
-          "downloading" \
-          "$source_id" \
-          "$source_index" \
-          "$FETCH_PROGRESS_TOTAL_SOURCES" \
-          "$file_name" \
-          "$bytes" \
-          "$expected_size" \
-          "Downloading '$file_name'"
-          
-        # Print terminal progress bar
-        if [[ "$expected_size" -gt 0 ]]; then
-          local percent=0
-          if [[ "$bytes" -ge "$expected_size" ]]; then
-            percent=100
-          else
-            percent=$((bytes * 100 / expected_size))
+        fail "Source '$source_id' resolution failed"
+      }
+
+      [[ -n "$resolved_url" ]] || fail "Source '$source_id' did not resolve a download URL"
+      log "Resolved URL: $resolved_url"
+
+      local http_code
+      http_code="$(probe_http_code "$resolved_url" "${AUTH_ARGS[@]}")"
+      if [[ -z "$http_code" || "$http_code" == "000" || "$http_code" -ge 400 ]]; then
+        if [[ "$format" == "netex" ]]; then
+          fail "NeTEx source '$source_id' HTTP error for $resolved_url (status=$http_code)"
+        fi
+        fail "HTTP error for source '$source_id' (status=$http_code, url=$resolved_url)"
+      fi
+
+      local head_headers
+      head_headers="$(curl -sSI -L "${AUTH_ARGS[@]}" "$resolved_url" || true)"
+
+      local file_name
+      file_name="${resolved_url##*/}"
+      file_name="${file_name%%\?*}"
+      [[ -n "$file_name" && "$file_name" != */ ]] || file_name="${source_id}_${run_date}.bin"
+
+      local provider_slug dest_dir out_file tmp_file
+      provider_slug="$(slugify "$provider")"
+      dest_dir="data/raw/${country}/${provider_slug}/${format}/${run_date}"
+      mkdir -p "$dest_dir"
+
+      out_file="${dest_dir}/${file_name}"
+      tmp_file="${dest_dir}/.${file_name}.tmp.$$"
+      FETCH_PROGRESS_FILE_NAME="$file_name"
+
+      local expected_size
+      expected_size="$(printf '%s\n' "$head_headers" | awk -F': ' 'tolower($1)=="content-length"{print $2; exit}' | tr -d '\r' || true)"
+      [[ "$expected_size" =~ ^[0-9]+$ ]] || expected_size=0
+      FETCH_PROGRESS_TOTAL_BYTES="$expected_size"
+      FETCH_PROGRESS_DOWNLOADED_BYTES=0
+      write_fetch_progress "downloading" \
+        "$FETCH_PROGRESS_SOURCE_ID" \
+        "$FETCH_PROGRESS_SOURCE_INDEX" \
+        "$FETCH_PROGRESS_TOTAL_SOURCES" \
+        "$FETCH_PROGRESS_FILE_NAME" \
+        0 \
+        "$FETCH_PROGRESS_TOTAL_BYTES" \
+        "Downloading '$file_name'"
+
+      local progress_watcher_pid=""
+      (
+        while true; do
+          bytes=0
+          if [[ -f "$tmp_file" ]]; then
+            bytes="$(stat -c '%s' "$tmp_file" 2>/dev/null || printf '0')"
           fi
-          
-          local filled=$((percent / 5))
-          local empty=$((20 - filled))
-          local bar
-          bar="$(printf "%${filled}s" | tr ' ' '#')$(printf "%${empty}s" | tr ' ' '-')"
-          printf "\r[fetch-sources] [%-20s] %3d%% (%s/%s) " "$bar" "$percent" "$(numfmt --to=iec "$bytes")" "$(numfmt --to=iec "$expected_size")" >&2
-        else
-          printf "\r[fetch-sources] %s: %s downloaded " "$file_name" "$(numfmt --to=iec "$bytes")" >&2
-        fi
-        
-        sleep 1
-      done
-    ) &
-    progress_watcher_pid="$!"
+          [[ "$bytes" =~ ^[0-9]+$ ]] || bytes=0
 
-    log "Downloading to $out_file"
-    if ! curl -fsSL "${AUTH_ARGS[@]}" "$resolved_url" -o "$tmp_file"; then
+          write_fetch_progress \
+            "downloading" \
+            "$source_id" \
+            "$source_index" \
+            "$FETCH_PROGRESS_TOTAL_SOURCES" \
+            "$file_name" \
+            "$bytes" \
+            "$expected_size" \
+            "Downloading '$file_name'"
+
+          if [[ "$expected_size" -gt 0 ]]; then
+            local percent=0
+            if [[ "$bytes" -ge "$expected_size" ]]; then
+              percent=100
+            else
+              percent=$((bytes * 100 / expected_size))
+            fi
+
+            local filled=$((percent / 5))
+            local empty=$((20 - filled))
+            local bar
+            bar="$(printf "%${filled}s" | tr ' ' '#')$(printf "%${empty}s" | tr ' ' '-')"
+            printf "\r[fetch-sources] [%-20s] %3d%% (%s/%s) " "$bar" "$percent" "$(numfmt --to=iec "$bytes")" "$(numfmt --to=iec "$expected_size")" >&2
+          else
+            printf "\r[fetch-sources] %s: %s downloaded " "$file_name" "$(numfmt --to=iec "$bytes")" >&2
+          fi
+
+          sleep 1
+        done
+      ) &
+      progress_watcher_pid="$!"
+
+      log "Downloading to $out_file"
+      if ! curl -fsSL "${AUTH_ARGS[@]}" "$resolved_url" -o "$tmp_file"; then
+        if [[ -n "$progress_watcher_pid" ]]; then
+          kill "$progress_watcher_pid" >/dev/null 2>&1 || true
+          wait "$progress_watcher_pid" >/dev/null 2>&1 || true
+        fi
+        printf "\n" >&2
+        rm -f "$tmp_file"
+        if [[ "$format" == "netex" ]]; then
+          fail "NeTEx source '$source_id' download failed (hard failure): $resolved_url"
+        fi
+        fail "Download failed for source '$source_id'"
+      fi
       if [[ -n "$progress_watcher_pid" ]]; then
         kill "$progress_watcher_pid" >/dev/null 2>&1 || true
         wait "$progress_watcher_pid" >/dev/null 2>&1 || true
       fi
       printf "\n" >&2
-      rm -f "$tmp_file"
-      if [[ "$format" == "netex" ]]; then
-        fail "NeTEx source '$source_id' download failed (hard failure): $resolved_url"
+
+      if ! check_format_match "$tmp_file" "$format" "$resolved_url" "$source_id"; then
+        rm -f "$tmp_file"
+        fail "Format mismatch for source '$source_id': expected '$format', URL '$resolved_url'"
       fi
-      fail "Download failed for source '$source_id'"
+
+      mv "$tmp_file" "$out_file"
+
+      local file_size sha256 version_hint
+      file_size="$(stat -c '%s' "$out_file")"
+      sha256="$(sha256sum "$out_file" | awk '{print $1}')"
+      version_hint="$(detect_version_hint "$resolved_url" "$head_headers")"
+      FETCH_PROGRESS_DOWNLOADED_BYTES="$file_size"
+      FETCH_PROGRESS_TOTAL_BYTES="${FETCH_PROGRESS_TOTAL_BYTES:-0}"
+      if [[ "$FETCH_PROGRESS_TOTAL_BYTES" -eq 0 ]]; then
+        FETCH_PROGRESS_TOTAL_BYTES="$file_size"
+      fi
+
+      jq -n \
+        --arg sourceId "$source_id" \
+        --arg resolvedDownloadUrl "$resolved_url" \
+        --arg retrievalTimestamp "$retrieval_ts" \
+        --arg fileName "$file_name" \
+        --argjson fileSizeBytes "$file_size" \
+        --arg sha256 "$sha256" \
+        --arg detectedVersionOrDate "$version_hint" \
+        --arg requestedAsOf "$AS_OF" \
+        '{
+          sourceId: $sourceId,
+          resolvedDownloadUrl: $resolvedDownloadUrl,
+          retrievalTimestamp: $retrievalTimestamp,
+          fileName: $fileName,
+          fileSizeBytes: $fileSizeBytes,
+          sha256: $sha256,
+          detectedVersionOrDate: (if $detectedVersionOrDate == "" then null else $detectedVersionOrDate end),
+          requestedAsOf: (if $requestedAsOf == "" then null else $requestedAsOf end)
+        }' > "${dest_dir}/manifest.json"
+
+      write_fetch_progress "source_completed" \
+        "$FETCH_PROGRESS_SOURCE_ID" \
+        "$FETCH_PROGRESS_SOURCE_INDEX" \
+        "$FETCH_PROGRESS_TOTAL_SOURCES" \
+        "$FETCH_PROGRESS_FILE_NAME" \
+        "$FETCH_PROGRESS_DOWNLOADED_BYTES" \
+        "$FETCH_PROGRESS_TOTAL_BYTES" \
+        "Completed '$source_id'"
+
+      log "Completed '$source_id': size=${file_size} sha256=${sha256}"
+    ); then
+      successful_sources+=("$source_id")
+    else
+      failed_sources+=("$source_id")
+      warn "Continuing after source failure: '$source_id'"
     fi
-    if [[ -n "$progress_watcher_pid" ]]; then
-      kill "$progress_watcher_pid" >/dev/null 2>&1 || true
-      wait "$progress_watcher_pid" >/dev/null 2>&1 || true
-    fi
-    printf "\n" >&2
-
-    if ! check_format_match "$tmp_file" "$format" "$resolved_url" "$source_id"; then
-      rm -f "$tmp_file"
-      fail "Format mismatch for source '$source_id': expected '$format', URL '$resolved_url'"
-    fi
-
-    mv "$tmp_file" "$out_file"
-
-    local file_size sha256 version_hint
-    file_size="$(stat -c '%s' "$out_file")"
-    sha256="$(sha256sum "$out_file" | awk '{print $1}')"
-    version_hint="$(detect_version_hint "$resolved_url" "$head_headers")"
-    FETCH_PROGRESS_DOWNLOADED_BYTES="$file_size"
-    FETCH_PROGRESS_TOTAL_BYTES="${FETCH_PROGRESS_TOTAL_BYTES:-0}"
-    if [[ "$FETCH_PROGRESS_TOTAL_BYTES" -eq 0 ]]; then
-      FETCH_PROGRESS_TOTAL_BYTES="$file_size"
-    fi
-
-    jq -n \
-      --arg sourceId "$source_id" \
-      --arg resolvedDownloadUrl "$resolved_url" \
-      --arg retrievalTimestamp "$retrieval_ts" \
-      --arg fileName "$file_name" \
-      --argjson fileSizeBytes "$file_size" \
-      --arg sha256 "$sha256" \
-      --arg detectedVersionOrDate "$version_hint" \
-      --arg requestedAsOf "$AS_OF" \
-      '{
-        sourceId: $sourceId,
-        resolvedDownloadUrl: $resolvedDownloadUrl,
-        retrievalTimestamp: $retrievalTimestamp,
-        fileName: $fileName,
-        fileSizeBytes: $fileSizeBytes,
-        sha256: $sha256,
-        detectedVersionOrDate: (if $detectedVersionOrDate == "" then null else $detectedVersionOrDate end),
-        requestedAsOf: (if $requestedAsOf == "" then null else $requestedAsOf end)
-      }' > "${dest_dir}/manifest.json"
-
-    write_fetch_progress "source_completed" \
-      "$FETCH_PROGRESS_SOURCE_ID" \
-      "$FETCH_PROGRESS_SOURCE_INDEX" \
-      "$FETCH_PROGRESS_TOTAL_SOURCES" \
-      "$FETCH_PROGRESS_FILE_NAME" \
-      "$FETCH_PROGRESS_DOWNLOADED_BYTES" \
-      "$FETCH_PROGRESS_TOTAL_BYTES" \
-      "Completed '$source_id'"
-
-    log "Completed '$source_id': size=${file_size} sha256=${sha256}"
   done
 
-  write_fetch_progress "completed" "" "$FETCH_PROGRESS_TOTAL_SOURCES" "$FETCH_PROGRESS_TOTAL_SOURCES" "" 0 0 \
-    "All selected sources fetched successfully."
-  log "All selected sources fetched successfully."
+  if [[ ${#successful_sources[@]} -eq 0 ]]; then
+    fail "No selected sources were fetched successfully"
+  fi
+
+  if [[ ${#failed_sources[@]} -gt 0 ]]; then
+    write_fetch_progress "completed_with_warnings" "" "$FETCH_PROGRESS_TOTAL_SOURCES" "$FETCH_PROGRESS_TOTAL_SOURCES" "" 0 0 \
+      "Fetched ${#successful_sources[@]} source(s); ${#failed_sources[@]} failed."
+    warn "Fetch completed with warnings: succeeded=${#successful_sources[@]} failed=${#failed_sources[@]} failed_sources=${failed_sources[*]}"
+  else
+    write_fetch_progress "completed" "" "$FETCH_PROGRESS_TOTAL_SOURCES" "$FETCH_PROGRESS_TOTAL_SOURCES" "" 0 0 \
+      "All selected sources fetched successfully."
+    log "All selected sources fetched successfully."
+  fi
   return 0
 }
 

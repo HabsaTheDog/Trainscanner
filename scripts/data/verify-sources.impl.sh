@@ -537,7 +537,7 @@ main() {
 
   load_env
 
-  mapfile -t selected_sources < <(jq -c --arg country "$COUNTRY_FILTER" --arg source_id "$SOURCE_ID_FILTER" '(.sources[] | select((($country == "") or (.country == $country)) and (($source_id == "") or (.id == $source_id))))' "$CONFIG_FILE")
+  mapfile -t selected_sources < <(jq -c --arg country "$COUNTRY_FILTER" --arg source_id "$SOURCE_ID_FILTER" '(.sources[] | select((($country == "") or (.country == $country)) and (($source_id == "") or (.id == $source_id))) | select(($source_id != "") or (.pipelineEnabled != false)))' "$CONFIG_FILE")
   [[ ${#selected_sources[@]} -gt 0 ]] || { echo "No sources matched filters" >&2; exit 1; }
 
   local netex_count=0

@@ -56,6 +56,13 @@ test("global merge cluster types expose global station identifiers", () => {
   assert.ok(fields.coord_status, "candidate should expose coord_status");
   assert.ok(fields.service_context, "candidate should expose service_context");
   assert.ok(fields.context_summary, "candidate should expose context_summary");
+  assert.ok(fields.provenance, "candidate should expose provenance");
+  const serviceContextType = schema.getType("GlobalCandidateServiceContext");
+  assert.ok(serviceContextType, "GlobalCandidateServiceContext should exist");
+  assert.ok(
+    serviceContextType.getFields().stop_points,
+    "service context should expose stop_points",
+  );
 });
 
 test("global evidence type exposes status and raw values", () => {

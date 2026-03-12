@@ -40,6 +40,14 @@ test("build global stations SQL keeps latest-row dedup for stop places and stop 
     BUILD_GLOBAL_SQL,
     /CREATE TEMP TABLE _candidate_coord_resolution AS/,
   );
+  assert.match(
+    BUILD_GLOBAL_SQL,
+    /CREATE TEMP TABLE _cleanup_station_candidates AS/,
+  );
+  assert.match(
+    BUILD_GLOBAL_SQL,
+    /deactivation_reason',\s+'orphaned_without_active_source_or_stop_points'/,
+  );
   assert.match(BUILD_GLOBAL_SQL, /coord_source/);
   assert.match(BUILD_GLOBAL_SQL, /coord_confidence/);
 });

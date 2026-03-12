@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  formatCandidateProvenanceTooltip,
   formatCoordinateStatusLabel,
   formatEvidenceCategoryLabel,
   formatEvidenceDetails,
@@ -39,6 +40,15 @@ test("curation formatters normalize labels and evidence summaries", () => {
     "Feeds used: DB, SBB",
   );
   assert.equal(formatProviderFeedsTooltip([]), "No feeds available");
+  assert.equal(
+    formatCandidateProvenanceTooltip({
+      active_source_labels: ["DB Regio"],
+      historical_source_labels: ["DELFI"],
+      active_stop_place_refs: ["de:123"],
+      coord_input_stop_place_refs: ["de:123", "de:456"],
+    }),
+    "Active sources: DB Regio | Historical sources: DELFI | Active refs: de:123 | Coord refs: de:123, de:456",
+  );
   assert.equal(
     formatEvidenceValue({
       evidence_type: "geographic_distance",

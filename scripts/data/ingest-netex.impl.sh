@@ -42,6 +42,11 @@ fail() {
   return 1
 }
 
+warn() {
+  printf '[ingest-netex] WARN: %s\n' "$*" >&2
+  return 0
+}
+
 cleanup() {
   local file
   for file in "${TMP_FILES[@]}"; do
@@ -886,16 +891,33 @@ main() {
     '.sources[]
      | select(.format == "netex")
      | select($country == "" or .country == $country)
-     | select($source_id == "" or .id == $source_id)' "$CONFIG_FILE")
+     | select($source_id == "" or .id == $source_id)
+     | select($source_id != "" or (.pipelineEnabled != false))' "$CONFIG_FILE")
 
   [[ ${#sources[@]} -gt 0 ]] || fail "No matching netex sources selected"
 
-  local source_json
+  local source_json source_id
+  local successful_sources=()
+  local failed_sources=()
   for source_json in "${sources[@]}"; do
-    ingest_source "$source_json"
+    source_id="$(jq -r '.id' <<<"$source_json")"
+    if ingest_source "$source_json"; then
+      successful_sources+=("$source_id")
+    else
+      failed_sources+=("$source_id")
+      warn "Continuing after source failure: '$source_id'"
+    fi
   done
 
-  log "All selected NeTEx sources ingested successfully"
+  if [[ ${#successful_sources[@]} -eq 0 ]]; then
+    fail "No selected NeTEx sources were ingested successfully"
+  fi
+
+  if [[ ${#failed_sources[@]} -gt 0 ]]; then
+    warn "NeTEx ingest completed with warnings: succeeded=${#successful_sources[@]} failed=${#failed_sources[@]} failed_sources=${failed_sources[*]}"
+  else
+    log "All selected NeTEx sources ingested successfully"
+  fi
   return 0
 }
 

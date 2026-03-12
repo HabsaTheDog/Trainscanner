@@ -94,6 +94,27 @@ function normalizeTextArray(value) {
     .filter((item) => item.length > 0);
 }
 
+function normalizeCandidateProvenance(candidate) {
+  const activeSourceIds = uniqueStrings(candidate?.active_source_ids);
+  const activeStopPlaceRefs = uniqueStrings(candidate?.active_stop_place_refs);
+  const historicalSourceIds = uniqueStrings(candidate?.historical_source_ids);
+  const historicalStopPlaceRefs = uniqueStrings(
+    candidate?.historical_stop_place_refs,
+  );
+  const coordInputStopPlaceRefs = uniqueStrings(
+    candidate?.coord_input_stop_place_refs,
+  );
+
+  return {
+    active_source_ids: activeSourceIds,
+    active_stop_place_refs: activeStopPlaceRefs,
+    historical_source_ids: historicalSourceIds,
+    historical_stop_place_refs: historicalStopPlaceRefs,
+    coord_input_stop_place_refs: coordInputStopPlaceRefs,
+    has_active_source_mappings: activeSourceIds.length > 0,
+  };
+}
+
 function normalizeCandidateMetadata(candidate) {
   const metadata =
     candidate && typeof candidate.metadata === "object" && candidate.metadata
@@ -122,10 +143,15 @@ function normalizeCandidateMetadata(candidate) {
           : "missing_coordinates"),
     ).trim(),
     service_context: {
-      lines: normalizeTextArray(serviceContext.lines),
-      incoming: normalizeTextArray(serviceContext.incoming),
-      outgoing: normalizeTextArray(serviceContext.outgoing),
-      transport_modes: normalizeTextArray(serviceContext.transport_modes),
+      lines: uniqueStrings(normalizeTextArray(serviceContext.lines)),
+      incoming: uniqueStrings(normalizeTextArray(serviceContext.incoming)),
+      outgoing: uniqueStrings(normalizeTextArray(serviceContext.outgoing)),
+      stop_points: uniqueStrings(
+        normalizeTextArray(serviceContext.stop_points),
+      ),
+      transport_modes: uniqueStrings(
+        normalizeTextArray(serviceContext.transport_modes),
+      ),
     },
     context_summary: {
       route_count:
@@ -142,7 +168,33 @@ function normalizeCandidateMetadata(candidate) {
           10,
         ) || 0,
     },
+    provenance: normalizeCandidateProvenance(candidate),
   };
+}
+
+function buildEditHistoryQuery() {
+  return `
+      SELECT
+        event_type,
+        requested_by,
+        created_at
+      FROM (
+        SELECT
+          v.action::text AS event_type,
+          v.updated_by AS requested_by,
+          v.updated_at AS created_at
+        FROM qa_merge_cluster_workspace_versions v
+        WHERE v.merge_cluster_id = :'cluster_id'
+        UNION ALL
+        SELECT
+          d.operation::text AS event_type,
+          d.requested_by,
+          d.created_at
+        FROM qa_merge_decisions d
+        WHERE d.merge_cluster_id = :'cluster_id'
+      ) events
+      ORDER BY created_at DESC
+      `;
 }
 
 function normalizeEvidenceRow(row) {
@@ -1498,8 +1550,61 @@ async function getGlobalClusterDetail(clusterId) {
         cc.longitude,
         cc.country,
         cc.provider_labels,
-        cc.metadata
+        cc.metadata,
+        COALESCE(gs.metadata -> 'coord_inputs' -> 'provider_stop_place_refs', '[]'::jsonb)
+          AS coord_input_stop_place_refs,
+        COALESCE(provenance.active_source_ids, '[]'::jsonb) AS active_source_ids,
+        COALESCE(provenance.active_stop_place_refs, '[]'::jsonb) AS active_stop_place_refs,
+        COALESCE(provenance.historical_source_ids, '[]'::jsonb) AS historical_source_ids,
+        COALESCE(provenance.historical_stop_place_refs, '[]'::jsonb)
+          AS historical_stop_place_refs
       FROM qa_merge_cluster_candidates cc
+      LEFT JOIN global_stations gs
+        ON gs.global_station_id = cc.global_station_id
+      LEFT JOIN LATERAL (
+        SELECT
+          to_jsonb(
+            COALESCE(
+              ARRAY_AGG(DISTINCT m.source_id ORDER BY m.source_id)
+                FILTER (WHERE m.is_active = true AND m.source_id IS NOT NULL),
+              ARRAY[]::text[]
+            )
+          ) AS active_source_ids,
+          to_jsonb(
+            COALESCE(
+              ARRAY_AGG(
+                DISTINCT m.provider_stop_place_ref
+                ORDER BY m.provider_stop_place_ref
+              ) FILTER (
+                WHERE m.is_active = true
+                  AND m.provider_stop_place_ref IS NOT NULL
+              ),
+              ARRAY[]::text[]
+            )
+          ) AS active_stop_place_refs,
+          to_jsonb(
+            COALESCE(
+              ARRAY_AGG(DISTINCT m.source_id ORDER BY m.source_id)
+                FILTER (WHERE m.is_active = false AND m.source_id IS NOT NULL),
+              ARRAY[]::text[]
+            )
+          ) AS historical_source_ids,
+          to_jsonb(
+            COALESCE(
+              ARRAY_AGG(
+                DISTINCT m.provider_stop_place_ref
+                ORDER BY m.provider_stop_place_ref
+              ) FILTER (
+                WHERE m.is_active = false
+                  AND m.provider_stop_place_ref IS NOT NULL
+              ),
+              ARRAY[]::text[]
+            )
+          ) AS historical_stop_place_refs
+        FROM provider_global_station_mappings m
+        WHERE m.global_station_id = cc.global_station_id
+      ) provenance
+        ON true
       WHERE cc.merge_cluster_id = :'cluster_id'
       ORDER BY cc.candidate_rank, cc.global_station_id
       `,
@@ -1548,31 +1653,7 @@ async function getGlobalClusterDetail(clusterId) {
       `,
       { cluster_id: cleanClusterId },
     ),
-    client.queryRows(
-      `
-      SELECT
-        event_type,
-        requested_by,
-        created_at
-      FROM (
-        SELECT
-          v.action AS event_type,
-          v.updated_by AS requested_by,
-          v.updated_at AS created_at
-        FROM qa_merge_cluster_workspace_versions v
-        WHERE v.merge_cluster_id = :'cluster_id'
-        UNION ALL
-        SELECT
-          d.operation AS event_type,
-          d.requested_by,
-          d.created_at
-        FROM qa_merge_decisions d
-        WHERE d.merge_cluster_id = :'cluster_id'
-      ) events
-      ORDER BY created_at DESC
-      `,
-      { cluster_id: cleanClusterId },
-    ),
+    client.queryRows(buildEditHistoryQuery(), { cluster_id: cleanClusterId }),
   ]);
 
   const normalizedCandidates = candidates.map(normalizeCandidateMetadata);
@@ -1906,7 +1987,9 @@ async function getRefreshJob(jobId, options = {}) {
 
 module.exports = {
   _internal: {
+    buildEditHistoryQuery,
     buildWorkspaceMutationResponse,
+    normalizeCandidateMetadata,
     normalizeEvidenceRow,
     resolveUpdatedBy,
   },

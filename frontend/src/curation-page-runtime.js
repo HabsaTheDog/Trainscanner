@@ -44,6 +44,113 @@ const CLUSTER_DETAIL_QUERY = `
         provider_labels
         aliases
         coord_status
+        provenance {
+          has_active_source_mappings
+          active_source_ids
+          active_source_labels
+          active_stop_place_refs
+          historical_source_ids
+          historical_source_labels
+          historical_stop_place_refs
+          coord_input_stop_place_refs
+        }
+        service_context {
+          lines
+          incoming
+          outgoing
+          stop_points
+          transport_modes
+        }
+        context_summary {
+          route_count
+          incoming_count
+          outgoing_count
+          stop_point_count
+          provider_source_count
+        }
+        lat
+        lon
+      }
+      evidence {
+        evidence_type
+        source_global_station_id
+        target_global_station_id
+        category
+        is_seed_rule
+        seed_reasons
+        status
+        score
+        raw_value
+        details
+      }
+      evidence_summary
+      pair_summaries {
+        source_global_station_id
+        target_global_station_id
+        supporting_count
+        warning_count
+        missing_count
+        informational_count
+        score
+        summary
+        categories
+        seed_reasons
+        highlights
+      }
+      decisions {
+        decision_id
+        operation
+        note
+        requested_by
+        created_at
+        members {
+          global_station_id
+          action
+          group_label
+          metadata
+        }
+      }
+      edit_history {
+        event_type
+        requested_by
+        created_at
+      }
+    }
+  }
+`;
+
+const LEGACY_CLUSTER_DETAIL_QUERY = `
+  query GetGlobalClusterDetail($id: ID!) {
+    globalCluster(id: $id) {
+      cluster_id
+      country_tags
+      status
+      effective_status
+      has_workspace
+      workspace_version
+      workspace
+      scope_tag
+      severity
+      display_name
+      summary
+      candidates {
+        global_station_id
+        display_name
+        candidate_rank
+        country
+        provider_labels
+        aliases
+        coord_status
+        provenance {
+          has_active_source_mappings
+          active_source_ids
+          active_source_labels
+          active_stop_place_refs
+          historical_source_ids
+          historical_source_labels
+          historical_stop_place_refs
+          coord_input_stop_place_refs
+        }
         service_context {
           lines
           incoming
@@ -230,8 +337,23 @@ export function formatResultsLabel(totalCount, locale) {
   return `${safeCount.toLocaleString(locale)} results`;
 }
 
+function shouldRetryClusterDetailWithoutStopPoints(error) {
+  const message = String(error?.message || "");
+  return /Cannot query field "stop_points" on type "GlobalCandidateServiceContext"\.?/.test(
+    message,
+  );
+}
+
 export async function fetchClusterDetail(clusterId) {
-  const data = await graphqlQuery(CLUSTER_DETAIL_QUERY, { id: clusterId });
+  let data;
+  try {
+    data = await graphqlQuery(CLUSTER_DETAIL_QUERY, { id: clusterId });
+  } catch (error) {
+    if (!shouldRetryClusterDetailWithoutStopPoints(error)) {
+      throw error;
+    }
+    data = await graphqlQuery(LEGACY_CLUSTER_DETAIL_QUERY, { id: clusterId });
+  }
   if (!data.globalCluster) return null;
   return normalizeClusterDetail(data.globalCluster);
 }
@@ -249,12 +371,29 @@ export function normalizeClusterDetail(cluster) {
       provider_labels: candidate.provider_labels || [],
       aliases: candidate.aliases || [],
       coord_status: candidate.coord_status || "missing_coordinates",
+      provenance: {
+        has_active_source_mappings:
+          candidate.provenance?.has_active_source_mappings || false,
+        active_source_ids: candidate.provenance?.active_source_ids || [],
+        active_source_labels: candidate.provenance?.active_source_labels || [],
+        active_stop_place_refs:
+          candidate.provenance?.active_stop_place_refs || [],
+        historical_source_ids:
+          candidate.provenance?.historical_source_ids || [],
+        historical_source_labels:
+          candidate.provenance?.historical_source_labels || [],
+        historical_stop_place_refs:
+          candidate.provenance?.historical_stop_place_refs || [],
+        coord_input_stop_place_refs:
+          candidate.provenance?.coord_input_stop_place_refs || [],
+      },
       lat: candidate.lat,
       lon: candidate.lon,
       service_context: {
         lines: candidate.service_context?.lines || [],
         incoming: candidate.service_context?.incoming || [],
         outgoing: candidate.service_context?.outgoing || [],
+        stop_points: candidate.service_context?.stop_points || [],
         transport_modes: candidate.service_context?.transport_modes || [],
       },
       context_summary: {
@@ -1022,11 +1161,14 @@ export function serializeWorkspace(workspace) {
 }
 
 export function resolveDefaultMapStyle() {
-  if (globalThis.MAP_STYLE_URL) return globalThis.MAP_STYLE_URL;
-  if (globalThis.PROTOMAPS_API_KEY) {
-    return `https://api.protomaps.com/styles/v2/light.json?key=${globalThis.PROTOMAPS_API_KEY}`;
+  const explicit = String(globalThis.MAP_STYLE_URL || "").trim();
+  if (explicit) return explicit;
+
+  const protomapsKey = String(globalThis.PROTOMAPS_API_KEY || "").trim();
+  if (protomapsKey) {
+    return `https://api.protomaps.com/styles/v4/dark/en.json?key=${encodeURIComponent(protomapsKey)}`;
   }
-  return "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
+  return "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
 }
 
 export function resolveSatelliteMapStyle() {

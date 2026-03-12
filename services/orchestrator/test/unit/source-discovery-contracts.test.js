@@ -26,6 +26,28 @@ test("accepts NeTEx sources without fallback reason", () => {
   assert.equal(result.sources.length, 1);
 });
 
+test("accepts source entries disabled from the default pipeline rollout", () => {
+  const payload = {
+    schemaVersion: "1.0.0",
+    sources: [
+      {
+        id: "fr_netex_preview",
+        country: "FR",
+        provider: "provider",
+        datasetName: "dataset",
+        format: "netex",
+        accessType: "public",
+        downloadMethod: "manual_redirect",
+        downloadUrlOrEndpoint: "https://example.invalid/dataset",
+        pipelineEnabled: false,
+      },
+    ],
+  };
+
+  const result = validateSourceDiscoveryConfig(payload);
+  assert.equal(result.sources[0].pipelineEnabled, false);
+});
+
 test("rejects GTFS source without fallbackReason", () => {
   const payload = {
     schemaVersion: "1.0.0",
@@ -44,4 +66,28 @@ test("rejects GTFS source without fallbackReason", () => {
   };
 
   assert.throws(() => validateSourceDiscoveryConfig(payload), /fallbackReason/);
+});
+
+test("rejects non-boolean pipelineEnabled values", () => {
+  const payload = {
+    schemaVersion: "1.0.0",
+    sources: [
+      {
+        id: "fr_netex_preview",
+        country: "FR",
+        provider: "provider",
+        datasetName: "dataset",
+        format: "netex",
+        accessType: "public",
+        downloadMethod: "manual_redirect",
+        downloadUrlOrEndpoint: "https://example.invalid/dataset",
+        pipelineEnabled: "false",
+      },
+    ],
+  };
+
+  assert.throws(
+    () => validateSourceDiscoveryConfig(payload),
+    /Invalid source-discovery config/,
+  );
 });

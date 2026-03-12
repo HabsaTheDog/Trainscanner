@@ -47,9 +47,22 @@ async function requestAiScoreBridge(clusterId, candidates) {
 
 function mapClusterCandidate(candidate) {
   const toInt = (value) => Number.parseInt(String(value ?? 0), 10) || 0;
-  const labels = Array.isArray(candidate.provider_labels)
-    ? resolveSourceLabels(candidate.provider_labels)
+  const providerLabels = Array.isArray(candidate.provider_labels)
+    ? candidate.provider_labels
     : [];
+  const provenance =
+    candidate.provenance &&
+    typeof candidate.provenance === "object" &&
+    !Array.isArray(candidate.provenance)
+      ? candidate.provenance
+      : null;
+  const activeSourceIds = Array.isArray(provenance?.active_source_ids)
+    ? provenance.active_source_ids.map(String).filter(Boolean)
+    : [];
+  const historicalSourceIds = Array.isArray(provenance?.historical_source_ids)
+    ? provenance.historical_source_ids.map(String).filter(Boolean)
+    : [];
+  const labels = resolveSourceLabels(providerLabels);
   const aliases = Array.isArray(candidate.aliases) ? candidate.aliases : [];
   const serviceContext =
     candidate.service_context &&
@@ -78,6 +91,9 @@ function mapClusterCandidate(candidate) {
       outgoing: Array.isArray(serviceContext.outgoing)
         ? serviceContext.outgoing
         : [],
+      stop_points: Array.isArray(serviceContext.stop_points)
+        ? serviceContext.stop_points
+        : [],
       transport_modes: Array.isArray(serviceContext.transport_modes)
         ? serviceContext.transport_modes
         : [],
@@ -88,6 +104,29 @@ function mapClusterCandidate(candidate) {
       outgoing_count: toInt(contextSummary.outgoing_count),
       stop_point_count: toInt(contextSummary.stop_point_count),
       provider_source_count: toInt(contextSummary.provider_source_count),
+    },
+    provenance: {
+      has_active_source_mappings:
+        provenance?.has_active_source_mappings === true ||
+        activeSourceIds.length > 0,
+      active_source_ids: activeSourceIds,
+      active_source_labels: resolveSourceLabels(activeSourceIds).map(String),
+      active_stop_place_refs: Array.isArray(provenance?.active_stop_place_refs)
+        ? provenance.active_stop_place_refs.map(String).filter(Boolean)
+        : [],
+      historical_source_ids: historicalSourceIds,
+      historical_source_labels:
+        resolveSourceLabels(historicalSourceIds).map(String),
+      historical_stop_place_refs: Array.isArray(
+        provenance?.historical_stop_place_refs,
+      )
+        ? provenance.historical_stop_place_refs.map(String).filter(Boolean)
+        : [],
+      coord_input_stop_place_refs: Array.isArray(
+        provenance?.coord_input_stop_place_refs,
+      )
+        ? provenance.coord_input_stop_place_refs.map(String).filter(Boolean)
+        : [],
     },
   };
 }
@@ -196,4 +235,9 @@ const rootValue = {
     resolveGlobalCluster(clusterId, input),
 };
 
-module.exports = { rootValue };
+module.exports = {
+  rootValue,
+  _internal: {
+    mapClusterCandidate,
+  },
+};

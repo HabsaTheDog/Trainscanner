@@ -8,7 +8,7 @@ import {
   useState,
 } from "react";
 import {
-  formatCoordinateStatusLabel,
+  formatCandidateProvenanceTooltip,
   formatEvidenceCategoryLabel,
   formatEvidenceDetails,
   formatEvidenceStatusLabel,
@@ -509,6 +509,56 @@ const quickCountryFilterCodes = [
 const inp =
   "w-full bg-surface-2 border border-border-strong rounded-lg px-3 py-2 text-text-primary text-sm focus:outline-none focus:border-amber/40 transition-colors";
 
+function normalizeLabelList(values) {
+  const seen = new Set();
+  const labels = [];
+  for (const value of Array.isArray(values) ? values : []) {
+    const label = String(value || "").trim();
+    if (!label || seen.has(label)) {
+      continue;
+    }
+    seen.add(label);
+    labels.push(label);
+  }
+  return labels;
+}
+
+function CandidateContextSection({
+  title,
+  items,
+  totalCount,
+  emptyLabel = "None available.",
+}) {
+  const labels = normalizeLabelList(items);
+  const safeTotalCount = Number.isFinite(totalCount)
+    ? totalCount
+    : labels.length;
+  const extraCount = Math.max(safeTotalCount - labels.length, 0);
+
+  return (
+    <section className="rounded-xl border border-border bg-surface-2 px-3 py-2.5 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xs font-bold text-text-muted font-display uppercase tracking-wider">
+          {title}
+        </div>
+        <Tag>{safeTotalCount}</Tag>
+      </div>
+      {labels.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {labels.map((label) => (
+            <Tag key={`${title}-${label}`} title={label}>
+              {label}
+            </Tag>
+          ))}
+          {extraCount > 0 && <Tag>+{extraCount} more</Tag>}
+        </div>
+      ) : (
+        <p className="m-0 text-sm text-text-muted">{emptyLabel}</p>
+      )}
+    </section>
+  );
+}
+
 /* ── Sidebar ── */
 function ClusterSidebar({
   clusters,
@@ -643,14 +693,26 @@ function CandidateCard({
 }) {
   const c = item.candidate || {};
   const memberNames = getCompositeMembers(item, workspace, candidateMap) || [];
-  const modes = Array.isArray(c.service_context?.transport_modes)
-    ? c.service_context.transport_modes
-    : [];
   const ctx = c.context_summary || {};
   const kB = resolveKindAccent(item.kind);
   const ref = item.ref;
   const providerLabels = item.provider_labels || [];
   const providerFeedsTooltip = formatProviderFeedsTooltip(providerLabels);
+  const provenance = c.provenance || {};
+  const provenanceTooltip = formatCandidateProvenanceTooltip(provenance);
+  const activeSourceLabels = provenance.active_source_labels || [];
+  const historicalSourceLabels = provenance.historical_source_labels || [];
+  const coordInputStopPlaceRefs = provenance.coord_input_stop_place_refs || [];
+  const showOrphanedBadge = activeSourceLabels.length === 0;
+  const showProvenanceBadges =
+    historicalSourceLabels.length > 0 ||
+    coordInputStopPlaceRefs.length > 0 ||
+    showOrphanedBadge;
+  const serviceContext = c.service_context || {};
+  const routeLines = serviceContext.lines || [];
+  const incomingStops = serviceContext.incoming || [];
+  const outgoingStops = serviceContext.outgoing || [];
+  const stopPoints = serviceContext.stop_points || [];
   const fg =
     item.kind === "group" ? findWorkspaceEntity("group", workspace, ref) : null;
   const fm =
@@ -691,17 +753,37 @@ function CandidateCard({
             {item.display_name}
           </strong>
           {item.kind === "raw" && (
-            <div className="flex flex-wrap gap-1.5 mt-2">
-              {modes.slice(0, 2).map((m) => (
-                <Tag key={m}>{m}</Tag>
-              ))}
-              <Tag>{ctx.stop_point_count ?? 0} stops</Tag>
-              <Tag>{ctx.route_count ?? 0} routes</Tag>
-              <Tag>{formatCoordinateStatusLabel(c.coord_status)}</Tag>
-              <TooltipTag tooltip={providerFeedsTooltip}>
-                {providerLabels.length} feeds
-              </TooltipTag>
-            </div>
+            <>
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                <Tag>{ctx.stop_point_count ?? 0} stops</Tag>
+                <Tag>{ctx.route_count ?? 0} routes</Tag>
+                <TooltipTag tooltip={providerFeedsTooltip}>
+                  {providerLabels.length} feeds
+                </TooltipTag>
+              </div>
+              {showProvenanceBadges && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {historicalSourceLabels.length > 0 && (
+                    <TooltipTag tooltip={provenanceTooltip}>
+                      {historicalSourceLabels.length} historical
+                    </TooltipTag>
+                  )}
+                  {coordInputStopPlaceRefs.length > 0 && (
+                    <TooltipTag tooltip={provenanceTooltip}>
+                      {coordInputStopPlaceRefs.length} refs
+                    </TooltipTag>
+                  )}
+                  {showOrphanedBadge && (
+                    <TooltipTag
+                      tooltip={provenanceTooltip}
+                      className="border-red/30 text-red"
+                    >
+                      orphaned
+                    </TooltipTag>
+                  )}
+                </div>
+              )}
+            </>
           )}
           {isComposite && !expanded && (
             <div className="flex items-center gap-2 mt-1.5 text-text-muted text-sm">
@@ -735,28 +817,56 @@ function CandidateCard({
 
       {/* ── Inline rename for raw (when expanded) ── */}
       {expanded && item.kind === "raw" && (
-        <div className="border-t border-border px-3 py-2.5 bg-surface-1/50">
-          <div className="flex justify-between items-center mb-1">
-            <label
-              htmlFor={rawRenameInputId}
-              className="text-xs text-text-muted font-display block"
-            >
-              Rename
-            </label>
-            <span
-              className="text-[0.65rem] font-mono text-text-muted bg-surface-2 px-1.5 py-0.5 rounded border border-border"
-              title="GTFS ID"
-            >
-              {item.candidate?.global_station_id}
-            </span>
+        <div className="border-t border-border px-3 py-2.5 bg-surface-1/50 space-y-2.5">
+          <div>
+            <div className="flex justify-between items-center mb-1">
+              <label
+                htmlFor={rawRenameInputId}
+                className="text-xs text-text-muted font-display block"
+              >
+                Rename
+              </label>
+              <span
+                className="text-[0.65rem] font-mono text-text-muted bg-surface-2 px-1.5 py-0.5 rounded border border-border"
+                title="GTFS ID"
+              >
+                {item.candidate?.global_station_id}
+              </span>
+            </div>
+            <input
+              id={rawRenameInputId}
+              type="text"
+              className={inp}
+              value={getRenameValue(workspace, ref) || item.display_name}
+              onChange={(e) => onRenameRef(ref, e.target.value)}
+            />
           </div>
-          <input
-            id={rawRenameInputId}
-            type="text"
-            className={inp}
-            value={getRenameValue(workspace, ref) || item.display_name}
-            onChange={(e) => onRenameRef(ref, e.target.value)}
-          />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            <CandidateContextSection
+              title="Routes"
+              items={routeLines}
+              totalCount={ctx.route_count}
+              emptyLabel="No route context."
+            />
+            <CandidateContextSection
+              title="Stop Points"
+              items={stopPoints}
+              totalCount={ctx.stop_point_count}
+              emptyLabel="No stop points."
+            />
+            <CandidateContextSection
+              title="Incoming"
+              items={incomingStops}
+              totalCount={ctx.incoming_count}
+              emptyLabel="No incoming context."
+            />
+            <CandidateContextSection
+              title="Outgoing"
+              items={outgoingStops}
+              totalCount={ctx.outgoing_count}
+              emptyLabel="No outgoing context."
+            />
+          </div>
         </div>
       )}
 

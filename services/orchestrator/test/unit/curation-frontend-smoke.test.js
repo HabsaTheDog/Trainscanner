@@ -64,6 +64,8 @@ test("curation frontend includes required component structure and runtime utilit
   assert.match(pageJsx, /function Badge/);
   assert.match(pageJsx, /function StatusPill/);
   assert.match(pageJsx, /function Tag/);
+  assert.match(pageJsx, /function CandidateContextSection/);
+  assert.match(pageJsx, /Stop Points/);
   assert.match(pageJsx, /category==="core_match"/);
   assert.match(pageJsx, /is_seed_rule===true/);
   assert.match(pageJsx, /type="checkbox"/);
@@ -89,8 +91,11 @@ test("curation frontend includes required component structure and runtime utilit
   assert.match(runtimeJs, /workspace_version/);
   assert.match(runtimeJs, /effective_status/);
   assert.match(runtimeJs, /service_context/);
+  assert.match(runtimeJs, /stop_points/);
   assert.match(runtimeJs, /context_summary/);
   assert.match(runtimeJs, /coord_status/);
+  assert.match(runtimeJs, /provenance/);
+  assert.match(runtimeJs, /active_source_labels/);
   assert.match(runtimeJs, /fetchClusters/);
   assert.match(runtimeJs, /country:\s*filters\.country\s*\|\|\s*null/);
   assert.match(runtimeJs, /fetchClusterDetail/);

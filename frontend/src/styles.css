@@ -8,6 +8,9 @@
   --color-surface-3: #21262d;
   --color-surface-4: #282e36;
 
+  --color-scrollbar-thumb: rgba(230, 237, 243, 0.18);
+  --color-scrollbar-thumb-hover: rgba(230, 237, 243, 0.28);
+
   --color-border: rgba(255, 255, 255, 0.06);
   --color-border-strong: rgba(255, 255, 255, 0.12);
   --color-border-accent: rgba(245, 158, 11, 0.3);
@@ -51,6 +54,11 @@
   box-sizing: border-box;
 }
 
+html {
+  color-scheme: dark;
+  scrollbar-color: var(--color-scrollbar-thumb) transparent;
+}
+
 body {
   margin: 0;
   font-family: var(--font-body);
@@ -70,12 +78,12 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--color-scrollbar-thumb);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.18);
+  background: var(--color-scrollbar-thumb-hover);
 }
 
 /* ── Map Markers (imperative DOM, can't use Tailwind classes) ── */
@@ -183,6 +191,16 @@ body {
 
 .curation-map .maplibregl-ctrl-group button span {
   filter: invert(0.8);
+}
+
+.curation-map .maplibregl-ctrl-attrib {
+  background: rgba(13, 17, 23, 0.82);
+  color: var(--color-text-secondary);
+  border-top-left-radius: 8px;
+}
+
+.curation-map .maplibregl-ctrl-attrib a {
+  color: var(--color-text-primary);
 }
 
 /* ── Utility for text-ellipsis ── */

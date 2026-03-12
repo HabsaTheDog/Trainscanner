@@ -203,6 +203,12 @@ SELECT
   END AS geom_3857
 FROM global_stations gs
 WHERE gs.is_active = true
+  AND EXISTS (
+    SELECT 1
+    FROM provider_global_station_mappings m
+    WHERE m.global_station_id = gs.global_station_id
+      AND m.is_active = true
+  )
   AND (
     NULLIF(:'country_filter', '') IS NULL
     OR gs.country = NULLIF(:'country_filter', '')::char(2)
@@ -855,6 +861,14 @@ SELECT
     ARRAY[]::text[]
   ) AS route_labels,
   COALESCE(
+    (
+      SELECT COUNT(*)::integer
+      FROM _cluster_station_route_counts rc
+      WHERE rc.global_station_id = sc.global_station_id
+    ),
+    0
+  ) AS route_count,
+  COALESCE(
     ARRAY(
       SELECT DISTINCT rc.transport_mode
       FROM _cluster_station_route_counts rc
@@ -876,6 +890,14 @@ SELECT
     ARRAY[]::text[]
   ) AS incoming_labels,
   COALESCE(
+    (
+      SELECT COUNT(*)::integer
+      FROM _cluster_station_incoming_counts ic
+      WHERE ic.global_station_id = sc.global_station_id
+    ),
+    0
+  ) AS incoming_count,
+  COALESCE(
     ARRAY(
       SELECT oc.station_label
       FROM _cluster_station_outgoing_counts oc
@@ -885,6 +907,36 @@ SELECT
     ),
     ARRAY[]::text[]
   ) AS outgoing_labels,
+  COALESCE(
+    (
+      SELECT COUNT(*)::integer
+      FROM _cluster_station_outgoing_counts oc
+      WHERE oc.global_station_id = sc.global_station_id
+    ),
+    0
+  ) AS outgoing_count,
+  COALESCE(
+    ARRAY(
+      SELECT
+        DISTINCT
+        COALESCE(
+          NULLIF(sp.display_name, ''),
+          NULLIF(sp.metadata ->> 'provider_stop_point_ref', ''),
+          sp.global_stop_point_id
+        )
+      FROM global_stop_points sp
+      WHERE sp.global_station_id = sc.global_station_id
+        AND sp.is_active = true
+      ORDER BY
+        COALESCE(
+          NULLIF(sp.display_name, ''),
+          NULLIF(sp.metadata ->> 'provider_stop_point_ref', ''),
+          sp.global_stop_point_id
+        ) ASC
+      LIMIT 8
+    ),
+    ARRAY[]::text[]
+  ) AS stop_point_labels,
   sc.adjacent_labels,
   sc.stop_point_count,
   sc.provider_source_count,
@@ -1040,12 +1092,13 @@ SELECT
       'lines', to_jsonb(COALESCE(sc.route_labels, ARRAY[]::text[])),
       'incoming', to_jsonb(COALESCE(sc.incoming_labels, ARRAY[]::text[])),
       'outgoing', to_jsonb(COALESCE(sc.outgoing_labels, ARRAY[]::text[])),
+      'stop_points', to_jsonb(COALESCE(sc.stop_point_labels, ARRAY[]::text[])),
       'transport_modes', to_jsonb(COALESCE(sc.transport_modes, ARRAY[]::text[]))
     ),
     'context_summary', jsonb_build_object(
-      'route_count', cardinality(COALESCE(sc.route_labels, ARRAY[]::text[])),
-      'incoming_count', cardinality(COALESCE(sc.incoming_labels, ARRAY[]::text[])),
-      'outgoing_count', cardinality(COALESCE(sc.outgoing_labels, ARRAY[]::text[])),
+      'route_count', COALESCE(sc.route_count, 0),
+      'incoming_count', COALESCE(sc.incoming_count, 0),
+      'outgoing_count', COALESCE(sc.outgoing_count, 0),
       'stop_point_count', COALESCE(sc.stop_point_count, 0),
       'provider_source_count', COALESCE(sc.provider_source_count, 0)
     ),
