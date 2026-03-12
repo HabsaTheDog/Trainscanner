@@ -8,9 +8,9 @@
     "start": "node src/server.js",
     "lint": "bash -lc \"find src test -type f -name '*.js' -print0 | xargs -0 -n1 node --check\"",
     "check": "npm run lint",
-    "test:unit": "node --test test/unit",
-    "test:integration": "node --test test/integration",
-    "test:e2e": "node --test test/e2e",
+    "test:unit": "node --test test/unit/*.test.js",
+    "test:integration": "node --test test/integration/*.test.js",
+    "test:e2e": "node --test test/e2e/*.test.js",
     "test:coverage": "bash -lc 'rm -rf coverage && c8 --all --src src --reporter=lcovonly --reporter=text-summary --report-dir coverage node --test test/unit test/integration test/e2e'",
     "test": "npm run test:unit && npm run test:integration && npm run test:e2e"
   },
