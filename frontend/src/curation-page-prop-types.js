@@ -35,6 +35,27 @@ export const candidateShape = PropTypes.shape({
     stop_point_count: PropTypes.number,
     route_count: PropTypes.number,
   }),
+  external_reference_summary: PropTypes.shape({
+    source_counts: PropTypes.object,
+    primary_match_count: PropTypes.number,
+    strong_match_count: PropTypes.number,
+    probable_match_count: PropTypes.number,
+  }),
+  external_reference_matches: PropTypes.arrayOf(
+    PropTypes.shape({
+      source_id: PropTypes.string,
+      external_id: PropTypes.string,
+      display_name: PropTypes.string,
+      category: PropTypes.string,
+      lat: PropTypes.number,
+      lon: PropTypes.number,
+      distance_meters: PropTypes.number,
+      match_status: PropTypes.string,
+      match_confidence: PropTypes.number,
+      source_url: PropTypes.string,
+      is_primary: PropTypes.bool,
+    }),
+  ),
 });
 
 export const groupNodeShape = PropTypes.shape({
@@ -126,6 +147,18 @@ export const clusterDetailShape = PropTypes.shape({
   workspace_version: PropTypes.number,
   has_workspace: PropTypes.bool,
   candidates: PropTypes.arrayOf(candidateShape),
+  reference_overlay: PropTypes.arrayOf(
+    PropTypes.shape({
+      source_id: PropTypes.string,
+      external_id: PropTypes.string,
+      display_name: PropTypes.string,
+      category: PropTypes.string,
+      lat: PropTypes.number,
+      lon: PropTypes.number,
+      source_url: PropTypes.string,
+      matched_candidate_ids: PropTypes.arrayOf(PropTypes.string),
+    }),
+  ),
   evidence: PropTypes.arrayOf(evidenceRowShape),
   pair_summaries: PropTypes.arrayOf(pairSummaryShape),
   evidence_summary: PropTypes.object,

@@ -27,7 +27,9 @@ import {
   BASE_MARKER_SIZE,
   buildMappableItems,
   buildMarkerOverlapLayout,
+  EXTERNAL_REFERENCE_MIN_ZOOM,
   MARKER_SELECTION_RING_SIZE,
+  shouldShowExternalReferencePointsAtZoom,
 } from "./curation-page-map-utils";
 import {
   clusterDetailShape,
@@ -47,6 +49,7 @@ import {
   createEmptyWorkspace,
   createGroupFromSelection,
   createMergeFromSelection,
+  fetchReferenceViewport,
   formatResultsLabel,
   getRenameValue,
   markKeepSeparate,
@@ -200,6 +203,153 @@ function resolveMapModeHandler(mode, handlers) {
   handlers.setCustom(mode);
 }
 
+const EXTERNAL_SOURCE_META = {
+  overture: {
+    label: "Overture",
+    color: "#22c55e",
+    pillClassName: "border-green/30 bg-green-dim text-green",
+  },
+  wikidata: {
+    label: "Wikidata",
+    color: "#38bdf8",
+    pillClassName: "border-blue/30 bg-blue-dim text-blue",
+  },
+  geonames: {
+    label: "GeoNames",
+    color: "#f97316",
+    pillClassName: "border-orange/30 bg-orange-dim text-orange",
+  },
+};
+
+function resolveExternalSourceMeta(sourceId) {
+  return (
+    EXTERNAL_SOURCE_META[
+      String(sourceId || "")
+        .trim()
+        .toLowerCase()
+    ] || {
+      label: formatLabel(sourceId || "external"),
+      color: "#94a3b8",
+      pillClassName: "border-border bg-surface-3 text-text-secondary",
+    }
+  );
+}
+
+function formatMeters(value) {
+  const meters = Number(value);
+  if (!Number.isFinite(meters)) {
+    return "—";
+  }
+  return `${Math.round(meters)}m`;
+}
+
+function buildGoogleMapsLink(name, lat, lon) {
+  const parts = [];
+  const cleanName = String(name || "").trim();
+  if (cleanName) {
+    parts.push(cleanName);
+  }
+  if (Number.isFinite(Number(lat)) && Number.isFinite(Number(lon))) {
+    parts.push(`${Number(lat)},${Number(lon)}`);
+  }
+  const query = parts.join(" ");
+  if (!query) {
+    return "";
+  }
+  const url = new URL("https://www.google.com/maps/search/");
+  url.searchParams.set("api", "1");
+  url.searchParams.set("query", query);
+  return url.toString();
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function uniqueStrings(values) {
+  return Array.from(
+    new Set(
+      (Array.isArray(values) ? values : [])
+        .map((value) => String(value || "").trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function buildDisplayReferencePoints({
+  focusReferencePoints = [],
+  viewportReferencePoints = [],
+  activeCandidateIds = [],
+}) {
+  const activeCandidateIdSet = new Set(uniqueStrings(activeCandidateIds));
+  const merged = new Map();
+
+  const mergePoint = (point, options = {}) => {
+    const sourceId = String(point?.source_id || "")
+      .trim()
+      .toLowerCase();
+    const externalId = String(point?.external_id || "").trim();
+    const key = `${sourceId}:${externalId || `${point?.lat}:${point?.lon}`}`;
+    const matchedCandidateIds = uniqueStrings(point?.matched_candidate_ids);
+    const previous = merged.get(key);
+    const combinedMatchedCandidateIds = uniqueStrings([
+      ...(previous?.matched_candidate_ids || []),
+      ...matchedCandidateIds,
+    ]);
+    const relevantCandidateIds = combinedMatchedCandidateIds.filter(
+      (candidateId) => activeCandidateIdSet.has(candidateId),
+    );
+
+    merged.set(key, {
+      ...previous,
+      ...point,
+      source_id: sourceId,
+      external_id: externalId,
+      matched_candidate_ids: combinedMatchedCandidateIds,
+      relevant_candidate_ids: relevantCandidateIds,
+      match_count: Math.max(
+        Number(previous?.match_count || 0),
+        Number(point?.match_count || 0),
+        combinedMatchedCandidateIds.length,
+      ),
+      is_focus_overlay:
+        options.isFocusOverlay === true || previous?.is_focus_overlay === true,
+      is_relevant_to_active_cluster: relevantCandidateIds.length > 0,
+    });
+  };
+
+  for (const point of Array.isArray(viewportReferencePoints)
+    ? viewportReferencePoints
+    : []) {
+    mergePoint(point, { isFocusOverlay: false });
+  }
+  for (const point of Array.isArray(focusReferencePoints)
+    ? focusReferencePoints
+    : []) {
+    mergePoint(point, { isFocusOverlay: true });
+  }
+
+  return Array.from(merged.values()).sort((left, right) => {
+    return (
+      Number(right.is_focus_overlay === true) -
+        Number(left.is_focus_overlay === true) ||
+      Number(right.is_relevant_to_active_cluster === true) -
+        Number(left.is_relevant_to_active_cluster === true) ||
+      Number(right.match_count || 0) - Number(left.match_count || 0) ||
+      String(left.source_id || "").localeCompare(
+        String(right.source_id || ""),
+      ) ||
+      String(left.display_name || "").localeCompare(
+        String(right.display_name || ""),
+      )
+    );
+  });
+}
+
 function getCompositeMembers(item, workspace, candidateMap) {
   return item.member_refs?.map((ref) =>
     resolveDisplayNameForRef(ref, workspace, candidateMap),
@@ -343,17 +493,71 @@ function createMarkerEl(item, sel, om, onSelect) {
   return sh;
 }
 
+function createReferenceMarkerEl(point, onSelect) {
+  const meta = resolveExternalSourceMeta(point.source_id);
+  const shell = document.createElement("button");
+  shell.type = "button";
+  const relevantCandidateCount = Array.isArray(point.relevant_candidate_ids)
+    ? point.relevant_candidate_ids.length
+    : 0;
+  shell.className = [
+    "curation-reference-marker-shell",
+    point.is_focus_overlay ? "curation-reference-marker-shell--focus" : "",
+    point.is_relevant_to_active_cluster
+      ? "curation-reference-marker-shell--relevant"
+      : "curation-reference-marker-shell--background",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  shell.title = `${meta.label}: ${point.display_name || point.external_id}`;
+  shell.style.setProperty("--reference-marker-color", meta.color);
+  shell.style.zIndex = point.is_focus_overlay
+    ? "1400"
+    : point.is_relevant_to_active_cluster
+      ? "1325"
+      : "1050";
+  shell.addEventListener("click", (event) => {
+    event.stopPropagation();
+    onSelect();
+  });
+
+  const dot = document.createElement("span");
+  dot.className = [
+    "curation-reference-marker",
+    point.is_focus_overlay ? "curation-reference-marker--focus" : "",
+    point.is_relevant_to_active_cluster
+      ? "curation-reference-marker--relevant"
+      : "curation-reference-marker--background",
+    relevantCandidateCount > 0 ? "curation-reference-marker--matched" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  shell.appendChild(dot);
+  return shell;
+}
+
 /* ── Map ── */
 function CurationMap({
   items,
+  focusReferencePoints,
+  viewportReferencePoints,
   selectedRefs,
   onSelectRef,
+  onSelectReferenceCandidates,
+  onViewportChange,
   mapMode,
   onToggleMapMode,
+  activeReferenceSources,
+  onToggleReferenceSource,
 }) {
   const mapRef = useRef(null),
     cRef = useRef(null),
-    mkRef = useRef([]);
+    mkRef = useRef([]),
+    overlayMarkerRef = useRef([]),
+    popupRef = useRef(null),
+    onViewportChangeRef = useRef(onViewportChange);
+  const [currentZoom, setCurrentZoom] = useState(5);
+  onViewportChangeRef.current = onViewportChange;
   useEffect(() => {
     if (mapRef.current || !cRef.current) return;
     const m = new maplibregl.Map({
@@ -364,6 +568,7 @@ function CurationMap({
     });
     m.addControl(new maplibregl.NavigationControl(), "top-right");
     mapRef.current = m;
+    setCurrentZoom(m.getZoom());
     return () => {
       m.remove();
       mapRef.current = null;
@@ -375,6 +580,42 @@ function CurationMap({
     map.setStyle(resolveMapStyle(mapMode));
   }, [mapMode]);
   useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const emitViewport = () => {
+      const bounds = map.getBounds();
+      if (!bounds || typeof onViewportChangeRef.current !== "function") {
+        return;
+      }
+      onViewportChangeRef.current({
+        minLat: bounds.getSouth(),
+        minLon: bounds.getWest(),
+        maxLat: bounds.getNorth(),
+        maxLon: bounds.getEast(),
+      });
+    };
+    const syncZoom = () => {
+      setCurrentZoom(map.getZoom());
+    };
+
+    map.on("load", emitViewport);
+    map.on("moveend", emitViewport);
+    map.on("load", syncZoom);
+    map.on("zoomend", syncZoom);
+    if (map.isStyleLoaded()) {
+      emitViewport();
+      syncZoom();
+    }
+
+    return () => {
+      map.off("load", emitViewport);
+      map.off("moveend", emitViewport);
+      map.off("load", syncZoom);
+      map.off("zoomend", syncZoom);
+    };
+  }, []);
+  useEffect(() => {
     const m = mapRef.current;
     if (!m) return;
     let fid = 0;
@@ -383,10 +624,22 @@ function CurationMap({
     const valid = (items || []).filter(
       (i) => Number.isFinite(i.lat) && Number.isFinite(i.lon),
     );
-    if (valid.length === 0) return;
+    const visibleOverlay = (focusReferencePoints || []).filter(
+      (point) =>
+        activeReferenceSources.has(point.source_id) &&
+        Number.isFinite(point.lat) &&
+        Number.isFinite(point.lon),
+    );
+    if (valid.length === 0 && visibleOverlay.length === 0) return;
     const bounds = new maplibregl.LngLatBounds();
-    for (const i of valid) bounds.extend([i.lon, i.lat]);
-    m.fitBounds(bounds, { padding: 60, maxZoom: 15, duration: 0 });
+    for (const i of [...valid, ...visibleOverlay])
+      bounds.extend([i.lon, i.lat]);
+    m.fitBounds(bounds, {
+      padding: { top: 88, right: 104, bottom: 88, left: 104 },
+      maxZoom: 14,
+      duration: 0,
+    });
+    if (valid.length === 0) return;
     fid = requestAnimationFrame(() => {
       const ol = buildMarkerOverlapLayout(m, valid);
       for (const i of valid) {
@@ -401,7 +654,79 @@ function CurationMap({
     return () => {
       if (fid) cancelAnimationFrame(fid);
     };
-  }, [items, onSelectRef, selectedRefs]);
+  }, [
+    activeReferenceSources,
+    focusReferencePoints,
+    items,
+    onSelectRef,
+    selectedRefs,
+  ]);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    clearMarkers(overlayMarkerRef.current);
+    overlayMarkerRef.current = [];
+    popupRef.current?.remove();
+    popupRef.current = null;
+
+    const visibleOverlay = (
+      Array.isArray(viewportReferencePoints) ? viewportReferencePoints : []
+    ).filter(
+      (point) =>
+        shouldShowExternalReferencePointsAtZoom(currentZoom) &&
+        activeReferenceSources.has(point.source_id) &&
+        Number.isFinite(point.lat) &&
+        Number.isFinite(point.lon),
+    );
+    for (const point of visibleOverlay) {
+      const marker = new maplibregl.Marker({
+        element: createReferenceMarkerEl(point, () => {
+          onSelectReferenceCandidates(point.relevant_candidate_ids || []);
+          popupRef.current?.remove();
+          popupRef.current = new maplibregl.Popup({
+            closeButton: false,
+            offset: 14,
+          })
+            .setLngLat([point.lon, point.lat])
+            .setHTML(
+              `
+                <div class="space-y-1.5 text-sm">
+                  <div class="font-bold">${escapeHtml(point.display_name || point.external_id)}</div>
+                  <div class="text-xs text-slate-400">${escapeHtml(resolveExternalSourceMeta(point.source_id).label)}</div>
+                  <div class="text-xs text-slate-300">${escapeHtml(point.category || "station")}</div>
+                  <div class="text-xs text-slate-300">${point.is_relevant_to_active_cluster ? "Relevant to active cluster" : "Viewport reference point"}</div>
+                  ${
+                    point.source_url
+                      ? `<a class="text-xs text-sky-300 no-underline hover:underline" href="${escapeHtml(point.source_url)}" target="_blank" rel="noreferrer">Open source</a>`
+                      : ""
+                  }
+                </div>
+              `,
+            )
+            .addTo(map);
+        }),
+        anchor: "center",
+      })
+        .setLngLat([point.lon, point.lat])
+        .addTo(map);
+      overlayMarkerRef.current.push(marker);
+    }
+
+    return () => {
+      clearMarkers(overlayMarkerRef.current);
+      overlayMarkerRef.current = [];
+      popupRef.current?.remove();
+      popupRef.current = null;
+    };
+  }, [
+    activeReferenceSources,
+    currentZoom,
+    onSelectReferenceCandidates,
+    viewportReferencePoints,
+  ]);
+  const showReferenceZoomHint =
+    activeReferenceSources.size > 0 &&
+    !shouldShowExternalReferencePointsAtZoom(currentZoom);
   return (
     <div className="relative w-full h-full">
       <div ref={cRef} className="curation-map w-full h-full" />
@@ -423,6 +748,27 @@ function CurationMap({
           Sat
         </button>
       </div>
+      <div className="absolute top-3 left-24 flex gap-1 z-10 flex-wrap pr-3">
+        {["overture", "wikidata", "geonames"].map((sourceId) => {
+          const meta = resolveExternalSourceMeta(sourceId);
+          const active = activeReferenceSources.has(sourceId);
+          return (
+            <button
+              key={sourceId}
+              type="button"
+              onClick={() => onToggleReferenceSource(sourceId)}
+              className={`px-2.5 py-1 rounded-md text-xs font-bold font-display border backdrop-blur-md cursor-pointer transition-all ${active ? meta.pillClassName : "bg-surface-0/50 border-white/10 text-white/60 hover:bg-surface-0/70"}`}
+            >
+              {meta.label}
+            </button>
+          );
+        })}
+      </div>
+      {showReferenceZoomHint ? (
+        <div className="absolute top-12 left-24 z-10 rounded-md border border-white/10 bg-surface-0/75 px-2.5 py-1 text-[11px] font-display text-white/75 backdrop-blur-md">
+          Zoom in to level {EXTERNAL_REFERENCE_MIN_ZOOM} to show references
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -703,6 +1049,16 @@ function CandidateCard({
   const activeSourceLabels = provenance.active_source_labels || [];
   const historicalSourceLabels = provenance.historical_source_labels || [];
   const coordInputStopPlaceRefs = provenance.coord_input_stop_place_refs || [];
+  const externalSummary = c.external_reference_summary || {};
+  const externalMatches = c.external_reference_matches || [];
+  const externalSourceCounts = Object.entries(
+    externalSummary.source_counts || {},
+  );
+  const googleMapsLink = buildGoogleMapsLink(
+    item.display_name,
+    item.lat,
+    item.lon,
+  );
   const showOrphanedBadge = activeSourceLabels.length === 0;
   const showProvenanceBadges =
     historicalSourceLabels.length > 0 ||
@@ -783,6 +1139,33 @@ function CandidateCard({
                   )}
                 </div>
               )}
+              {(externalSourceCounts.length > 0 ||
+                externalSummary.strong_match_count > 0 ||
+                externalSummary.probable_match_count > 0) && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {externalSourceCounts.map(([sourceId, count]) => {
+                    const meta = resolveExternalSourceMeta(sourceId);
+                    return (
+                      <Tag
+                        key={`${item.ref}-${sourceId}`}
+                        className={meta.pillClassName}
+                      >
+                        {meta.label} {count}
+                      </Tag>
+                    );
+                  })}
+                  {externalSummary.strong_match_count > 0 && (
+                    <Tag className="border-green/30 bg-green-dim text-green">
+                      Strong {externalSummary.strong_match_count}
+                    </Tag>
+                  )}
+                  {externalSummary.probable_match_count > 0 && (
+                    <Tag className="border-blue/30 bg-blue-dim text-blue">
+                      Probable {externalSummary.probable_match_count}
+                    </Tag>
+                  )}
+                </div>
+              )}
             </>
           )}
           {isComposite && !expanded && (
@@ -841,6 +1224,67 @@ function CandidateCard({
               onChange={(e) => onRenameRef(ref, e.target.value)}
             />
           </div>
+          <section className="rounded-xl border border-border bg-surface-2 px-3 py-2.5 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-xs font-bold text-text-muted font-display uppercase tracking-wider">
+                External References
+              </div>
+              {googleMapsLink ? (
+                <a
+                  href={googleMapsLink}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs text-amber no-underline hover:underline"
+                >
+                  Open in Google Maps
+                </a>
+              ) : null}
+            </div>
+            {externalMatches.length > 0 ? (
+              <div className="space-y-1.5">
+                {externalMatches.slice(0, 3).map((match) => {
+                  const meta = resolveExternalSourceMeta(match.source_id);
+                  return (
+                    <div
+                      key={`${item.ref}-${match.source_id}-${match.external_id}`}
+                      className="rounded-lg border border-border bg-surface-1 px-2.5 py-2"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="text-sm text-text-primary truncate">
+                            {match.display_name}
+                          </div>
+                          <div className="flex flex-wrap gap-1.5 mt-1">
+                            <Tag className={meta.pillClassName}>
+                              {meta.label}
+                            </Tag>
+                            <Tag>
+                              {formatLabel(match.match_status || "match")}
+                            </Tag>
+                            <Tag>{formatMeters(match.distance_meters)}</Tag>
+                          </div>
+                        </div>
+                        {match.source_url ? (
+                          <a
+                            href={match.source_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-xs text-amber no-underline hover:underline shrink-0"
+                          >
+                            Source
+                          </a>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="m-0 text-sm text-text-muted">
+                No external matches loaded for this candidate.
+              </p>
+            )}
+          </section>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             <CandidateContextSection
               title="Routes"
@@ -1251,10 +1695,16 @@ export function CurationPage() {
   const [saveState, setSaveState] = useState("Saved");
   const [aiResult, setAiResult] = useState(null);
   const [expandedRefs, setExpandedRefs] = useState(new Set());
+  const [viewportReferencePoints, setViewportReferencePoints] = useState([]);
+  const [activeReferenceSources, setActiveReferenceSources] = useState(
+    () => new Set(["overture", "wikidata", "geonames"]),
+  );
   const ntRef = useRef(null),
     lsRef = useRef(serializeWorkspace(createEmptyWorkspace())),
     srRef = useRef(0),
-    isRef = useRef(false);
+    isRef = useRef(false),
+    lastViewportKeyRef = useRef(""),
+    viewportRequestIdRef = useRef(0);
 
   const toggleExpand = useCallback((ref) => {
     setExpandedRefs((prev) => {
@@ -1302,6 +1752,52 @@ export function CurationPage() {
     },
     [showNotice],
   );
+  const loadReferenceViewport = useCallback(
+    async (viewport) => {
+      const minLat = Number(viewport?.minLat);
+      const minLon = Number(viewport?.minLon);
+      const maxLat = Number(viewport?.maxLat);
+      const maxLon = Number(viewport?.maxLon);
+      if (
+        !Number.isFinite(minLat) ||
+        !Number.isFinite(minLon) ||
+        !Number.isFinite(maxLat) ||
+        !Number.isFinite(maxLon)
+      ) {
+        return;
+      }
+
+      const viewportKey = [minLat, minLon, maxLat, maxLon]
+        .map((value) => value.toFixed(3))
+        .join(":");
+      if (viewportKey === lastViewportKeyRef.current) {
+        return;
+      }
+      lastViewportKeyRef.current = viewportKey;
+      const requestId = viewportRequestIdRef.current + 1;
+      viewportRequestIdRef.current = requestId;
+
+      try {
+        const rows = await fetchReferenceViewport({
+          minLat,
+          minLon,
+          maxLat,
+          maxLon,
+          limit: 1500,
+        });
+        if (viewportRequestIdRef.current !== requestId) {
+          return;
+        }
+        setViewportReferencePoints(rows);
+      } catch (error) {
+        if (viewportRequestIdRef.current !== requestId) {
+          return;
+        }
+        showNotice(`Viewport refs: ${error.message}`, "error");
+      }
+    },
+    [showNotice],
+  );
 
   useEffect(() => {
     loadClusters();
@@ -1328,6 +1824,28 @@ export function CurationPage() {
     [rail, uiState.focusedRef],
   );
   const plotted = useMemo(() => buildMappableItems(rail), [rail]);
+  const activeClusterCandidateIds = useMemo(
+    () =>
+      uniqueStrings(
+        (clusterDetail?.candidates || []).map((candidate) =>
+          String(candidate?.global_station_id || "").trim(),
+        ),
+      ),
+    [clusterDetail?.candidates],
+  );
+  const displayReferencePoints = useMemo(
+    () =>
+      buildDisplayReferencePoints({
+        focusReferencePoints: clusterDetail?.reference_overlay || [],
+        viewportReferencePoints,
+        activeCandidateIds: activeClusterCandidateIds,
+      }),
+    [
+      activeClusterCandidateIds,
+      clusterDetail?.reference_overlay,
+      viewportReferencePoints,
+    ],
+  );
 
   useEffect(() => {
     if (!uiState.focusedRef) return;
@@ -1410,6 +1928,31 @@ export function CurationPage() {
   const hSelectRef = useCallback((ref) => {
     dispatch({ type: "toggle_selection", ref });
     dispatch({ type: "focus", ref });
+  }, []);
+  const hSelectReferenceCandidates = useCallback(
+    (candidateIds = []) => {
+      const refs = uniqueStrings(candidateIds.map(toRawRef)).filter((ref) =>
+        railIdx.has(ref),
+      );
+      if (refs.length === 0) {
+        return;
+      }
+      dispatch({
+        type: "set_selection",
+        refs,
+        lastSelectedIndex: resolveSelectedIndex(railIdx, refs),
+      });
+      dispatch({ type: "focus", ref: refs[0] });
+    },
+    [railIdx],
+  );
+  const hToggleReferenceSource = useCallback((sourceId) => {
+    setActiveReferenceSources((previous) => {
+      const next = new Set(previous);
+      if (next.has(sourceId)) next.delete(sourceId);
+      else next.add(sourceId);
+      return next;
+    });
   }, []);
   const hMerge = useCallback(() => {
     commit(
@@ -1830,8 +2373,12 @@ export function CurationPage() {
           <div className="flex-[40] min-w-[300px] relative shrink-0">
             <CurationMap
               items={plotted}
+              focusReferencePoints={clusterDetail?.reference_overlay || []}
+              viewportReferencePoints={displayReferencePoints}
               selectedRefs={uiState.selectedRefs}
               onSelectRef={hSelectRef}
+              onSelectReferenceCandidates={hSelectReferenceCandidates}
+              onViewportChange={loadReferenceViewport}
               mapMode={uiState.mapMode}
               onToggleMapMode={(mode) =>
                 resolveMapModeHandler(mode, {
@@ -1841,6 +2388,8 @@ export function CurationPage() {
                     dispatch({ type: "map_mode", mode: nextMode }),
                 })
               }
+              activeReferenceSources={activeReferenceSources}
+              onToggleReferenceSource={hToggleReferenceSource}
             />
           </div>
         </div>
@@ -1862,10 +2411,45 @@ EvidenceRows.propTypes = {
 
 CurationMap.propTypes = {
   items: PropTypes.arrayOf(railItemShape).isRequired,
+  focusReferencePoints: PropTypes.arrayOf(
+    PropTypes.shape({
+      source_id: PropTypes.string,
+      external_id: PropTypes.string,
+      display_name: PropTypes.string,
+      category: PropTypes.string,
+      lat: PropTypes.number,
+      lon: PropTypes.number,
+      source_url: PropTypes.string,
+      matched_candidate_ids: PropTypes.arrayOf(PropTypes.string),
+      match_count: PropTypes.number,
+    }),
+  ).isRequired,
+  viewportReferencePoints: PropTypes.arrayOf(
+    PropTypes.shape({
+      source_id: PropTypes.string,
+      external_id: PropTypes.string,
+      display_name: PropTypes.string,
+      category: PropTypes.string,
+      lat: PropTypes.number,
+      lon: PropTypes.number,
+      source_url: PropTypes.string,
+      matched_candidate_ids: PropTypes.arrayOf(PropTypes.string),
+      relevant_candidate_ids: PropTypes.arrayOf(PropTypes.string),
+      match_count: PropTypes.number,
+      is_focus_overlay: PropTypes.bool,
+      is_relevant_to_active_cluster: PropTypes.bool,
+    }),
+  ).isRequired,
   selectedRefs: refSetShape.isRequired,
   onSelectRef: PropTypes.func.isRequired,
+  onSelectReferenceCandidates: PropTypes.func.isRequired,
+  onViewportChange: PropTypes.func.isRequired,
   mapMode: PropTypes.string.isRequired,
   onToggleMapMode: PropTypes.func.isRequired,
+  activeReferenceSources: PropTypes.shape({
+    has: PropTypes.func.isRequired,
+  }).isRequired,
+  onToggleReferenceSource: PropTypes.func.isRequired,
 };
 
 Pill.propTypes = {

@@ -28,6 +28,10 @@ const cliCases = [
     expectedUsage: /Usage: scripts\/data\/build-global-merge-queue\.sh/,
   },
   {
+    file: "refresh-external-references.js",
+    expectedUsage: /Usage: scripts\/data\/refresh-external-references\.sh/,
+  },
+  {
     file: "report-review-queue.js",
     expectedUsage: /Usage: scripts\/data\/report-review-queue\.sh/,
   },
@@ -94,7 +98,7 @@ test("refresh station review CLI validates selected steps", async () => {
       assert.match(err.stderr, /errorCode=INVALID_REQUEST/);
       assert.match(
         err.stderr,
-        /must be one of fetch\|ingest\|global-stations\|merge-queue/,
+        /must be one of fetch\|ingest\|global-stations\|reference-data\|merge-queue/,
       );
       return true;
     },
@@ -144,10 +148,14 @@ test("refresh station review dry-run scopes fetch and ingest locally but rebuild
   );
   assert.match(
     result.stdout,
+    /dry-run reference-data: Import external references and build matches --as-of 2026-03-10 --country DE/,
+  );
+  assert.match(
+    result.stdout,
     /dry-run merge-queue: Build global merge queue --as-of 2026-03-10/,
   );
   assert.doesNotMatch(
     result.stdout,
-    /dry-run global-stations: .*--country|dry-run global-stations: .*--source-id|dry-run merge-queue: .*--country|dry-run merge-queue: .*--source-id/,
+    /dry-run global-stations: .*--country|dry-run global-stations: .*--source-id|dry-run merge-queue: .*--country|dry-run merge-queue: .*--source-id|dry-run reference-data: .*--source-id/,
   );
 });

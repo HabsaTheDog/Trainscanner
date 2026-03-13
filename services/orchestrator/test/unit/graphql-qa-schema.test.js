@@ -57,6 +57,14 @@ test("global merge cluster types expose global station identifiers", () => {
   assert.ok(fields.service_context, "candidate should expose service_context");
   assert.ok(fields.context_summary, "candidate should expose context_summary");
   assert.ok(fields.provenance, "candidate should expose provenance");
+  assert.ok(
+    fields.external_reference_summary,
+    "candidate should expose external_reference_summary",
+  );
+  assert.ok(
+    fields.external_reference_matches,
+    "candidate should expose external_reference_matches",
+  );
   const serviceContextType = schema.getType("GlobalCandidateServiceContext");
   assert.ok(serviceContextType, "GlobalCandidateServiceContext should exist");
   assert.ok(
@@ -87,6 +95,7 @@ test("cluster detail exposes workspace metadata and additive evidence summary fi
   assert.ok(fields.workspace, "detail should expose workspace JSON");
   assert.ok(fields.evidence_summary, "detail should expose evidence_summary");
   assert.ok(fields.pair_summaries, "detail should expose pair_summaries");
+  assert.ok(fields.reference_overlay, "detail should expose reference_overlay");
   const pairType = schema.getType("GlobalPairSummary");
   const pairFields = pairType.getFields();
   assert.ok(pairFields.categories, "pair summary should expose categories");
@@ -110,6 +119,28 @@ test("cluster detail exposes workspace metadata", () => {
   assert.ok(fields.workspace_version, "detail should expose workspace_version");
   assert.ok(fields.has_workspace, "detail should expose has_workspace");
   assert.ok(fields.workspace, "detail should expose workspace JSON");
+});
+
+test("external reference helper types are present", () => {
+  const summaryType = schema.getType("GlobalCandidateExternalReferenceSummary");
+  const matchType = schema.getType("GlobalCandidateExternalReferenceMatch");
+  const overlayType = schema.getType("GlobalReferencePoint");
+
+  assert.ok(
+    summaryType,
+    "GlobalCandidateExternalReferenceSummary should exist",
+  );
+  assert.ok(matchType, "GlobalCandidateExternalReferenceMatch should exist");
+  assert.ok(overlayType, "GlobalReferencePoint should exist");
+  assert.ok(
+    summaryType.getFields().source_counts,
+    "summary should expose source_counts",
+  );
+  assert.ok(matchType.getFields().source_id, "match should expose source_id");
+  assert.ok(
+    overlayType.getFields().matched_candidate_ids,
+    "overlay should expose matched_candidate_ids",
+  );
 });
 
 test("health query resolves without DB connection", async () => {

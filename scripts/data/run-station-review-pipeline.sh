@@ -38,18 +38,20 @@ Run a full station-review data pipeline in one command:
   2) fetch latest sources
   3) ingest NeTEx snapshots
   4) build pan-European global stations
-  5) build global merge queue clusters
+  5) import external reviewer reference data
+  6) build global merge queue clusters
 
 Options:
   --country <ISO2>            Restrict fetch/ingest scope to one country
   --as-of YYYY-MM-DD          Snapshot date override for refresh stages
   --source-id <id>            Restrict fetch/ingest scope to one source id
-  --only <list>               Comma-separated steps: fetch,ingest,global-stations,merge-queue
-  --from-step <step>          Start from step: fetch|ingest|global-stations|merge-queue
-  --to-step <step>            Stop after step: fetch|ingest|global-stations|merge-queue
+  --only <list>               Comma-separated steps: fetch,ingest,global-stations,reference-data,merge-queue
+  --from-step <step>          Start from step: fetch|ingest|global-stations|reference-data|merge-queue
+  --to-step <step>            Stop after step: fetch|ingest|global-stations|reference-data|merge-queue
   --skip-fetch                Skip fetch step
   --skip-ingest               Skip ingest step
   --skip-global-stations      Skip global station build step
+  --skip-reference-data       Skip external reference import/match step
   --skip-merge-queue          Skip global merge queue build step
   --skip-db-bootstrap         Skip DB schema bootstrap
   --run-id <id>               Optional run id prefix for refresh stage logs
@@ -151,7 +153,7 @@ while [[ $# -gt 0 ]]; do
       fi
       shift 2
       ;;
-    --skip-fetch|--skip-ingest|--skip-global-stations|--skip-merge-queue)
+    --skip-fetch|--skip-ingest|--skip-global-stations|--skip-reference-data|--skip-merge-queue)
       REFRESH_ARGS+=("$1")
       shift
       ;;

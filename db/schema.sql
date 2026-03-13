@@ -381,6 +381,88 @@ CREATE INDEX IF NOT EXISTS idx_global_stop_points_geom
   ON global_stop_points USING gist (geom)
   WHERE geom IS NOT NULL;
 
+CREATE TABLE IF NOT EXISTS external_reference_imports (
+  import_id uuid PRIMARY KEY,
+  source_id text NOT NULL,
+  snapshot_label text NOT NULL,
+  snapshot_date date,
+  country iso_country_code,
+  status text NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'succeeded', 'failed')),
+  metadata jsonb NOT NULL DEFAULT jsonb_build_object(),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (source_id, snapshot_label, country)
+);
+
+CREATE INDEX IF NOT EXISTS idx_external_reference_imports_source_country
+  ON external_reference_imports (source_id, country, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS external_reference_stations (
+  reference_station_id bigserial PRIMARY KEY,
+  import_id uuid NOT NULL REFERENCES external_reference_imports(import_id) ON DELETE CASCADE,
+  source_id text NOT NULL,
+  external_id text NOT NULL,
+  display_name text NOT NULL,
+  normalized_name text NOT NULL,
+  country iso_country_code,
+  latitude double precision,
+  longitude double precision,
+  geom geometry(Point, 4326) GENERATED ALWAYS AS (
+    CASE
+      WHEN longitude BETWEEN -180 AND 180 AND latitude BETWEEN -90 AND 90
+        THEN ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)
+      ELSE NULL
+    END
+  ) STORED,
+  category text,
+  subtype text,
+  source_url text,
+  metadata jsonb NOT NULL DEFAULT jsonb_build_object(),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (import_id, source_id, external_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_external_reference_stations_geom
+  ON external_reference_stations USING gist (geom)
+  WHERE geom IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_external_reference_stations_country_name
+  ON external_reference_stations (country, normalized_name);
+
+CREATE INDEX IF NOT EXISTS idx_external_reference_stations_source_external
+  ON external_reference_stations (source_id, external_id);
+
+CREATE TABLE IF NOT EXISTS global_station_reference_matches (
+  match_id bigserial PRIMARY KEY,
+  global_station_id text NOT NULL REFERENCES global_stations(global_station_id) ON DELETE CASCADE,
+  reference_station_id bigint NOT NULL REFERENCES external_reference_stations(reference_station_id) ON DELETE CASCADE,
+  source_id text NOT NULL,
+  match_status text NOT NULL CHECK (match_status IN ('strong', 'probable', 'weak')),
+  match_confidence numeric(6,4),
+  name_similarity numeric(6,4),
+  distance_meters numeric(10,2),
+  token_overlap_count integer NOT NULL DEFAULT 0,
+  is_primary boolean NOT NULL DEFAULT false,
+  metadata jsonb NOT NULL DEFAULT jsonb_build_object(),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (global_station_id, reference_station_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_global_station_reference_matches_station_source
+  ON global_station_reference_matches (global_station_id, source_id, is_primary);
+
+CREATE INDEX IF NOT EXISTS idx_global_station_reference_matches_reference
+  ON global_station_reference_matches (reference_station_id);
+
+CREATE INDEX IF NOT EXISTS idx_global_station_reference_matches_status_confidence
+  ON global_station_reference_matches (match_status, match_confidence DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_global_station_reference_matches_primary
+  ON global_station_reference_matches (global_station_id, source_id)
+  WHERE is_primary = true;
+
 CREATE TABLE IF NOT EXISTS provider_global_station_mappings (
   mapping_id bigserial PRIMARY KEY,
   source_id text NOT NULL,

@@ -5,6 +5,14 @@ const schema = buildSchema(`
     health: String
     globalClusters(country: String, status: String): GlobalMergeClusterConnection!
     globalCluster(id: ID!): GlobalMergeClusterDetail
+    globalReferenceViewport(
+      minLat: Float!
+      minLon: Float!
+      maxLat: Float!
+      maxLon: Float!
+      sourceIds: [String!]
+      limit: Int
+    ): [GlobalReferencePoint!]!
   }
 
   type Mutation {
@@ -112,6 +120,7 @@ const schema = buildSchema(`
     issue_count: Int
     country_tags: [String!]
     candidates: [GlobalClusterCandidate!]
+    reference_overlay: [GlobalReferencePoint!]
     evidence: [GlobalEvidence!]
     evidence_summary: JSON
     pair_summaries: [GlobalPairSummary!]
@@ -132,6 +141,41 @@ const schema = buildSchema(`
     service_context: GlobalCandidateServiceContext
     context_summary: GlobalCandidateContextSummary
     provenance: GlobalCandidateProvenance
+    external_reference_summary: GlobalCandidateExternalReferenceSummary
+    external_reference_matches: [GlobalCandidateExternalReferenceMatch!]
+  }
+
+  type GlobalCandidateExternalReferenceSummary {
+    source_counts: JSON
+    primary_match_count: Int
+    strong_match_count: Int
+    probable_match_count: Int
+  }
+
+  type GlobalCandidateExternalReferenceMatch {
+    source_id: String
+    external_id: String
+    display_name: String
+    category: String
+    lat: Float
+    lon: Float
+    distance_meters: Float
+    match_status: String
+    match_confidence: Float
+    source_url: String
+    is_primary: Boolean
+  }
+
+  type GlobalReferencePoint {
+    source_id: String
+    external_id: String
+    display_name: String
+    category: String
+    lat: Float
+    lon: Float
+    source_url: String
+    matched_candidate_ids: [String!]
+    match_count: Int
   }
 
   type GlobalCandidateProvenance {

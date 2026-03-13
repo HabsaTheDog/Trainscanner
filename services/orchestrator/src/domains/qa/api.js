@@ -1,9 +1,13 @@
 const crypto = require("node:crypto");
 
+const { parseBooleanEnv } = require("../../core/runtime");
 const { createPostgisClient } = require("../../data/postgis/client");
 const {
   ensureMergeClusterEvidenceColumns,
 } = require("../../data/postgis/repositories/merge-evidence-schema");
+const {
+  createExternalReferenceRepo,
+} = require("../../data/postgis/repositories/external-reference-repo");
 const {
   createPipelineJobsRepo,
 } = require("../../data/postgis/repositories/pipeline-jobs-repo");
@@ -14,7 +18,9 @@ const {
 } = require("./cluster-decision-contracts");
 const {
   classifyEvidenceRow,
+  normalizeLooseStationName,
   summarizeEvidenceRows,
+  tokenizeLooseStationName,
 } = require("./evidence-utils");
 const {
   createEmptyWorkspace,
@@ -169,6 +175,476 @@ function normalizeCandidateMetadata(candidate) {
         ) || 0,
     },
     provenance: normalizeCandidateProvenance(candidate),
+    external_reference_summary: normalizeExternalReferenceSummary(
+      candidate?.external_reference_summary,
+    ),
+    external_reference_matches: Array.isArray(
+      candidate?.external_reference_matches,
+    )
+      ? candidate.external_reference_matches.map(
+          normalizeExternalReferenceMatch,
+        )
+      : [],
+  };
+}
+
+function normalizeExternalReferenceSummary(summary) {
+  const sourceCounts =
+    summary?.source_counts &&
+    typeof summary.source_counts === "object" &&
+    !Array.isArray(summary.source_counts)
+      ? summary.source_counts
+      : {};
+  return {
+    source_counts: Object.fromEntries(
+      Object.entries(sourceCounts).map(([key, value]) => [
+        String(key || "").trim(),
+        Number.parseInt(String(value || 0), 10) || 0,
+      ]),
+    ),
+    primary_match_count:
+      Number.parseInt(String(summary?.primary_match_count ?? 0), 10) || 0,
+    strong_match_count:
+      Number.parseInt(String(summary?.strong_match_count ?? 0), 10) || 0,
+    probable_match_count:
+      Number.parseInt(String(summary?.probable_match_count ?? 0), 10) || 0,
+  };
+}
+
+function normalizeExternalReferenceMatch(row) {
+  return {
+    source_id: String(row?.source_id || "").trim(),
+    external_id: String(row?.external_id || "").trim(),
+    display_name: String(row?.display_name || "").trim(),
+    category: String(row?.category || "").trim(),
+    lat:
+      row?.lat === null || row?.lat === undefined
+        ? row?.latitude === null || row?.latitude === undefined
+          ? null
+          : Number(row.latitude)
+        : Number(row.lat),
+    lon:
+      row?.lon === null || row?.lon === undefined
+        ? row?.longitude === null || row?.longitude === undefined
+          ? null
+          : Number(row.longitude)
+        : Number(row.lon),
+    distance_meters:
+      row?.distance_meters === null || row?.distance_meters === undefined
+        ? null
+        : Number(row.distance_meters),
+    match_status: String(row?.match_status || "").trim(),
+    match_confidence:
+      row?.match_confidence === null || row?.match_confidence === undefined
+        ? null
+        : Number(row.match_confidence),
+    source_url: String(row?.source_url || "").trim(),
+    is_primary: row?.is_primary === true,
+  };
+}
+
+function normalizeReferenceOverlayPoint(row) {
+  return {
+    source_id: String(row?.source_id || "").trim(),
+    external_id: String(row?.external_id || "").trim(),
+    display_name: String(row?.display_name || "").trim(),
+    category: String(row?.category || "").trim(),
+    lat:
+      row?.lat === null || row?.lat === undefined
+        ? row?.latitude === null || row?.latitude === undefined
+          ? null
+          : Number(row.latitude)
+        : Number(row.lat),
+    lon:
+      row?.lon === null || row?.lon === undefined
+        ? row?.longitude === null || row?.longitude === undefined
+          ? null
+          : Number(row.longitude)
+        : Number(row.lon),
+    source_url: String(row?.source_url || "").trim(),
+    matched_candidate_ids: uniqueStrings(row?.matched_candidate_ids),
+    match_count: Number.parseInt(String(row?.match_count ?? 0), 10) || 0,
+  };
+}
+
+function normalizeViewportCoordinate(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isExternalReferenceFeatureEnabled(env = process.env) {
+  return parseBooleanEnv(env?.QA_EXTERNAL_REFERENCES_ENABLED, false);
+}
+
+function normalizeViewportBounds(input = {}) {
+  const minLat = normalizeViewportCoordinate(input.minLat);
+  const minLon = normalizeViewportCoordinate(input.minLon);
+  const maxLat = normalizeViewportCoordinate(input.maxLat);
+  const maxLon = normalizeViewportCoordinate(input.maxLon);
+
+  if (
+    !Number.isFinite(minLat) ||
+    !Number.isFinite(minLon) ||
+    !Number.isFinite(maxLat) ||
+    !Number.isFinite(maxLon)
+  ) {
+    throw new AppError({
+      code: "INVALID_REQUEST",
+      statusCode: 400,
+      message: "Viewport bounds require finite min/max lat/lon values",
+    });
+  }
+
+  if (minLat >= maxLat || minLon >= maxLon) {
+    throw new AppError({
+      code: "INVALID_REQUEST",
+      statusCode: 400,
+      message: "Viewport bounds must have min values smaller than max values",
+    });
+  }
+
+  return {
+    minLat: Math.max(-90, minLat),
+    minLon: Math.max(-180, minLon),
+    maxLat: Math.min(90, maxLat),
+    maxLon: Math.min(180, maxLon),
+  };
+}
+
+function toRad(value) {
+  return (Number(value) * Math.PI) / 180;
+}
+
+function calculateDistanceMeters(left, right) {
+  if (
+    !Number.isFinite(Number(left?.lat)) ||
+    !Number.isFinite(Number(left?.lon)) ||
+    !Number.isFinite(Number(right?.lat)) ||
+    !Number.isFinite(Number(right?.lon))
+  ) {
+    return null;
+  }
+  const earthRadiusMeters = 6371000;
+  const lat1 = toRad(left.lat);
+  const lat2 = toRad(right.lat);
+  const latDiff = toRad(Number(right.lat) - Number(left.lat));
+  const lonDiff = toRad(Number(right.lon) - Number(left.lon));
+  const a =
+    Math.sin(latDiff / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(lonDiff / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return earthRadiusMeters * c;
+}
+
+function calculateLooseNameSimilarity(left, right) {
+  const leftTokens = new Set(tokenizeLooseStationName(left));
+  const rightTokens = new Set(tokenizeLooseStationName(right));
+  const leftLoose = normalizeLooseStationName(left);
+  const rightLoose = normalizeLooseStationName(right);
+  if (!leftLoose || !rightLoose) {
+    return 0;
+  }
+  if (leftLoose === rightLoose) {
+    return 1;
+  }
+  let overlap = 0;
+  for (const token of leftTokens) {
+    if (rightTokens.has(token)) {
+      overlap += 1;
+    }
+  }
+  const denominator = Math.max(leftTokens.size, rightTokens.size, 1);
+  return overlap / denominator;
+}
+
+function pickPrimarySourceMatch(rows = [], sourceId) {
+  const sourceRows = (Array.isArray(rows) ? rows : []).filter(
+    (row) => row.source_id === sourceId,
+  );
+  return (
+    sourceRows.find((row) => row.is_primary === true) ||
+    sourceRows.sort((left, right) => {
+      return (
+        Number(right.match_confidence || 0) -
+          Number(left.match_confidence || 0) ||
+        Number(left.distance_meters || Number.POSITIVE_INFINITY) -
+          Number(right.distance_meters || Number.POSITIVE_INFINITY)
+      );
+    })[0] ||
+    null
+  );
+}
+
+function buildCandidateExternalReferenceSummary(matchRows = []) {
+  const summary = {
+    source_counts: {},
+    primary_match_count: 0,
+    strong_match_count: 0,
+    probable_match_count: 0,
+  };
+
+  for (const row of Array.isArray(matchRows) ? matchRows : []) {
+    summary.source_counts[row.source_id] =
+      (summary.source_counts[row.source_id] || 0) + 1;
+    if (row.is_primary === true) {
+      summary.primary_match_count += 1;
+    }
+    if (row.match_status === "strong") {
+      summary.strong_match_count += 1;
+    }
+    if (row.match_status === "probable") {
+      summary.probable_match_count += 1;
+    }
+  }
+
+  return summary;
+}
+
+function buildCoverageEvidenceRow(sourceId, targetId, leftRows, rightRows) {
+  const leftSources = uniqueStrings(leftRows.map((row) => row.source_id));
+  const rightSources = uniqueStrings(rightRows.map((row) => row.source_id));
+  const sharedSources = leftSources.filter((source) =>
+    rightSources.includes(source),
+  );
+  const leftOnlySources = leftSources.filter(
+    (source) => !sharedSources.includes(source),
+  );
+  const rightOnlySources = rightSources.filter(
+    (source) => !sharedSources.includes(source),
+  );
+
+  if (
+    sharedSources.length === 0 &&
+    leftOnlySources.length === 0 &&
+    rightOnlySources.length === 0
+  ) {
+    return null;
+  }
+
+  return {
+    evidence_type: "external_reference_coverage",
+    source_global_station_id: sourceId,
+    target_global_station_id: targetId,
+    status: "informational",
+    score:
+      Math.max(sharedSources.length, 0) /
+      Math.max(new Set([...leftSources, ...rightSources]).size, 1),
+    raw_value: sharedSources.length,
+    details: {
+      shared_sources: sharedSources,
+      left_only_sources: leftOnlySources,
+      right_only_sources: rightOnlySources,
+      total_shared_sources: sharedSources.length,
+      explanation:
+        sharedSources.length > 0
+          ? `Shared external coverage in ${sharedSources.join(", ")}`
+          : "External coverage does not overlap across sources",
+    },
+  };
+}
+
+function buildExternalReferenceEvidenceForPair(
+  sourceId,
+  targetId,
+  leftRows = [],
+  rightRows = [],
+) {
+  const evidence = [];
+  const coverageRow = buildCoverageEvidenceRow(
+    sourceId,
+    targetId,
+    leftRows,
+    rightRows,
+  );
+  if (coverageRow) {
+    evidence.push(coverageRow);
+  }
+
+  const sharedSources = uniqueStrings(
+    leftRows
+      .map((row) => row.source_id)
+      .filter((candidateSource) =>
+        rightRows.some((row) => row.source_id === candidateSource),
+      ),
+  );
+
+  for (const matchSourceId of sharedSources) {
+    const leftMatch = pickPrimarySourceMatch(leftRows, matchSourceId);
+    const rightMatch = pickPrimarySourceMatch(rightRows, matchSourceId);
+    if (!leftMatch || !rightMatch) {
+      continue;
+    }
+
+    if (
+      leftMatch.reference_station_id === rightMatch.reference_station_id ||
+      (leftMatch.external_id &&
+        leftMatch.external_id === rightMatch.external_id)
+    ) {
+      evidence.push({
+        evidence_type: "external_reference_same_entity",
+        source_global_station_id: sourceId,
+        target_global_station_id: targetId,
+        status: "supporting",
+        score:
+          (Number(leftMatch.match_confidence || 0) +
+            Number(rightMatch.match_confidence || 0)) /
+          2,
+        raw_value: 1,
+        details: {
+          source_id: matchSourceId,
+          external_id: leftMatch.external_id || rightMatch.external_id,
+          display_name: leftMatch.display_name || rightMatch.display_name,
+          source_url: leftMatch.source_url || rightMatch.source_url,
+          explanation: `Both candidates map to the same ${matchSourceId} entity`,
+        },
+      });
+      continue;
+    }
+
+    const referenceDistanceMeters = calculateDistanceMeters(
+      leftMatch,
+      rightMatch,
+    );
+    const nameSimilarity = calculateLooseNameSimilarity(
+      leftMatch.display_name,
+      rightMatch.display_name,
+    );
+
+    if (
+      referenceDistanceMeters !== null &&
+      referenceDistanceMeters <= 300 &&
+      nameSimilarity >= 0.67
+    ) {
+      evidence.push({
+        evidence_type: "external_reference_nearby_alignment",
+        source_global_station_id: sourceId,
+        target_global_station_id: targetId,
+        status:
+          referenceDistanceMeters <= 150 && nameSimilarity >= 0.85
+            ? "supporting"
+            : "informational",
+        score: Math.max(
+          0,
+          ((Number(leftMatch.match_confidence || 0) +
+            Number(rightMatch.match_confidence || 0)) /
+            2 +
+            nameSimilarity) /
+            2,
+        ),
+        raw_value: referenceDistanceMeters,
+        details: {
+          source_id: matchSourceId,
+          left_external_id: leftMatch.external_id,
+          right_external_id: rightMatch.external_id,
+          left_display_name: leftMatch.display_name,
+          right_display_name: rightMatch.display_name,
+          distance_meters: Math.round(referenceDistanceMeters),
+          name_similarity: Number(nameSimilarity.toFixed(3)),
+          explanation: `Nearby ${matchSourceId} entities align closely by name and location`,
+        },
+      });
+      continue;
+    }
+
+    if (
+      (referenceDistanceMeters !== null && referenceDistanceMeters >= 600) ||
+      nameSimilarity <= 0.34
+    ) {
+      evidence.push({
+        evidence_type: "external_reference_conflict",
+        source_global_station_id: sourceId,
+        target_global_station_id: targetId,
+        status: "warning",
+        score: Math.max(0, 1 - Math.max(nameSimilarity, 0)),
+        raw_value:
+          referenceDistanceMeters === null
+            ? 1
+            : Math.round(referenceDistanceMeters),
+        details: {
+          source_id: matchSourceId,
+          left_external_id: leftMatch.external_id,
+          right_external_id: rightMatch.external_id,
+          left_display_name: leftMatch.display_name,
+          right_display_name: rightMatch.display_name,
+          distance_meters:
+            referenceDistanceMeters === null
+              ? null
+              : Math.round(referenceDistanceMeters),
+          name_similarity: Number(nameSimilarity.toFixed(3)),
+          explanation: `Distinct ${matchSourceId} entities diverge materially by location or naming`,
+        },
+      });
+    }
+  }
+
+  return evidence;
+}
+
+function buildExternalReferenceEnrichment(
+  candidates = [],
+  matchRows = [],
+  overlayRows = [],
+) {
+  const matchesByStationId = new Map();
+  for (const row of Array.isArray(matchRows) ? matchRows : []) {
+    const stationId = String(row?.global_station_id || "").trim();
+    if (!stationId) {
+      continue;
+    }
+    const normalized = normalizeExternalReferenceMatch(row);
+    const current = matchesByStationId.get(stationId) || [];
+    current.push({
+      ...normalized,
+      reference_station_id: row.reference_station_id,
+    });
+    matchesByStationId.set(stationId, current);
+  }
+
+  const enrichedCandidates = (Array.isArray(candidates) ? candidates : []).map(
+    (candidate) => {
+      const stationMatches =
+        matchesByStationId.get(
+          String(candidate?.global_station_id || "").trim(),
+        ) || [];
+      return {
+        ...candidate,
+        external_reference_summary:
+          buildCandidateExternalReferenceSummary(stationMatches),
+        external_reference_matches: stationMatches,
+      };
+    },
+  );
+
+  const evidence = [];
+  for (
+    let leftIndex = 0;
+    leftIndex < enrichedCandidates.length;
+    leftIndex += 1
+  ) {
+    for (
+      let rightIndex = leftIndex + 1;
+      rightIndex < enrichedCandidates.length;
+      rightIndex += 1
+    ) {
+      const leftCandidate = enrichedCandidates[leftIndex];
+      const rightCandidate = enrichedCandidates[rightIndex];
+      evidence.push(
+        ...buildExternalReferenceEvidenceForPair(
+          leftCandidate.global_station_id,
+          rightCandidate.global_station_id,
+          leftCandidate.external_reference_matches,
+          rightCandidate.external_reference_matches,
+        ),
+      );
+    }
+  }
+
+  return {
+    candidates: enrichedCandidates,
+    reference_overlay: (Array.isArray(overlayRows) ? overlayRows : []).map(
+      normalizeReferenceOverlayPoint,
+    ),
+    evidence,
   };
 }
 
@@ -1497,6 +1973,7 @@ async function getGlobalClusters(url) {
 
 async function getGlobalClusterDetail(clusterId) {
   const client = await getDbClient();
+  const externalReferenceRepo = createExternalReferenceRepo(client);
   const cleanClusterId = String(clusterId || "").trim();
   const cluster = await client.queryOne(
     `
@@ -1656,8 +2133,36 @@ async function getGlobalClusterDetail(clusterId) {
     client.queryRows(buildEditHistoryQuery(), { cluster_id: cleanClusterId }),
   ]);
 
-  const normalizedCandidates = candidates.map(normalizeCandidateMetadata);
-  const normalizedEvidence = evidence.map(normalizeEvidenceRow);
+  let normalizedCandidates = candidates.map(normalizeCandidateMetadata);
+  let referenceOverlay = [];
+  let externalEvidence = [];
+
+  if (isExternalReferenceFeatureEnabled() && normalizedCandidates.length > 0) {
+    const stationIds = normalizedCandidates
+      .map((candidate) => String(candidate?.global_station_id || "").trim())
+      .filter(Boolean);
+    const enrichmentStartedAt = Date.now();
+    const [matchRows, overlayRows] = await Promise.all([
+      externalReferenceRepo.loadMatchesByStationIds(stationIds),
+      externalReferenceRepo.loadOverlayByStationIds(stationIds),
+    ]);
+    const enrichment = buildExternalReferenceEnrichment(
+      normalizedCandidates,
+      matchRows,
+      overlayRows,
+    );
+    normalizedCandidates = enrichment.candidates;
+    referenceOverlay = enrichment.reference_overlay;
+    externalEvidence = enrichment.evidence.map(normalizeEvidenceRow);
+    console.info(
+      `[external-reference] cluster_id=${cleanClusterId} candidates=${stationIds.length} matches=${matchRows.length} overlay_points=${referenceOverlay.length} latency_ms=${Date.now() - enrichmentStartedAt}`,
+    );
+  }
+
+  const normalizedEvidence = [
+    ...evidence.map(normalizeEvidenceRow),
+    ...externalEvidence,
+  ];
   const { evidenceSummary, pairSummaries } =
     summarizeEvidenceRows(normalizedEvidence);
 
@@ -1665,12 +2170,37 @@ async function getGlobalClusterDetail(clusterId) {
     ...cluster,
     workspace: cluster.workspace || null,
     candidates: normalizedCandidates,
+    reference_overlay: referenceOverlay,
     evidence: normalizedEvidence,
     evidence_summary: evidenceSummary,
     pair_summaries: pairSummaries,
     decisions,
     edit_history: editHistory,
   };
+}
+
+async function getExternalReferenceViewportPoints(input = {}) {
+  if (!isExternalReferenceFeatureEnabled()) {
+    return [];
+  }
+
+  const bounds = normalizeViewportBounds(input);
+  const limit = Number.isFinite(Number(input.limit))
+    ? Math.max(1, Math.min(5000, Number(input.limit)))
+    : 1200;
+  const sourceIds = uniqueStrings(input.sourceIds).map((value) =>
+    String(value).toLowerCase(),
+  );
+
+  const client = await getDbClient();
+  const externalReferenceRepo = createExternalReferenceRepo(client);
+  const rows = await externalReferenceRepo.loadViewportPoints({
+    ...bounds,
+    sourceIds,
+    limit,
+  });
+
+  return (Array.isArray(rows) ? rows : []).map(normalizeReferenceOverlayPoint);
 }
 
 async function saveGlobalClusterWorkspace(clusterId, input) {
@@ -1987,12 +2517,16 @@ async function getRefreshJob(jobId, options = {}) {
 
 module.exports = {
   _internal: {
+    buildExternalReferenceEnrichment,
     buildEditHistoryQuery,
     buildWorkspaceMutationResponse,
     normalizeCandidateMetadata,
+    normalizeExternalReferenceMatch,
+    normalizeExternalReferenceSummary,
     normalizeEvidenceRow,
     resolveUpdatedBy,
   },
+  getExternalReferenceViewportPoints,
   getGlobalClusters,
   getGlobalClusterDetail,
   getRefreshJob,

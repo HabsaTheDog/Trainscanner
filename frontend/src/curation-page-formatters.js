@@ -15,6 +15,10 @@ const EVIDENCE_LABELS = {
   shared_adjacent_stations: "Adjacent Stations",
   country_relation: "Country",
   generic_name_penalty: "Generic Penalty",
+  external_reference_same_entity: "External Same Entity",
+  external_reference_nearby_alignment: "External Nearby Alignment",
+  external_reference_conflict: "External Conflict",
+  external_reference_coverage: "External Coverage",
 };
 
 const STATUS_LABELS = {
@@ -55,6 +59,7 @@ const COUNT_EVIDENCE_TYPES = new Set([
   "shared_adjacent_stations",
   "coordinate_quality",
   "generic_name_penalty",
+  "external_reference_coverage",
 ]);
 
 function toCount(value) {
@@ -141,6 +146,18 @@ export function formatEvidenceValue(row) {
       return `${Math.round(meters)}m`;
     }
     return formatEvidenceStatusLabel(row.details?.distance_status);
+  }
+
+  if (
+    [
+      "external_reference_nearby_alignment",
+      "external_reference_conflict",
+    ].includes(row.evidence_type)
+  ) {
+    const meters = Number(row.raw_value ?? row.details?.distance_meters);
+    if (Number.isFinite(meters) && meters > 1) {
+      return `${Math.round(meters)}m`;
+    }
   }
 
   if (

@@ -90,6 +90,10 @@ const EVIDENCE_CATEGORY_BY_TYPE = {
   country_relation: "network_context",
   coordinate_quality: "risk_conflict",
   generic_name_penalty: "risk_conflict",
+  external_reference_same_entity: "core_match",
+  external_reference_nearby_alignment: "core_match",
+  external_reference_coverage: "network_context",
+  external_reference_conflict: "risk_conflict",
 };
 
 const SEED_EVIDENCE_TYPE_BY_REASON = {

@@ -25,6 +25,24 @@ test("mapClusterCandidate preserves provider feed context alongside provenance",
       historical_stop_place_refs: ["de:old:123"],
       coord_input_stop_place_refs: ["de:123"],
     },
+    external_reference_summary: {
+      source_counts: {
+        wikidata: 1,
+      },
+      primary_match_count: 1,
+      strong_match_count: 1,
+      probable_match_count: 0,
+    },
+    external_reference_matches: [
+      {
+        source_id: "wikidata",
+        external_id: "Q123",
+        display_name: "Station A",
+        match_status: "strong",
+        match_confidence: 0.98,
+        is_primary: true,
+      },
+    ],
   });
 
   assert.deepEqual(mapped.provider_labels, ["db_regio_feed", "delfi_feed"]);
@@ -36,4 +54,6 @@ test("mapClusterCandidate preserves provider feed context alongside provenance",
   assert.deepEqual(mapped.provenance.active_source_ids, ["db_regio_feed"]);
   assert.deepEqual(mapped.provenance.historical_source_ids, ["delfi_feed"]);
   assert.equal(mapped.provenance.has_active_source_mappings, true);
+  assert.equal(mapped.external_reference_summary.primary_match_count, 1);
+  assert.equal(mapped.external_reference_matches[0].source_id, "wikidata");
 });

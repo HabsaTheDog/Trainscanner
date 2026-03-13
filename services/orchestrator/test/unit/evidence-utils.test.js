@@ -76,6 +76,17 @@ test("classifyEvidenceRow derives canonical category and seed role", () => {
       seed_reasons: ["loose_name_geo"],
     },
   );
+  assert.deepEqual(
+    classifyEvidenceRow({
+      evidence_type: "external_reference_conflict",
+      details: {},
+    }),
+    {
+      category: "risk_conflict",
+      is_seed_rule: false,
+      seed_reasons: [],
+    },
+  );
 });
 
 test("summarizeEvidenceRows builds cluster-level counts and pair summaries", () => {

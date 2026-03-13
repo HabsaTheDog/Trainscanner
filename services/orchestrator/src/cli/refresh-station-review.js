@@ -8,10 +8,17 @@ const {
   buildGlobalStations,
   buildGlobalMergeQueue,
 } = require("../domains/global/service");
+const { refreshExternalReferences } = require("../domains/reference/service");
 const { parsePipelineCliArgs, printCliError } = require("./pipeline-common");
 const { isStrictIsoDate } = require("../core/date");
 
-const STEP_IDS = ["fetch", "ingest", "global-stations", "merge-queue"];
+const STEP_IDS = [
+  "fetch",
+  "ingest",
+  "global-stations",
+  "reference-data",
+  "merge-queue",
+];
 
 function parseStepToken(raw) {
   const token = String(raw || "")
@@ -31,6 +38,14 @@ function parseStepToken(raw) {
   }
   if (token === "global" || token === "stations") {
     return "global-stations";
+  }
+  if (
+    token === "references" ||
+    token === "reference" ||
+    token === "external-references" ||
+    token === "external_reference"
+  ) {
+    return "reference-data";
   }
   return token;
 }
@@ -62,18 +77,21 @@ function printUsage() {
     "  --source-id <id>            Restrict fetch/ingest scope to one source id\n",
   );
   process.stdout.write(
-    "  --only <list>               Comma-separated steps: fetch,ingest,global-stations,merge-queue\n",
+    "  --only <list>               Comma-separated steps: fetch,ingest,global-stations,reference-data,merge-queue\n",
   );
   process.stdout.write(
-    "  --from-step <step>          Start from step: fetch|ingest|global-stations|merge-queue\n",
+    "  --from-step <step>          Start from step: fetch|ingest|global-stations|reference-data|merge-queue\n",
   );
   process.stdout.write(
-    "  --to-step <step>            Stop after step: fetch|ingest|global-stations|merge-queue\n",
+    "  --to-step <step>            Stop after step: fetch|ingest|global-stations|reference-data|merge-queue\n",
   );
   process.stdout.write("  --skip-fetch                Skip fetch step\n");
   process.stdout.write("  --skip-ingest               Skip ingest step\n");
   process.stdout.write(
     "  --skip-global-stations      Skip global station build step\n",
+  );
+  process.stdout.write(
+    "  --skip-reference-data       Skip external reference import/match step\n",
   );
   process.stdout.write(
     "  --skip-merge-queue          Skip global merge queue build step\n",
@@ -96,7 +114,7 @@ function assertStepId(stepId, flagName) {
   }
   throw new AppError({
     code: "INVALID_REQUEST",
-    message: `${flagName} must be one of fetch|ingest|global-stations|merge-queue`,
+    message: `${flagName} must be one of fetch|ingest|global-stations|reference-data|merge-queue`,
   });
 }
 
@@ -123,6 +141,7 @@ function parseArgsToken(options, tokens, index) {
     "--skip-fetch": "fetch",
     "--skip-ingest": "ingest",
     "--skip-global-stations": "global-stations",
+    "--skip-reference-data": "reference-data",
     "--skip-merge-queue": "merge-queue",
   };
 
@@ -269,8 +288,14 @@ function appendArgIfSet(args, key, value) {
 function buildStepArgs(options, stepId) {
   const args = [];
   appendArgIfSet(args, "--as-of", options.asOf);
-  if (stepId === "fetch" || stepId === "ingest") {
+  if (
+    stepId === "fetch" ||
+    stepId === "ingest" ||
+    stepId === "reference-data"
+  ) {
     appendArgIfSet(args, "--country", options.country);
+  }
+  if (stepId === "fetch" || stepId === "ingest") {
     appendArgIfSet(args, "--source-id", options.sourceId);
   }
   return args;
@@ -304,6 +329,17 @@ function toStepDefinitions(options) {
       args: buildStepArgs(options, "global-stations"),
       run: (runOptions) =>
         buildGlobalStations({
+          rootDir: runOptions.rootDir,
+          runId: runOptions.runId,
+          args: runOptions.args,
+          jobOrchestrationEnabled: false,
+        }),
+    },
+    "reference-data": {
+      label: "Import external references and build matches",
+      args: buildStepArgs(options, "reference-data"),
+      run: (runOptions) =>
+        refreshExternalReferences({
           rootDir: runOptions.rootDir,
           runId: runOptions.runId,
           args: runOptions.args,
@@ -350,7 +386,7 @@ function run() {
         `[refresh-station-review] import scope country=${options.country || "ALL"} as-of=${options.asOf || "latest"} source-id=${options.sourceId || "ALL"}\n`,
       );
       process.stdout.write(
-        `[refresh-station-review] rebuild scope global-stations=GLOBAL merge-queue=GLOBAL as-of=${options.asOf || "latest"}\n`,
+        `[refresh-station-review] rebuild scope global-stations=GLOBAL reference-data=${options.country || "ALL"} merge-queue=GLOBAL as-of=${options.asOf || "latest"}\n`,
       );
       process.stdout.write(
         `[refresh-station-review] selected steps: ${selectedSteps.join(" -> ")}\n`,

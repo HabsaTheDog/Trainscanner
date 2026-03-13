@@ -7,9 +7,11 @@ RUN apt-get update \
     jq \
     unzip \
     python3 \
+    python3-pip \
     findutils \
     postgresql-client \
     ca-certificates \
+  && python3 -m pip install --break-system-packages --no-cache-dir duckdb==1.4.0 \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -111,22 +111,39 @@ body {
 }
 
 .curation-marker {
+  position: relative;
   width: 100%;
   height: 100%;
   box-sizing: border-box;
   border-radius: 50%;
   background: var(--color-amber);
-  border: 2.5px solid var(--color-surface-0);
-  box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
+  border: 3px solid rgba(8, 12, 18, 0.98);
+  box-shadow:
+    0 0 0 1px rgba(255, 248, 220, 0.55),
+    0 0 14px rgba(245, 158, 11, 0.65);
   transition:
     transform 0.12s,
     box-shadow 0.12s,
     background 0.12s;
 }
 
+.curation-marker::after {
+  content: "";
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(255, 250, 240, 0.96);
+  box-shadow: 0 0 8px rgba(255, 250, 240, 0.72);
+}
+
 .curation-marker-shell:hover .curation-marker {
   transform: scale(1.15);
-  box-shadow: 0 0 14px rgba(245, 158, 11, 0.6);
+  box-shadow:
+    0 0 0 1px rgba(255, 248, 220, 0.7),
+    0 0 18px rgba(245, 158, 11, 0.78);
 }
 
 .curation-marker__selection-ring {
@@ -142,8 +159,8 @@ body {
 
 .curation-marker-shell--selected .curation-marker {
   box-shadow:
-    0 0 0 3px rgba(239, 68, 68, 0.3),
-    0 0 12px rgba(239, 68, 68, 0.4);
+    0 0 0 4px rgba(239, 68, 68, 0.38),
+    0 0 16px rgba(239, 68, 68, 0.52);
 }
 
 .curation-marker--selected {
@@ -153,6 +170,105 @@ body {
 .curation-marker--node {
   background: var(--color-orange);
   box-shadow: 0 0 8px rgba(249, 115, 22, 0.4);
+}
+
+.curation-reference-marker-shell {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: 50%;
+  cursor: pointer;
+  overflow: visible;
+}
+
+.curation-reference-marker-shell--relevant {
+  width: 28px;
+  height: 28px;
+}
+
+.curation-reference-marker-shell--focus {
+  width: 34px;
+  height: 34px;
+}
+
+.curation-reference-marker {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 3px solid var(--reference-marker-color, #94a3b8);
+  background: transparent;
+  box-shadow:
+    0 0 0 1px rgba(13, 17, 23, 0.95),
+    0 0 12px
+    color-mix(in srgb, var(--reference-marker-color, #94a3b8) 55%, transparent);
+  transition:
+    transform 0.12s,
+    box-shadow 0.12s;
+}
+
+.curation-reference-marker--background {
+  border-width: 2px;
+  opacity: 0.48;
+  box-shadow:
+    0 0 0 1px rgba(13, 17, 23, 0.72),
+    0 0 8px
+    color-mix(in srgb, var(--reference-marker-color, #94a3b8) 22%, transparent);
+}
+
+.curation-reference-marker--relevant {
+  border-width: 3px;
+  opacity: 0.92;
+}
+
+.curation-reference-marker--focus {
+  border-width: 4px;
+  opacity: 1;
+  box-shadow:
+    0 0 0 1px rgba(13, 17, 23, 0.98),
+    0 0 18px
+    color-mix(in srgb, var(--reference-marker-color, #94a3b8) 78%, transparent);
+}
+
+.curation-reference-marker--matched {
+  border-width: 4px;
+}
+
+.curation-reference-marker::after {
+  content: "";
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: color-mix(
+    in srgb,
+    var(--reference-marker-color, #94a3b8) 60%,
+    transparent
+  );
+  box-shadow: 0 0 8px
+    color-mix(in srgb, var(--reference-marker-color, #94a3b8) 45%, transparent);
+}
+
+.curation-reference-marker--background::after {
+  width: 4px;
+  height: 4px;
+  opacity: 0.5;
+}
+
+.curation-reference-marker-shell:hover .curation-reference-marker {
+  transform: scale(1.12);
+  box-shadow:
+    0 0 0 1px rgba(13, 17, 23, 0.95),
+    0 0 18px
+    color-mix(in srgb, var(--reference-marker-color, #94a3b8) 70%, transparent);
 }
 
 @keyframes pulse-ring {
@@ -201,6 +317,19 @@ body {
 
 .curation-map .maplibregl-ctrl-attrib a {
   color: var(--color-text-primary);
+}
+
+.curation-map .maplibregl-popup-content {
+  background: rgba(15, 23, 42, 0.94);
+  border: 1px solid var(--color-border-strong);
+  color: var(--color-text-primary);
+  border-radius: 12px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+  padding: 10px 12px;
+}
+
+.curation-map .maplibregl-popup-tip {
+  border-top-color: rgba(15, 23, 42, 0.94);
 }
 
 /* ── Utility for text-ellipsis ── */

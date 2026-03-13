@@ -1,7 +1,8 @@
 export const COORDINATE_BUCKET_PRECISION = 7;
-export const BASE_MARKER_SIZE = 24;
-export const MARKER_SELECTION_RING_SIZE = 3;
-export const STACK_GROUP_DISTANCE = 24;
+export const BASE_MARKER_SIZE = 30;
+export const MARKER_SELECTION_RING_SIZE = 4;
+export const STACK_GROUP_DISTANCE = 30;
+export const EXTERNAL_REFERENCE_MIN_ZOOM = 9;
 
 function coordinateBucketKey(lat, lon) {
   return `${Number(lat).toFixed(COORDINATE_BUCKET_PRECISION)}:${Number(lon).toFixed(COORDINATE_BUCKET_PRECISION)}`;
@@ -156,4 +157,10 @@ export function buildMappableItems(items) {
       return buildApproximateItem(item, peers);
     })
     .filter((item) => Number.isFinite(item.lat) && Number.isFinite(item.lon));
+}
+
+export function shouldShowExternalReferencePointsAtZoom(zoom) {
+  return (
+    Number.isFinite(Number(zoom)) && Number(zoom) >= EXTERNAL_REFERENCE_MIN_ZOOM
+  );
 }

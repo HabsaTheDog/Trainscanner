@@ -68,8 +68,38 @@ const CLUSTER_DETAIL_QUERY = `
           stop_point_count
           provider_source_count
         }
+        external_reference_summary {
+          source_counts
+          primary_match_count
+          strong_match_count
+          probable_match_count
+        }
+        external_reference_matches {
+          source_id
+          external_id
+          display_name
+          category
+          lat
+          lon
+          distance_meters
+          match_status
+          match_confidence
+          source_url
+          is_primary
+        }
         lat
         lon
+      }
+      reference_overlay {
+        source_id
+        external_id
+        display_name
+        category
+        lat
+        lon
+        source_url
+        matched_candidate_ids
+        match_count
       }
       evidence {
         evidence_type
@@ -119,6 +149,36 @@ const CLUSTER_DETAIL_QUERY = `
   }
 `;
 
+const REFERENCE_VIEWPORT_QUERY = `
+  query GetReferenceViewport(
+    $minLat: Float!
+    $minLon: Float!
+    $maxLat: Float!
+    $maxLon: Float!
+    $sourceIds: [String!]
+    $limit: Int
+  ) {
+    globalReferenceViewport(
+      minLat: $minLat
+      minLon: $minLon
+      maxLat: $maxLat
+      maxLon: $maxLon
+      sourceIds: $sourceIds
+      limit: $limit
+    ) {
+      source_id
+      external_id
+      display_name
+      category
+      lat
+      lon
+      source_url
+      matched_candidate_ids
+      match_count
+    }
+  }
+`;
+
 const LEGACY_CLUSTER_DETAIL_QUERY = `
   query GetGlobalClusterDetail($id: ID!) {
     globalCluster(id: $id) {
@@ -164,8 +224,37 @@ const LEGACY_CLUSTER_DETAIL_QUERY = `
           stop_point_count
           provider_source_count
         }
+        external_reference_summary {
+          source_counts
+          primary_match_count
+          strong_match_count
+          probable_match_count
+        }
+        external_reference_matches {
+          source_id
+          external_id
+          display_name
+          category
+          lat
+          lon
+          distance_meters
+          match_status
+          match_confidence
+          source_url
+          is_primary
+        }
         lat
         lon
+      }
+      reference_overlay {
+        source_id
+        external_id
+        display_name
+        category
+        lat
+        lon
+        source_url
+        matched_candidate_ids
       }
       evidence {
         evidence_type
@@ -358,6 +447,41 @@ export async function fetchClusterDetail(clusterId) {
   return normalizeClusterDetail(data.globalCluster);
 }
 
+function normalizeReferencePoint(point) {
+  return {
+    source_id: point.source_id,
+    external_id: point.external_id,
+    display_name: point.display_name,
+    category: point.category,
+    lat: point.lat,
+    lon: point.lon,
+    source_url: point.source_url || "",
+    matched_candidate_ids: Array.isArray(point.matched_candidate_ids)
+      ? point.matched_candidate_ids
+      : [],
+    match_count: point.match_count ?? 0,
+  };
+}
+
+export async function fetchReferenceViewport(input = {}) {
+  const data = await graphqlQuery(REFERENCE_VIEWPORT_QUERY, {
+    minLat: Number(input.minLat),
+    minLon: Number(input.minLon),
+    maxLat: Number(input.maxLat),
+    maxLon: Number(input.maxLon),
+    sourceIds: Array.isArray(input.sourceIds) ? input.sourceIds : null,
+    limit:
+      Number.isFinite(Number(input.limit)) && Number(input.limit) > 0
+        ? Number(input.limit)
+        : null,
+  });
+
+  const rows = Array.isArray(data.globalReferenceViewport)
+    ? data.globalReferenceViewport
+    : [];
+  return rows.map(normalizeReferencePoint);
+}
+
 export function normalizeClusterDetail(cluster) {
   if (!cluster || typeof cluster !== "object") return null;
   return {
@@ -404,9 +528,54 @@ export function normalizeClusterDetail(cluster) {
         provider_source_count:
           candidate.context_summary?.provider_source_count ?? 0,
       },
+      external_reference_summary: {
+        source_counts:
+          candidate.external_reference_summary &&
+          typeof candidate.external_reference_summary.source_counts === "object"
+            ? candidate.external_reference_summary.source_counts
+            : {},
+        primary_match_count:
+          candidate.external_reference_summary?.primary_match_count ?? 0,
+        strong_match_count:
+          candidate.external_reference_summary?.strong_match_count ?? 0,
+        probable_match_count:
+          candidate.external_reference_summary?.probable_match_count ?? 0,
+      },
+      external_reference_matches: Array.isArray(
+        candidate.external_reference_matches,
+      )
+        ? candidate.external_reference_matches.map((match) => ({
+            source_id: match.source_id,
+            external_id: match.external_id,
+            display_name: match.display_name,
+            category: match.category,
+            lat: match.lat,
+            lon: match.lon,
+            distance_meters: match.distance_meters ?? null,
+            match_status: match.match_status,
+            match_confidence: match.match_confidence ?? null,
+            source_url: match.source_url || "",
+            is_primary: match.is_primary === true,
+          }))
+        : [],
       segment_context: {},
       metadata: { country: candidate.country || "" },
     })),
+    reference_overlay: Array.isArray(cluster.reference_overlay)
+      ? cluster.reference_overlay.map((point) => ({
+          source_id: point.source_id,
+          external_id: point.external_id,
+          display_name: point.display_name,
+          category: point.category,
+          lat: point.lat,
+          lon: point.lon,
+          source_url: point.source_url || "",
+          matched_candidate_ids: Array.isArray(point.matched_candidate_ids)
+            ? point.matched_candidate_ids
+            : [],
+          match_count: point.match_count ?? 0,
+        }))
+      : [],
     evidence: (cluster.evidence || []).map((row) => ({
       evidence_type: row.evidence_type,
       source_global_station_id: row.source_global_station_id,

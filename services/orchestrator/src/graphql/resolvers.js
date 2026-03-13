@@ -1,4 +1,5 @@
 const {
+  getExternalReferenceViewportPoints,
   getGlobalClusters,
   getGlobalClusterDetail,
   postGlobalClusterDecision,
@@ -128,6 +129,49 @@ function mapClusterCandidate(candidate) {
         ? provenance.coord_input_stop_place_refs.map(String).filter(Boolean)
         : [],
     },
+    external_reference_summary: {
+      source_counts:
+        candidate.external_reference_summary &&
+        typeof candidate.external_reference_summary.source_counts === "object"
+          ? candidate.external_reference_summary.source_counts
+          : {},
+      primary_match_count:
+        Number.parseInt(
+          String(
+            candidate.external_reference_summary?.primary_match_count ?? 0,
+          ),
+          10,
+        ) || 0,
+      strong_match_count:
+        Number.parseInt(
+          String(candidate.external_reference_summary?.strong_match_count ?? 0),
+          10,
+        ) || 0,
+      probable_match_count:
+        Number.parseInt(
+          String(
+            candidate.external_reference_summary?.probable_match_count ?? 0,
+          ),
+          10,
+        ) || 0,
+    },
+    external_reference_matches: Array.isArray(
+      candidate.external_reference_matches,
+    )
+      ? candidate.external_reference_matches.map((match) => ({
+          source_id: match.source_id,
+          external_id: match.external_id,
+          display_name: match.display_name,
+          category: match.category,
+          lat: match.lat,
+          lon: match.lon,
+          distance_meters: match.distance_meters,
+          match_status: match.match_status,
+          match_confidence: match.match_confidence,
+          source_url: match.source_url,
+          is_primary: match.is_primary === true,
+        }))
+      : [],
   };
 }
 
@@ -168,6 +212,21 @@ const rootValue = {
         ? detail.country_tags
         : [],
       candidates: (detail.candidates || []).map(mapClusterCandidate),
+      reference_overlay: Array.isArray(detail.reference_overlay)
+        ? detail.reference_overlay.map((row) => ({
+            source_id: row.source_id,
+            external_id: row.external_id,
+            display_name: row.display_name,
+            category: row.category,
+            lat: row.lat,
+            lon: row.lon,
+            source_url: row.source_url,
+            matched_candidate_ids: Array.isArray(row.matched_candidate_ids)
+              ? row.matched_candidate_ids.map(String).filter(Boolean)
+              : [],
+            match_count: Number.parseInt(String(row.match_count ?? 0), 10) || 0,
+          }))
+        : [],
       evidence: (detail.evidence || []).map((row) => ({
         ...row,
         evidence_type: row.evidence_type,
@@ -200,6 +259,39 @@ const rootValue = {
         ? detail.edit_history
         : [],
     };
+  },
+
+  globalReferenceViewport: async ({
+    minLat,
+    minLon,
+    maxLat,
+    maxLon,
+    sourceIds,
+    limit,
+  }) => {
+    const rows = await getExternalReferenceViewportPoints({
+      minLat,
+      minLon,
+      maxLat,
+      maxLon,
+      sourceIds,
+      limit,
+    });
+    return Array.isArray(rows)
+      ? rows.map((row) => ({
+          source_id: row.source_id,
+          external_id: row.external_id,
+          display_name: row.display_name,
+          category: row.category,
+          lat: row.lat,
+          lon: row.lon,
+          source_url: row.source_url,
+          matched_candidate_ids: Array.isArray(row.matched_candidate_ids)
+            ? row.matched_candidate_ids.map(String).filter(Boolean)
+            : [],
+          match_count: Number.parseInt(String(row.match_count ?? 0), 10) || 0,
+        }))
+      : [];
   },
 
   requestAiScore: async ({ clusterId }) => {

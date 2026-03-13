@@ -3,9 +3,11 @@ const assert = require("node:assert/strict");
 
 const {
   _internal: {
+    buildExternalReferenceEnrichment,
     buildEditHistoryQuery,
     buildWorkspaceMutationResponse,
     normalizeCandidateMetadata,
+    normalizeExternalReferenceSummary,
     normalizeEvidenceRow,
     resolveUpdatedBy,
   },
@@ -88,6 +90,111 @@ test("normalizeCandidateMetadata exposes active and historical provenance", () =
     coord_input_stop_place_refs: ["de:123"],
     has_active_source_mappings: true,
   });
+  assert.deepEqual(normalized.external_reference_summary, {
+    source_counts: {},
+    primary_match_count: 0,
+    strong_match_count: 0,
+    probable_match_count: 0,
+  });
+  assert.deepEqual(normalized.external_reference_matches, []);
+});
+
+test("normalizeExternalReferenceSummary coerces source counts and match totals", () => {
+  assert.deepEqual(
+    normalizeExternalReferenceSummary({
+      source_counts: {
+        wikidata: "2",
+      },
+      primary_match_count: "1",
+      strong_match_count: "2",
+      probable_match_count: "0",
+    }),
+    {
+      source_counts: {
+        wikidata: 2,
+      },
+      primary_match_count: 1,
+      strong_match_count: 2,
+      probable_match_count: 0,
+    },
+  );
+});
+
+test("buildExternalReferenceEnrichment appends candidate provenance, overlay, and evidence", () => {
+  const enrichment = buildExternalReferenceEnrichment(
+    [
+      {
+        global_station_id: "station_a",
+        display_name: "Vienna Hbf",
+      },
+      {
+        global_station_id: "station_b",
+        display_name: "Wien Hauptbahnhof",
+      },
+    ],
+    [
+      {
+        global_station_id: "station_a",
+        reference_station_id: 1,
+        source_id: "wikidata",
+        external_id: "Q123",
+        display_name: "Wien Hauptbahnhof",
+        latitude: 48.185,
+        longitude: 16.374,
+        distance_meters: 45,
+        match_status: "strong",
+        match_confidence: 0.99,
+        is_primary: true,
+        source_url: "https://www.wikidata.org/wiki/Q123",
+      },
+      {
+        global_station_id: "station_b",
+        reference_station_id: 1,
+        source_id: "wikidata",
+        external_id: "Q123",
+        display_name: "Wien Hauptbahnhof",
+        latitude: 48.185,
+        longitude: 16.374,
+        distance_meters: 35,
+        match_status: "strong",
+        match_confidence: 0.98,
+        is_primary: true,
+        source_url: "https://www.wikidata.org/wiki/Q123",
+      },
+    ],
+    [
+      {
+        source_id: "wikidata",
+        external_id: "Q123",
+        display_name: "Wien Hauptbahnhof",
+        category: "station",
+        latitude: 48.185,
+        longitude: 16.374,
+        source_url: "https://www.wikidata.org/wiki/Q123",
+        matched_candidate_ids: ["station_a", "station_b"],
+      },
+    ],
+  );
+
+  assert.equal(
+    enrichment.candidates[0].external_reference_summary.strong_match_count,
+    1,
+  );
+  assert.equal(enrichment.reference_overlay.length, 1);
+  assert.deepEqual(enrichment.reference_overlay[0].matched_candidate_ids, [
+    "station_a",
+    "station_b",
+  ]);
+  assert.ok(
+    enrichment.evidence.some(
+      (row) => row.evidence_type === "external_reference_same_entity",
+    ),
+  );
+  assert.ok(
+    enrichment.evidence.some(
+      (row) => row.evidence_type === "external_reference_coverage",
+    ),
+  );
 });
 
 test("buildEditHistoryQuery casts workspace and decision enums to text", () => {

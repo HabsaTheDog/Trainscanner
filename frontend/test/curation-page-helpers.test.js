@@ -22,12 +22,18 @@ import {
   BASE_MARKER_SIZE,
   buildMappableItems,
   buildMarkerOverlapLayout,
+  EXTERNAL_REFERENCE_MIN_ZOOM,
+  shouldShowExternalReferencePointsAtZoom,
 } from "../src/curation-page-map-utils.js";
 import { createUiState, uiReducer } from "../src/curation-page-ui-state.js";
 
 test("curation formatters normalize labels and evidence summaries", () => {
   assert.equal(formatLabel("risk_conflict"), "Risk Conflict");
   assert.equal(formatEvidenceTypeLabel("name_exact"), "Exact Name");
+  assert.equal(
+    formatEvidenceTypeLabel("external_reference_same_entity"),
+    "External Same Entity",
+  );
   assert.equal(formatEvidenceStatusLabel("missing_coordinates"), "No Coords");
   assert.equal(
     formatEvidenceCategoryLabel("network_context"),
@@ -62,6 +68,13 @@ test("curation formatters normalize labels and evidence summaries", () => {
       raw_value: 0.88,
     }),
     "88%",
+  );
+  assert.equal(
+    formatEvidenceValue({
+      evidence_type: "external_reference_conflict",
+      raw_value: 812,
+    }),
+    "812m",
   );
   assert.equal(
     formatEvidenceDetails({
@@ -167,6 +180,18 @@ test("curation map utils derive approximate coordinates and overlap layout", () 
   assert.equal(layout.get("raw:A").stackSize, 2);
   assert.equal(layout.get("raw:A").markerSize, BASE_MARKER_SIZE * 2);
   assert.equal(layout.get("raw:B").stackIndex, 1);
+});
+
+test("external reference points only appear once the map is zoomed in enough", () => {
+  assert.equal(
+    shouldShowExternalReferencePointsAtZoom(EXTERNAL_REFERENCE_MIN_ZOOM - 0.1),
+    false,
+  );
+  assert.equal(
+    shouldShowExternalReferencePointsAtZoom(EXTERNAL_REFERENCE_MIN_ZOOM),
+    true,
+  );
+  assert.equal(shouldShowExternalReferencePointsAtZoom(12), true);
 });
 
 test("curation ui state reducer keeps selection and focus transitions stable", () => {

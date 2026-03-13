@@ -120,6 +120,29 @@ test("normalizeClusterDetail preserves canonical evidence taxonomy fields", asyn
           stop_point_count: 6,
           provider_source_count: 2,
         },
+        external_reference_summary: {
+          source_counts: {
+            wikidata: 1,
+          },
+          primary_match_count: 1,
+          strong_match_count: 1,
+          probable_match_count: 0,
+        },
+        external_reference_matches: [
+          {
+            source_id: "wikidata",
+            external_id: "Q123",
+            display_name: "Station A",
+            category: "station",
+            lat: 52.52,
+            lon: 13.405,
+            distance_meters: 23,
+            match_status: "strong",
+            match_confidence: 0.99,
+            source_url: "https://www.wikidata.org/wiki/Q123",
+            is_primary: true,
+          },
+        ],
         provenance: {
           has_active_source_mappings: false,
           active_source_ids: [],
@@ -130,6 +153,18 @@ test("normalizeClusterDetail preserves canonical evidence taxonomy fields", asyn
           historical_stop_place_refs: ["de:old:123"],
           coord_input_stop_place_refs: ["de:123"],
         },
+      },
+    ],
+    reference_overlay: [
+      {
+        source_id: "wikidata",
+        external_id: "Q123",
+        display_name: "Station A",
+        category: "station",
+        lat: 52.52,
+        lon: 13.405,
+        source_url: "https://www.wikidata.org/wiki/Q123",
+        matched_candidate_ids: ["station_a"],
       },
     ],
     evidence: [
@@ -194,6 +229,19 @@ test("normalizeClusterDetail preserves canonical evidence taxonomy fields", asyn
     historical_stop_place_refs: ["de:old:123"],
     coord_input_stop_place_refs: ["de:123"],
   });
+  assert.deepEqual(detail.candidates[0].external_reference_summary, {
+    source_counts: {
+      wikidata: 1,
+    },
+    primary_match_count: 1,
+    strong_match_count: 1,
+    probable_match_count: 0,
+  });
+  assert.equal(
+    detail.candidates[0].external_reference_matches[0].source_id,
+    "wikidata",
+  );
+  assert.equal(detail.reference_overlay[0].source_id, "wikidata");
   assert.deepEqual(detail.evidence_summary.category_counts, {
     core_match: 1,
     network_context: 0,
