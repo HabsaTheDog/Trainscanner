@@ -18,7 +18,7 @@ const MERGE_QUEUE_SUMMARY_SCHEMA = {
   additionalProperties: true,
 };
 
-const DEFAULT_MERGE_QUEUE_MAX_PARALLEL_WORKERS = 2;
+const DEFAULT_MERGE_QUEUE_MAX_PARALLEL_WORKERS = 4;
 const DEFAULT_MERGE_QUEUE_WORK_MEM = "64MB";
 const DEFAULT_MERGE_QUEUE_MAINTENANCE_WORK_MEM = "256MB";
 
@@ -102,6 +102,105 @@ function extractInfoFromNotice(notice) {
     value: payload.slice(separatorIndex + 1).trim(),
   };
 }
+
+function scopeParams(scope = {}) {
+  return {
+    country_filter: scope.country || "",
+    as_of: scope.asOf || "",
+  };
+}
+
+const CURRENT_MERGE_QUEUE_SUMMARY_SQL = `
+WITH scope AS (
+  SELECT COALESCE(NULLIF(:'as_of', ''), 'latest') AS scope_tag
+)
+SELECT json_build_object(
+  'scopeCountry', COALESCE(NULLIF(:'country_filter', ''), ''),
+  'scopeAsOf', COALESCE(NULLIF(:'as_of', ''), ''),
+  'scopeTag', (SELECT scope_tag FROM scope),
+  'clusters', (
+    SELECT COUNT(*)
+    FROM qa_merge_clusters c
+    WHERE c.scope_tag = (SELECT scope_tag FROM scope)
+      AND (
+        NULLIF(:'country_filter', '') IS NULL
+        OR NULLIF(:'country_filter', '') = ANY (COALESCE(c.country_tags, ARRAY[]::text[]))
+      )
+  ),
+  'candidates', (
+    SELECT COUNT(*)
+    FROM qa_merge_cluster_candidates c
+    JOIN qa_merge_clusters mc
+      ON mc.merge_cluster_id = c.merge_cluster_id
+    WHERE mc.scope_tag = (SELECT scope_tag FROM scope)
+      AND (
+        NULLIF(:'country_filter', '') IS NULL
+        OR NULLIF(:'country_filter', '') = ANY (COALESCE(mc.country_tags, ARRAY[]::text[]))
+      )
+  ),
+  'evidence', (
+    SELECT COUNT(*)
+    FROM qa_merge_cluster_evidence e
+    JOIN qa_merge_clusters mc
+      ON mc.merge_cluster_id = e.merge_cluster_id
+    WHERE mc.scope_tag = (SELECT scope_tag FROM scope)
+      AND (
+        NULLIF(:'country_filter', '') IS NULL
+        OR NULLIF(:'country_filter', '') = ANY (COALESCE(mc.country_tags, ARRAY[]::text[]))
+      )
+  )
+)::text AS summary_json;
+`;
+
+const MERGE_QUEUE_FINGERPRINT_SQL = `
+SELECT json_build_object(
+  'stage', 'merge-queue',
+  'country', COALESCE(NULLIF(:'country_filter', ''), ''),
+  'asOf', COALESCE(NULLIF(:'as_of', ''), ''),
+  'globalStationUpdatedAtMax', COALESCE(
+    (
+      SELECT to_char(MAX(gs.updated_at), 'YYYY-MM-DD"T"HH24:MI:SSOF')
+      FROM global_stations gs
+      WHERE gs.is_active = true
+        AND (
+          NULLIF(:'country_filter', '') IS NULL
+          OR gs.country = NULLIF(:'country_filter', '')::char(2)
+        )
+    ),
+    ''
+  ),
+  'activeStationCount', (
+    SELECT COUNT(*)
+    FROM global_stations gs
+    WHERE gs.is_active = true
+      AND (
+        NULLIF(:'country_filter', '') IS NULL
+        OR gs.country = NULLIF(:'country_filter', '')::char(2)
+      )
+  ),
+  'activeStopPointCount', (
+    SELECT COUNT(*)
+    FROM global_stop_points sp
+    WHERE sp.is_active = true
+      AND (
+        NULLIF(:'country_filter', '') IS NULL
+        OR sp.country = NULLIF(:'country_filter', '')::char(2)
+      )
+  ),
+  'activeStationMappingCount', (
+    SELECT COUNT(*)
+    FROM provider_global_station_mappings m
+    JOIN global_stations gs
+      ON gs.global_station_id = m.global_station_id
+    WHERE m.is_active = true
+      AND gs.is_active = true
+      AND (
+        NULLIF(:'country_filter', '') IS NULL
+        OR gs.country = NULLIF(:'country_filter', '')::char(2)
+      )
+  )
+) AS fingerprint;
+`;
 
 const LOOSE_NAME_TOKEN_SPLIT_REGEX_SQL = String.raw`\s+`;
 const LOOSE_NAME_TOKEN_STOP_WORDS_SQL = [
@@ -1648,6 +1747,105 @@ function createMergeQueueRepo(client) {
         message: "Merge queue summary failed schema validation",
       });
       return parsed;
+    },
+
+    async getRebuildFingerprint(scope = {}) {
+      const row = await client.queryOne(
+        MERGE_QUEUE_FINGERPRINT_SQL,
+        scopeParams(scope),
+      );
+      return row?.fingerprint || null;
+    },
+
+    async getCurrentSummary(scope = {}) {
+      const row = await client.queryOne(
+        CURRENT_MERGE_QUEUE_SUMMARY_SQL,
+        scopeParams(scope),
+      );
+      const raw = String(row?.summary_json || "");
+      let parsed;
+      try {
+        parsed = JSON.parse(raw);
+      } catch (err) {
+        throw new AppError({
+          code: "MERGE_QUEUE_BUILD_FAILED",
+          message: "Current merge queue summary returned invalid summary JSON",
+          cause: err,
+        });
+      }
+      validateOrThrow(parsed, MERGE_QUEUE_SUMMARY_SCHEMA, {
+        code: "MERGE_QUEUE_BUILD_FAILED",
+        message: "Current merge queue summary failed schema validation",
+      });
+      return parsed;
+    },
+
+    getTuningConfig() {
+      return {
+        maxParallelWorkersPerGather: MERGE_QUEUE_MAX_PARALLEL_WORKERS,
+        workMem: MERGE_QUEUE_WORK_MEM,
+        maintenanceWorkMem: MERGE_QUEUE_MAINTENANCE_WORK_MEM,
+      };
+    },
+
+    async sampleRebuildQueryPlans(scope = {}) {
+      const params = scopeParams(scope);
+      const queries = [
+        {
+          name: "scope_stations",
+          sql: `
+            EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
+            SELECT
+              gs.global_station_id,
+              gs.display_name,
+              gs.country
+            FROM global_stations gs
+            WHERE gs.is_active = true
+              AND EXISTS (
+                SELECT 1
+                FROM provider_global_station_mappings m
+                WHERE m.global_station_id = gs.global_station_id
+                  AND m.is_active = true
+              )
+              AND (
+                NULLIF(:'country_filter', '') IS NULL
+                OR gs.country = NULLIF(:'country_filter', '')::char(2)
+              )
+            ORDER BY gs.global_station_id
+            LIMIT 10000;
+          `,
+        },
+        {
+          name: "cluster_route_counts",
+          sql: `
+            EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
+            SELECT
+              sp.global_station_id,
+              COUNT(*)::integer AS hits
+            FROM global_stop_points sp
+            JOIN timetable_trip_stop_times tts
+              ON tts.global_stop_point_id = sp.global_stop_point_id
+            WHERE sp.is_active = true
+              AND (
+                NULLIF(:'country_filter', '') IS NULL
+                OR sp.country = NULLIF(:'country_filter', '')::char(2)
+              )
+            GROUP BY sp.global_station_id
+            ORDER BY hits DESC
+            LIMIT 1000;
+          `,
+        },
+      ];
+
+      const plans = [];
+      for (const query of queries) {
+        const rows = await client.queryRows(query.sql, params);
+        plans.push({
+          name: query.name,
+          plan: rows[0]?.["QUERY PLAN"] || rows[0] || null,
+        });
+      }
+      return plans;
     },
   };
 }

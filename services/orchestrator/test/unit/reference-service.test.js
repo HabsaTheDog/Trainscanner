@@ -6,6 +6,7 @@ const path = require("node:path");
 
 const {
   _internal: {
+    preflightSourceAvailability,
     normalizeImportedRows,
     parseRefreshExternalReferenceArgs,
     resolveGeoNamesInputPath,
@@ -141,4 +142,58 @@ test("resolveSourceDescriptors reuses cached Wikidata rows before live refresh",
 
   assert.equal(loaded.cacheHit, true);
   assert.deepEqual(loaded.rows, fixtureRows);
+});
+
+test("preflightSourceAvailability fails overture and geonames early without local inputs", () => {
+  const entries = preflightSourceAvailability(
+    "/tmp/repo",
+    {},
+    {
+      country: "DE",
+      asOf: "2026-03-13",
+    },
+    ["overture", "geonames", "wikidata"],
+  );
+
+  assert.deepEqual(entries, [
+    {
+      sourceId: "overture",
+      available: false,
+      mode: "unavailable",
+      reason: "missing_QA_EXTERNAL_REFERENCE_OVERTURE_PATH",
+    },
+    {
+      sourceId: "geonames",
+      available: false,
+      mode: "unavailable",
+      reason: "missing_QA_EXTERNAL_REFERENCE_GEONAMES_PATH",
+    },
+    {
+      sourceId: "wikidata",
+      available: true,
+      mode: "live",
+      reason: "country_scoped_live_refresh",
+    },
+  ]);
+});
+
+test("preflightSourceAvailability rejects live wikidata without country before db work", () => {
+  const entries = preflightSourceAvailability(
+    "/tmp/repo",
+    {},
+    {
+      country: "",
+      asOf: "2026-03-13",
+    },
+    ["wikidata"],
+  );
+
+  assert.deepEqual(entries, [
+    {
+      sourceId: "wikidata",
+      available: false,
+      mode: "unavailable",
+      reason: "country_required_for_live_wikidata",
+    },
+  ]);
 });

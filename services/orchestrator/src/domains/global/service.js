@@ -191,12 +191,190 @@ async function closeClient(client) {
   }
 }
 
-function createMergeQueueCallbacks(writeMergeQueueNotice, scopeCountry) {
+function isTruthy(value) {
+  return ["1", "true", "yes", "on"].includes(
+    String(value || "")
+      .trim()
+      .toLowerCase(),
+  );
+}
+
+function resolveSkipUnchangedEnabled(options = {}) {
+  if (options.skipUnchangedEnabled !== undefined) {
+    return Boolean(options.skipUnchangedEnabled);
+  }
+  return !isTruthy(options.env?.QA_PIPELINE_DISABLE_SKIP_UNCHANGED);
+}
+
+function toMetricValue(rawValue) {
+  const value = String(rawValue ?? "").trim();
+  if (value === "") {
+    return "";
+  }
+  if (value === "true") {
+    return true;
+  }
+  if (value === "false") {
+    return false;
+  }
+  if (/^-?\d+$/.test(value)) {
+    return Number.parseInt(value, 10);
+  }
+  if (/^-?\d+\.\d+$/.test(value)) {
+    return Number.parseFloat(value);
+  }
+  return value;
+}
+
+function buildStateKey(stageId, scope = {}) {
+  return [
+    "pipeline_stage_fingerprint",
+    stageId,
+    scope.country || "ALL",
+    scope.asOf || "latest",
+    scope.sourceId || "ALL",
+  ].join(":");
+}
+
+async function readStageState(client, key) {
+  if (!client || typeof client.queryOne !== "function") {
+    return null;
+  }
+  try {
+    const row = await client.queryOne(
+      `SELECT value FROM system_state WHERE key = :'key'`,
+      { key },
+    );
+    return row?.value || null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeStageState(client, key, value) {
+  if (!client || typeof client.runSql !== "function") {
+    return;
+  }
+  try {
+    await client.runSql(
+      `
+        INSERT INTO system_state (key, value)
+        VALUES (:'key', :'value'::jsonb)
+        ON CONFLICT (key) DO UPDATE
+        SET value = :'value'::jsonb,
+            updated_at = CURRENT_TIMESTAMP
+      `,
+      {
+        key,
+        value: JSON.stringify(value),
+      },
+    );
+  } catch {}
+}
+
+function createPhaseTracker({ stageId, envTuning = {}, now = Date.now } = {}) {
+  const startedAtMs = now();
+  const phases = [];
+  const phaseMap = new Map();
+  const counters = {};
+  let currentPhase = null;
+  let currentPhaseStartedAtMs = startedAtMs;
+
+  function ensurePhase(name) {
+    const normalized = String(name || "").trim() || "unphased";
+    if (!phaseMap.has(normalized)) {
+      const phase = {
+        name: normalized,
+        startedAtMs: 0,
+        durationMs: 0,
+        info: {},
+        rowCounts: {},
+      };
+      phaseMap.set(normalized, phase);
+      phases.push(phase);
+    }
+    return phaseMap.get(normalized);
+  }
+
+  function closeCurrentPhase(closedAtMs) {
+    if (!currentPhase) {
+      return;
+    }
+    currentPhase.durationMs += Math.max(
+      0,
+      closedAtMs - currentPhaseStartedAtMs,
+    );
+  }
+
+  return {
+    onPhase(phaseName) {
+      const switchedAtMs = now();
+      closeCurrentPhase(switchedAtMs);
+      currentPhase = ensurePhase(phaseName);
+      if (currentPhase.startedAtMs === 0) {
+        currentPhase.startedAtMs = Math.max(0, switchedAtMs - startedAtMs);
+      }
+      currentPhaseStartedAtMs = switchedAtMs;
+    },
+    onInfo(info) {
+      if (!info || !info.key) {
+        return;
+      }
+      const phase = currentPhase || ensurePhase("unphased");
+      const value = toMetricValue(info.value);
+      counters[info.key] = value;
+      phase.info[info.key] = value;
+      if (
+        typeof value === "number" &&
+        /(?:count|rows|total|mappings|edges|conflicts)$/i.test(info.key)
+      ) {
+        phase.rowCounts[info.key] = value;
+      }
+    },
+    finalize(extra = {}) {
+      const endedAtMs = now();
+      closeCurrentPhase(endedAtMs);
+      return {
+        stageId,
+        totalDurationMs: Math.max(0, endedAtMs - startedAtMs),
+        phases: phases.map((phase) => ({
+          name: phase.name,
+          startedAtMs: phase.startedAtMs,
+          durationMs: phase.durationMs,
+          info: phase.info,
+          rowCounts: phase.rowCounts,
+        })),
+        counters,
+        envTuning,
+        ...extra,
+      };
+    },
+  };
+}
+
+function createMergeQueueCallbacks(
+  writeMergeQueueNotice,
+  scopeCountry,
+  tracker = null,
+  extraCallbacks = {},
+) {
   return {
     onPhase(phase) {
+      if (tracker) {
+        tracker.onPhase(phase);
+      }
+      if (typeof extraCallbacks.onPhase === "function") {
+        extraCallbacks.onPhase(phase);
+      }
       writeMergeQueueNotice(`phase=${phase}`, scopeCountry);
     },
     onInfo(info) {
+      if (tracker) {
+        tracker.onInfo(info);
+      }
+      if (typeof extraCallbacks.onInfo === "function") {
+        extraCallbacks.onInfo(info);
+      }
       writeMergeQueueNotice(`${info.key}=${info.value}`, scopeCountry);
     },
   };
@@ -306,8 +484,110 @@ function createGlobalService(deps = {}) {
           try {
             await client.ensureReady();
             const stationsRepo = createStationsRepo(client);
-            const summary = await stationsRepo.buildGlobalStations(
-              parsed.scope,
+            const envTuning =
+              typeof stationsRepo.getTuningConfig === "function"
+                ? stationsRepo.getTuningConfig()
+                : {};
+            const metricsTracker = createPhaseTracker({
+              stageId: "global-stations",
+              envTuning,
+            });
+            const writeGlobalNotice = (label) => {
+              process.stdout.write(
+                `[global-stations] ${label} country=${parsed.scope.country || "ALL"} scope=${parsed.scope.asOf || "latest"} source=${parsed.scope.sourceId || "ALL"}\n`,
+              );
+            };
+            const stateKey = buildStateKey("global-stations", parsed.scope);
+            let cacheHit = false;
+            let skippedUnchanged = false;
+            let summary;
+            const skipUnchangedEnabled = resolveSkipUnchangedEnabled(options);
+
+            if (
+              skipUnchangedEnabled &&
+              typeof stationsRepo.getBuildFingerprint === "function" &&
+              typeof stationsRepo.getCurrentSummary === "function"
+            ) {
+              const fingerprint = await stationsRepo.getBuildFingerprint(
+                parsed.scope,
+              );
+              const previousState = await readStageState(client, stateKey);
+              if (
+                fingerprint &&
+                previousState?.fingerprint &&
+                JSON.stringify(previousState.fingerprint) ===
+                  JSON.stringify(fingerprint)
+              ) {
+                cacheHit = true;
+                skippedUnchanged = true;
+                metricsTracker.onInfo({ key: "cache_hit", value: "true" });
+                metricsTracker.onInfo({
+                  key: "skipped_unchanged",
+                  value: "true",
+                });
+                writeGlobalNotice("cache_hit=true");
+                writeGlobalNotice("skipped_unchanged=true");
+                summary = await stationsRepo.getCurrentSummary(parsed.scope);
+              } else {
+                summary = await stationsRepo.buildGlobalStations(parsed.scope, {
+                  onPhase(phase) {
+                    metricsTracker.onPhase(phase);
+                    if (typeof options.onPhase === "function") {
+                      options.onPhase({
+                        stageId: "global-stations",
+                        phase,
+                      });
+                    }
+                    writeGlobalNotice(`phase=${phase}`);
+                  },
+                  onInfo(info) {
+                    metricsTracker.onInfo(info);
+                    if (typeof options.onInfo === "function") {
+                      options.onInfo({
+                        stageId: "global-stations",
+                        ...info,
+                      });
+                    }
+                    writeGlobalNotice(`${info.key}=${info.value}`);
+                  },
+                });
+                await writeStageState(client, stateKey, {
+                  fingerprint,
+                  summary,
+                  updatedAt: new Date().toISOString(),
+                });
+              }
+            } else {
+              summary = await stationsRepo.buildGlobalStations(parsed.scope, {
+                onPhase(phase) {
+                  metricsTracker.onPhase(phase);
+                  if (typeof options.onPhase === "function") {
+                    options.onPhase({
+                      stageId: "global-stations",
+                      phase,
+                    });
+                  }
+                  writeGlobalNotice(`phase=${phase}`);
+                },
+                onInfo(info) {
+                  metricsTracker.onInfo(info);
+                  if (typeof options.onInfo === "function") {
+                    options.onInfo({
+                      stageId: "global-stations",
+                      ...info,
+                    });
+                  }
+                  writeGlobalNotice(`${info.key}=${info.value}`);
+                },
+              });
+            }
+
+            const metrics = metricsTracker.finalize({
+              cacheHit,
+              skippedUnchanged,
+            });
+            process.stdout.write(
+              `[global-stations] metrics=${JSON.stringify(metrics)}\n`,
             );
             process.stdout.write(`${JSON.stringify(summary)}\n`);
             if (parsed.reportLowConfidence) {
@@ -322,6 +602,9 @@ function createGlobalService(deps = {}) {
             return {
               ok: true,
               summary,
+              metrics,
+              cacheHit,
+              skippedUnchanged,
             };
           } finally {
             await closeClient(client);
@@ -351,44 +634,127 @@ function createGlobalService(deps = {}) {
               `[merge-queue] ${label} country=${scopeCountry || "ALL"} scope=${parsed.scope.asOf || "latest"}\n`,
             );
           };
-
-          if (parsed.scope.country) {
-            const client = createClient({ rootDir });
-            try {
-              await client.ensureReady();
-              const queueRepo = createQueueRepo(client);
-              const summary = await queueRepo.rebuildMergeQueue(
-                parsed.scope,
-                createMergeQueueCallbacks(
-                  writeMergeQueueNotice,
-                  parsed.scope.country,
-                ),
-              );
-              process.stdout.write(`${JSON.stringify(summary)}\n`);
-              return {
-                ok: true,
-                summary,
-              };
-            } finally {
-              await closeClient(client);
-            }
-          }
-
           const client = createClient({ rootDir });
           try {
             await client.ensureReady();
             const queueRepo = createQueueRepo(client);
-            const summary = await queueRepo.rebuildMergeQueue(
-              {
-                country: "",
-                asOf: parsed.scope.asOf,
-              },
-              createMergeQueueCallbacks(writeMergeQueueNotice, ""),
+            const scope = parsed.scope.country
+              ? parsed.scope
+              : {
+                  country: "",
+                  asOf: parsed.scope.asOf,
+                };
+            const tracker = createPhaseTracker({
+              stageId: "merge-queue",
+              envTuning:
+                typeof queueRepo.getTuningConfig === "function"
+                  ? queueRepo.getTuningConfig()
+                  : {},
+            });
+            const stateKey = buildStateKey("merge-queue", scope);
+            let cacheHit = false;
+            let skippedUnchanged = false;
+            let summary;
+            const skipUnchangedEnabled = resolveSkipUnchangedEnabled(options);
+
+            if (
+              skipUnchangedEnabled &&
+              typeof queueRepo.getRebuildFingerprint === "function" &&
+              typeof queueRepo.getCurrentSummary === "function"
+            ) {
+              const fingerprint = await queueRepo.getRebuildFingerprint(scope);
+              const previousState = await readStageState(client, stateKey);
+              if (
+                fingerprint &&
+                previousState?.fingerprint &&
+                JSON.stringify(previousState.fingerprint) ===
+                  JSON.stringify(fingerprint)
+              ) {
+                cacheHit = true;
+                skippedUnchanged = true;
+                tracker.onInfo({ key: "cache_hit", value: "true" });
+                tracker.onInfo({
+                  key: "skipped_unchanged",
+                  value: "true",
+                });
+                writeMergeQueueNotice("cache_hit=true", scope.country);
+                writeMergeQueueNotice("skipped_unchanged=true", scope.country);
+                summary = await queueRepo.getCurrentSummary(scope);
+              } else {
+                summary = await queueRepo.rebuildMergeQueue(
+                  scope,
+                  createMergeQueueCallbacks(
+                    writeMergeQueueNotice,
+                    scope.country,
+                    tracker,
+                    {
+                      onPhase(phase) {
+                        if (typeof options.onPhase === "function") {
+                          options.onPhase({
+                            stageId: "merge-queue",
+                            phase,
+                          });
+                        }
+                      },
+                      onInfo(info) {
+                        if (typeof options.onInfo === "function") {
+                          options.onInfo({
+                            stageId: "merge-queue",
+                            ...info,
+                          });
+                        }
+                      },
+                    },
+                  ),
+                );
+                await writeStageState(client, stateKey, {
+                  fingerprint,
+                  summary,
+                  updatedAt: new Date().toISOString(),
+                });
+              }
+            } else {
+              summary = await queueRepo.rebuildMergeQueue(
+                scope,
+                createMergeQueueCallbacks(
+                  writeMergeQueueNotice,
+                  scope.country,
+                  tracker,
+                  {
+                    onPhase(phase) {
+                      if (typeof options.onPhase === "function") {
+                        options.onPhase({
+                          stageId: "merge-queue",
+                          phase,
+                        });
+                      }
+                    },
+                    onInfo(info) {
+                      if (typeof options.onInfo === "function") {
+                        options.onInfo({
+                          stageId: "merge-queue",
+                          ...info,
+                        });
+                      }
+                    },
+                  },
+                ),
+              );
+            }
+            const metrics = tracker.finalize({
+              cacheHit,
+              skippedUnchanged,
+            });
+            process.stdout.write(
+              `[merge-queue] metrics=${JSON.stringify(metrics)}\n`,
             );
             process.stdout.write(`${JSON.stringify(summary)}\n`);
             return {
               ok: true,
               summary,
+              metrics,
+              cacheHit,
+              skippedUnchanged,
             };
           } finally {
             await closeClient(client);

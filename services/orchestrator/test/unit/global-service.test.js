@@ -77,6 +77,7 @@ test("buildGlobalStations closes the db client and prints summary JSON", async (
 
   assert.deepEqual(clientCalls, ["ensureReady", "end"]);
   assert.match(stdout.writes.join(""), /"sourceRows":1/);
+  assert.match(stdout.writes.join(""), /\[global-stations\] metrics=/);
 });
 
 test("buildGlobalMergeQueue prints phase and info notices and closes the client", async () => {
@@ -136,6 +137,66 @@ test("buildGlobalMergeQueue prints phase and info notices and closes the client"
     /\[merge-queue\] pair_seeds_total=42 country=AT scope=2026-03-10/,
   );
   assert.match(output, /"clusters":1/);
+  assert.match(output, /\[merge-queue\] metrics=/);
+});
+
+test("buildGlobalStations skips unchanged scopes when fingerprint matches", async () => {
+  const stdout = captureStdout();
+  const stateWrites = [];
+
+  try {
+    const service = createGlobalService({
+      createPostgisClient: () => ({
+        async ensureReady() {},
+        async queryOne(sql) {
+          if (String(sql).includes("FROM system_state")) {
+            return {
+              value: {
+                fingerprint: { datasetIds: [101] },
+              },
+            };
+          }
+          return null;
+        },
+        async runSql(sql, params) {
+          stateWrites.push({ sql: String(sql), params });
+        },
+        async end() {},
+      }),
+      createGlobalStationsRepo: () => ({
+        async getBuildFingerprint() {
+          return { datasetIds: [101] };
+        },
+        async getCurrentSummary() {
+          return {
+            sourceRows: 10,
+            globalStations: 4,
+            stationMappings: 4,
+            globalStopPoints: 5,
+            stopPointMappings: 5,
+          };
+        },
+      }),
+    });
+
+    const result = await service.buildGlobalStations({
+      rootDir: SAFE_REPO_ROOT,
+      args: ["--country", "DE"],
+      jobOrchestrationEnabled: false,
+    });
+
+    assert.equal(result.cacheHit, true);
+    assert.equal(result.skippedUnchanged, true);
+  } finally {
+    stdout.restore();
+  }
+
+  assert.equal(stateWrites.length, 0);
+  assert.match(stdout.writes.join(""), /\[global-stations\] cache_hit=true/);
+  assert.match(
+    stdout.writes.join(""),
+    /\[global-stations\] skipped_unchanged=true/,
+  );
 });
 
 test("job-orchestrated global build closes both orchestration and execution clients", async () => {

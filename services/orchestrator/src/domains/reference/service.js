@@ -640,6 +640,113 @@ function logImportSummary(summary) {
   }
 }
 
+function validateConfiguredInputPath(filePath, envName) {
+  const resolved = String(filePath || "").trim();
+  if (!resolved) {
+    return {
+      available: false,
+      reason: `missing_${envName}`,
+    };
+  }
+
+  if (!fs.existsSync(resolved)) {
+    return {
+      available: false,
+      reason: `${envName}_not_found`,
+    };
+  }
+
+  return {
+    available: true,
+    reason: "configured",
+  };
+}
+
+function preflightSourceAvailability(_rootDir, env, scope, selectedSourceIds) {
+  return selectedSourceIds.map((sourceId) => {
+    if (sourceId === "overture") {
+      const inputPath = String(
+        env?.QA_EXTERNAL_REFERENCE_OVERTURE_PATH || "",
+      ).trim();
+      const inputStatus = validateConfiguredInputPath(
+        inputPath,
+        "QA_EXTERNAL_REFERENCE_OVERTURE_PATH",
+      );
+      return {
+        sourceId,
+        available: inputStatus.available,
+        mode: inputStatus.available ? "local_file" : "unavailable",
+        reason: inputStatus.reason,
+      };
+    }
+
+    if (sourceId === "geonames") {
+      const inputPath = String(
+        env?.QA_EXTERNAL_REFERENCE_GEONAMES_PATH || "",
+      ).trim();
+      const inputStatus = validateConfiguredInputPath(
+        inputPath,
+        "QA_EXTERNAL_REFERENCE_GEONAMES_PATH",
+      );
+      return {
+        sourceId,
+        available: inputStatus.available,
+        mode: inputStatus.available ? "local_file" : "unavailable",
+        reason: inputStatus.reason,
+      };
+    }
+
+    if (sourceId === "wikidata") {
+      const fixturePath = String(
+        env?.QA_EXTERNAL_REFERENCE_WIKIDATA_FIXTURE || "",
+      ).trim();
+      if (fixturePath) {
+        const fixtureStatus = validateConfiguredInputPath(
+          fixturePath,
+          "QA_EXTERNAL_REFERENCE_WIKIDATA_FIXTURE",
+        );
+        return {
+          sourceId,
+          available: fixtureStatus.available,
+          mode: fixtureStatus.available ? "fixture" : "unavailable",
+          reason: fixtureStatus.reason,
+        };
+      }
+
+      if (!scope.country) {
+        return {
+          sourceId,
+          available: false,
+          mode: "unavailable",
+          reason: "country_required_for_live_wikidata",
+        };
+      }
+
+      return {
+        sourceId,
+        available: true,
+        mode: "live",
+        reason: "country_scoped_live_refresh",
+      };
+    }
+
+    return {
+      sourceId,
+      available: false,
+      mode: "unavailable",
+      reason: "unknown_source",
+    };
+  });
+}
+
+function logSourceAvailability(entries = []) {
+  for (const entry of entries) {
+    process.stdout.write(
+      `[reference-data] preflight source=${entry.sourceId} available=${entry.available ? "true" : "false"} mode=${entry.mode} reason=${entry.reason}\n`,
+    );
+  }
+}
+
 async function runImportForSource(repo, descriptor, scope) {
   const metadata = descriptor.resolveMetadata(scope);
   const importRow = await repo.recordImportRun({
@@ -797,6 +904,37 @@ function createReferenceService(deps = {}) {
             };
           }
 
+          const selectedSourceIds = parsed.scope.sourceId
+            ? [parsed.scope.sourceId]
+            : SOURCE_IDS;
+          const preflight = preflightSourceAvailability(
+            rootDir,
+            runOptions.env || process.env,
+            parsed.scope,
+            selectedSourceIds,
+          );
+          logSourceAvailability(preflight);
+          const availableEntries = preflight.filter((entry) => entry.available);
+          const unavailableImports = preflight
+            .filter((entry) => !entry.available)
+            .map((entry) => ({
+              source_id: entry.sourceId,
+              status: "failed",
+              row_count: 0,
+              error_message: entry.reason,
+              preflight_only: true,
+            }));
+
+          if (availableEntries.length === 0) {
+            throw new AppError({
+              code: "EXTERNAL_REFERENCE_IMPORT_FAILED",
+              message: "All external reference imports failed preflight",
+              details: {
+                imports: unavailableImports,
+              },
+            });
+          }
+
           const client = createClient({ rootDir, env: runOptions.env });
           try {
             await client.ensureReady();
@@ -805,12 +943,11 @@ function createReferenceService(deps = {}) {
               rootDir,
               runOptions.env || process.env,
             );
-            const selectedSourceIds = parsed.scope.sourceId
-              ? [parsed.scope.sourceId]
-              : SOURCE_IDS;
 
-            const imports = [];
-            for (const sourceId of selectedSourceIds) {
+            const imports = [...unavailableImports];
+            for (const sourceId of availableEntries.map(
+              (entry) => entry.sourceId,
+            )) {
               imports.push(
                 await runImportForSource(
                   repo,
@@ -864,6 +1001,8 @@ module.exports = {
   printExternalReferenceUsage,
   refreshExternalReferences,
   _internal: {
+    preflightSourceAvailability,
+    logSourceAvailability,
     resolveGeoNamesInputPath,
     normalizeImportedRows,
     normalizeSnapshotDate,

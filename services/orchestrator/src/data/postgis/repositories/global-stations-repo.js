@@ -23,6 +23,72 @@ const GLOBAL_BUILD_SUMMARY_SCHEMA = {
   additionalProperties: true,
 };
 
+const DEFAULT_GLOBAL_BUILD_MAX_PARALLEL_WORKERS = 4;
+const DEFAULT_GLOBAL_BUILD_WORK_MEM = "64MB";
+const DEFAULT_GLOBAL_BUILD_MAINTENANCE_WORK_MEM = "256MB";
+const DEFAULT_GLOBAL_BUILD_SYNCHRONOUS_COMMIT = "OFF";
+
+function resolvePositiveIntegerEnv(name, fallback) {
+  const rawValue = String(process.env[name] || "").trim();
+  if (!rawValue) {
+    return fallback;
+  }
+
+  const parsed = Number.parseInt(rawValue, 10);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    return fallback;
+  }
+
+  return parsed;
+}
+
+function resolveMemoryEnv(name, fallback) {
+  const rawValue = String(process.env[name] || "").trim();
+  if (!rawValue) {
+    return fallback;
+  }
+
+  if (!/^\d+(kB|MB|GB)$/i.test(rawValue)) {
+    return fallback;
+  }
+
+  return rawValue.toUpperCase();
+}
+
+function resolveSynchronousCommitEnv(name, fallback) {
+  const rawValue = String(process.env[name] || "")
+    .trim()
+    .toUpperCase();
+  if (!rawValue) {
+    return fallback;
+  }
+
+  if (
+    ["ON", "OFF", "LOCAL", "REMOTE_WRITE", "REMOTE_APPLY"].includes(rawValue)
+  ) {
+    return rawValue;
+  }
+
+  return fallback;
+}
+
+const GLOBAL_BUILD_MAX_PARALLEL_WORKERS = resolvePositiveIntegerEnv(
+  "GLOBAL_STATION_BUILD_MAX_PARALLEL_WORKERS",
+  DEFAULT_GLOBAL_BUILD_MAX_PARALLEL_WORKERS,
+);
+const GLOBAL_BUILD_WORK_MEM = resolveMemoryEnv(
+  "GLOBAL_STATION_BUILD_WORK_MEM",
+  DEFAULT_GLOBAL_BUILD_WORK_MEM,
+);
+const GLOBAL_BUILD_MAINTENANCE_WORK_MEM = resolveMemoryEnv(
+  "GLOBAL_STATION_BUILD_MAINTENANCE_WORK_MEM",
+  DEFAULT_GLOBAL_BUILD_MAINTENANCE_WORK_MEM,
+);
+const GLOBAL_BUILD_SYNCHRONOUS_COMMIT = resolveSynchronousCommitEnv(
+  "GLOBAL_STATION_BUILD_SYNCHRONOUS_COMMIT",
+  DEFAULT_GLOBAL_BUILD_SYNCHRONOUS_COMMIT,
+);
+
 function extractJsonLine(stdout) {
   const lines = String(stdout || "")
     .split(/\r?\n/)
@@ -38,8 +104,344 @@ function extractJsonLine(stdout) {
   return "";
 }
 
+function extractPhaseFromNotice(notice) {
+  const message = String(notice?.message || notice || "").trim();
+  if (!message.startsWith("global_build_phase:")) {
+    return "";
+  }
+  return message.slice("global_build_phase:".length).trim();
+}
+
+function extractInfoFromNotice(notice) {
+  const message = String(notice?.message || notice || "").trim();
+  if (!message.startsWith("global_build_info:")) {
+    return null;
+  }
+
+  const payload = message.slice("global_build_info:".length).trim();
+  const separatorIndex = payload.indexOf("=");
+  if (separatorIndex <= 0) {
+    return null;
+  }
+
+  return {
+    key: payload.slice(0, separatorIndex).trim(),
+    value: payload.slice(separatorIndex + 1).trim(),
+  };
+}
+
+function parseSummaryLine(line, code, messagePrefix) {
+  if (!line) {
+    throw new AppError({
+      code,
+      message: `${messagePrefix} did not return summary JSON`,
+    });
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(line);
+  } catch (err) {
+    throw new AppError({
+      code,
+      message: `${messagePrefix} returned invalid summary JSON`,
+      cause: err,
+    });
+  }
+
+  validateOrThrow(parsed, GLOBAL_BUILD_SUMMARY_SCHEMA, {
+    code,
+    message: `${messagePrefix} summary failed schema validation`,
+  });
+
+  return parsed;
+}
+
+function scopeParams(scope = {}) {
+  return {
+    country_filter: scope.country || "",
+    as_of: scope.asOf || "",
+    source_id_scope: scope.sourceId || "",
+  };
+}
+
+const GLOBAL_BUILD_CURRENT_SUMMARY_SQL = `
+SELECT json_build_object(
+  'sourceRows', (
+    SELECT COUNT(*)
+    FROM (
+      SELECT 1
+      FROM raw_provider_stop_places rp
+      JOIN provider_datasets pd
+        ON pd.dataset_id = rp.dataset_id
+      WHERE (NULLIF(:'country_filter', '') IS NULL OR rp.country = NULLIF(:'country_filter', '')::char(2))
+        AND (NULLIF(:'source_id_scope', '') IS NULL OR rp.source_id = NULLIF(:'source_id_scope', ''))
+        AND (NULLIF(:'as_of', '') IS NULL OR pd.snapshot_date <= NULLIF(:'as_of', '')::date)
+      GROUP BY rp.source_id, rp.provider_stop_place_ref
+    ) latest
+  ),
+  'globalStations', (
+    SELECT COUNT(*)
+    FROM global_stations gs
+    WHERE gs.is_active = true
+      AND (
+        NULLIF(:'country_filter', '') IS NULL
+        OR gs.country = NULLIF(:'country_filter', '')::char(2)
+      )
+      AND (
+        NULLIF(:'source_id_scope', '') IS NULL
+        OR EXISTS (
+          SELECT 1
+          FROM provider_global_station_mappings m
+          WHERE m.global_station_id = gs.global_station_id
+            AND m.source_id = NULLIF(:'source_id_scope', '')
+            AND m.is_active = true
+        )
+      )
+  ),
+  'stationMappings', (
+    SELECT COUNT(*)
+    FROM provider_global_station_mappings m
+    WHERE m.is_active = true
+      AND (
+        NULLIF(:'source_id_scope', '') IS NULL
+        OR m.source_id = NULLIF(:'source_id_scope', '')
+      )
+      AND (
+        NULLIF(:'country_filter', '') IS NULL
+        OR EXISTS (
+          SELECT 1
+          FROM global_stations gs
+          WHERE gs.global_station_id = m.global_station_id
+            AND gs.is_active = true
+            AND gs.country = NULLIF(:'country_filter', '')::char(2)
+        )
+      )
+  ),
+  'globalStopPoints', (
+    SELECT COUNT(*)
+    FROM global_stop_points sp
+    WHERE sp.is_active = true
+      AND (
+        NULLIF(:'country_filter', '') IS NULL
+        OR sp.country = NULLIF(:'country_filter', '')::char(2)
+      )
+      AND (
+        NULLIF(:'source_id_scope', '') IS NULL
+        OR sp.metadata ->> 'source_id' = NULLIF(:'source_id_scope', '')
+      )
+  ),
+  'stopPointMappings', (
+    SELECT COUNT(*)
+    FROM provider_global_stop_point_mappings m
+    JOIN global_stop_points sp
+      ON sp.global_stop_point_id = m.global_stop_point_id
+    WHERE m.is_active = true
+      AND sp.is_active = true
+      AND (
+        NULLIF(:'country_filter', '') IS NULL
+        OR sp.country = NULLIF(:'country_filter', '')::char(2)
+      )
+      AND (
+        NULLIF(:'source_id_scope', '') IS NULL
+        OR m.source_id = NULLIF(:'source_id_scope', '')
+      )
+  ),
+  'mappedTripStopTimes', (
+    SELECT COUNT(*)
+    FROM timetable_trip_stop_times tts
+    WHERE tts.global_stop_point_id IS NOT NULL
+  ),
+  'transferEdges', (
+    SELECT COUNT(*)
+    FROM transfer_edges te
+    JOIN global_stop_points fsp
+      ON fsp.global_stop_point_id = te.from_global_stop_point_id
+    JOIN global_stop_points tsp
+      ON tsp.global_stop_point_id = te.to_global_stop_point_id
+    WHERE (
+      NULLIF(:'country_filter', '') IS NULL
+      OR fsp.country = NULLIF(:'country_filter', '')::char(2)
+      OR tsp.country = NULLIF(:'country_filter', '')::char(2)
+    )
+      AND (
+        NULLIF(:'source_id_scope', '') IS NULL
+        OR fsp.metadata ->> 'source_id' = NULLIF(:'source_id_scope', '')
+        OR tsp.metadata ->> 'source_id' = NULLIF(:'source_id_scope', '')
+      )
+  ),
+  'coordSourceSelf', (
+    SELECT COUNT(*)
+    FROM global_stations gs
+    WHERE gs.is_active = true
+      AND COALESCE(gs.metadata ->> 'coord_source', '') = 'self'
+      AND (
+        NULLIF(:'country_filter', '') IS NULL
+        OR gs.country = NULLIF(:'country_filter', '')::char(2)
+      )
+  ),
+  'coordSourceParentStopPlace', (
+    SELECT COUNT(*)
+    FROM global_stations gs
+    WHERE gs.is_active = true
+      AND COALESCE(gs.metadata ->> 'coord_source', '') = 'parent_stop_place'
+      AND (
+        NULLIF(:'country_filter', '') IS NULL
+        OR gs.country = NULLIF(:'country_filter', '')::char(2)
+      )
+  ),
+  'coordSourceChildStopPoints', (
+    SELECT COUNT(*)
+    FROM global_stations gs
+    WHERE gs.is_active = true
+      AND COALESCE(gs.metadata ->> 'coord_source', '') = 'child_stop_points'
+      AND (
+        NULLIF(:'country_filter', '') IS NULL
+        OR gs.country = NULLIF(:'country_filter', '')::char(2)
+      )
+  ),
+  'coordSourceSiblingStopPlaces', (
+    SELECT COUNT(*)
+    FROM global_stations gs
+    WHERE gs.is_active = true
+      AND COALESCE(gs.metadata ->> 'coord_source', '') = 'sibling_stop_places'
+      AND (
+        NULLIF(:'country_filter', '') IS NULL
+        OR gs.country = NULLIF(:'country_filter', '')::char(2)
+      )
+  ),
+  'coordSourceTopographicPlaceCluster', (
+    SELECT COUNT(*)
+    FROM global_stations gs
+    WHERE gs.is_active = true
+      AND COALESCE(gs.metadata ->> 'coord_source', '') = 'topographic_place_cluster'
+      AND (
+        NULLIF(:'country_filter', '') IS NULL
+        OR gs.country = NULLIF(:'country_filter', '')::char(2)
+      )
+  ),
+  'coordSourceMissing', (
+    SELECT COUNT(*)
+    FROM global_stations gs
+    WHERE gs.is_active = true
+      AND COALESCE(gs.metadata ->> 'coord_source', '') = 'missing'
+      AND (
+        NULLIF(:'country_filter', '') IS NULL
+        OR gs.country = NULLIF(:'country_filter', '')::char(2)
+      )
+  ),
+  'coordConfidenceHigh', (
+    SELECT COUNT(*)
+    FROM global_stations gs
+    WHERE gs.is_active = true
+      AND COALESCE(gs.metadata ->> 'coord_confidence', '') = 'high'
+      AND (
+        NULLIF(:'country_filter', '') IS NULL
+        OR gs.country = NULLIF(:'country_filter', '')::char(2)
+      )
+  ),
+  'coordConfidenceMedium', (
+    SELECT COUNT(*)
+    FROM global_stations gs
+    WHERE gs.is_active = true
+      AND COALESCE(gs.metadata ->> 'coord_confidence', '') = 'medium'
+      AND (
+        NULLIF(:'country_filter', '') IS NULL
+        OR gs.country = NULLIF(:'country_filter', '')::char(2)
+      )
+  ),
+  'coordConfidenceLow', (
+    SELECT COUNT(*)
+    FROM global_stations gs
+    WHERE gs.is_active = true
+      AND COALESCE(gs.metadata ->> 'coord_confidence', '') = 'low'
+      AND (
+        NULLIF(:'country_filter', '') IS NULL
+        OR gs.country = NULLIF(:'country_filter', '')::char(2)
+      )
+  ),
+  'coordConfidenceUnresolved', (
+    SELECT COUNT(*)
+    FROM global_stations gs
+    WHERE gs.is_active = true
+      AND COALESCE(gs.metadata ->> 'coord_confidence', '') = 'unresolved'
+      AND (
+        NULLIF(:'country_filter', '') IS NULL
+        OR gs.country = NULLIF(:'country_filter', '')::char(2)
+      )
+  ),
+  'coordConflictCount', (
+    SELECT COUNT(*)
+    FROM global_stations gs
+    WHERE gs.is_active = true
+      AND COALESCE((gs.metadata -> 'coord_validation' ->> 'conflict_signal_count')::integer, 0) > 0
+      AND (
+        NULLIF(:'country_filter', '') IS NULL
+        OR gs.country = NULLIF(:'country_filter', '')::char(2)
+      )
+  ),
+  'countryFilter', COALESCE(NULLIF(:'country_filter', ''), ''),
+  'asOf', COALESCE(NULLIF(:'as_of', ''), ''),
+  'sourceScope', COALESCE(NULLIF(:'source_id_scope', ''), '')
+)::text AS summary_json;
+`;
+
+const GLOBAL_BUILD_FINGERPRINT_SQL = `
+WITH relevant_datasets AS (
+  SELECT DISTINCT rp.dataset_id, rp.source_id
+  FROM raw_provider_stop_places rp
+  JOIN provider_datasets pd
+    ON pd.dataset_id = rp.dataset_id
+  WHERE (NULLIF(:'country_filter', '') IS NULL OR rp.country = NULLIF(:'country_filter', '')::char(2))
+    AND (NULLIF(:'source_id_scope', '') IS NULL OR rp.source_id = NULLIF(:'source_id_scope', ''))
+    AND (NULLIF(:'as_of', '') IS NULL OR pd.snapshot_date <= NULLIF(:'as_of', '')::date)
+  UNION
+  SELECT DISTINCT rpp.dataset_id, rpp.source_id
+  FROM raw_provider_stop_points rpp
+  JOIN provider_datasets pd
+    ON pd.dataset_id = rpp.dataset_id
+  WHERE (NULLIF(:'country_filter', '') IS NULL OR rpp.country = NULLIF(:'country_filter', '')::char(2))
+    AND (NULLIF(:'source_id_scope', '') IS NULL OR rpp.source_id = NULLIF(:'source_id_scope', ''))
+    AND (NULLIF(:'as_of', '') IS NULL OR pd.snapshot_date <= NULLIF(:'as_of', '')::date)
+)
+SELECT json_build_object(
+  'stage', 'global-stations',
+  'country', COALESCE(NULLIF(:'country_filter', ''), ''),
+  'asOf', COALESCE(NULLIF(:'as_of', ''), ''),
+  'sourceScope', COALESCE(NULLIF(:'source_id_scope', ''), ''),
+  'datasetIds', COALESCE(
+    (SELECT jsonb_agg(dataset_id ORDER BY dataset_id) FROM relevant_datasets),
+    '[]'::jsonb
+  ),
+  'sourceIds', COALESCE(
+    (SELECT jsonb_agg(DISTINCT source_id ORDER BY source_id) FROM relevant_datasets),
+    '[]'::jsonb
+  ),
+  'datasetCount', (SELECT COUNT(*) FROM relevant_datasets)
+) AS fingerprint;
+`;
+
 const BUILD_GLOBAL_SQL = `
 BEGIN;
+
+SET LOCAL max_parallel_workers_per_gather = ${GLOBAL_BUILD_MAX_PARALLEL_WORKERS};
+SET LOCAL work_mem = '${GLOBAL_BUILD_WORK_MEM}';
+SET LOCAL maintenance_work_mem = '${GLOBAL_BUILD_MAINTENANCE_WORK_MEM}';
+SET LOCAL synchronous_commit = '${GLOBAL_BUILD_SYNCHRONOUS_COMMIT}';
+SET LOCAL jit = off;
+
+DO $$
+BEGIN
+  RAISE NOTICE 'global_build_phase:initializing';
+  RAISE NOTICE 'global_build_info:country_filter=%', COALESCE(NULLIF(:'country_filter', ''), 'ALL');
+  RAISE NOTICE 'global_build_info:as_of=%', COALESCE(NULLIF(:'as_of', ''), 'latest');
+  RAISE NOTICE 'global_build_info:source_scope=%', COALESCE(NULLIF(:'source_id_scope', ''), 'ALL');
+END $$;
+
+DO $$
+BEGIN
+  RAISE NOTICE 'global_build_phase:loading_latest_stop_places';
+END $$;
 
 CREATE TEMP TABLE _candidate AS
 SELECT
@@ -85,6 +487,7 @@ BEGIN
   IF (SELECT COUNT(*) FROM _candidate) = 0 THEN
     RAISE EXCEPTION 'No raw provider stop places found for selected scope';
   END IF;
+  RAISE NOTICE 'global_build_info:source_row_count=%', (SELECT COUNT(*) FROM _candidate);
 END $$;
 
 CREATE INDEX _candidate_source_place_idx
@@ -105,6 +508,11 @@ CREATE INDEX _candidate_topographic_idx
   ON _candidate (source_id, topographic_place_ref)
   WHERE topographic_place_ref IS NOT NULL;
 
+DO $$
+BEGIN
+  RAISE NOTICE 'global_build_info:candidate_index_count=5';
+END $$;
+
 CREATE TEMP TABLE _candidate_child_counts AS
 SELECT
   c.source_id,
@@ -115,6 +523,16 @@ LEFT JOIN _candidate child
   ON child.source_id = c.source_id
  AND child.parent_stop_place_ref = c.provider_stop_place_ref
 GROUP BY c.source_id, c.provider_stop_place_ref;
+
+DO $$
+BEGIN
+  RAISE NOTICE 'global_build_info:child_count_rows=%', (SELECT COUNT(*) FROM _candidate_child_counts);
+END $$;
+
+DO $$
+BEGIN
+  RAISE NOTICE 'global_build_phase:loading_latest_stop_points';
+END $$;
 
 CREATE TEMP TABLE _candidate_stop_points_latest AS
 SELECT
@@ -156,6 +574,17 @@ WHERE latest.row_num = 1;
 CREATE INDEX _candidate_stop_points_latest_place_idx
   ON _candidate_stop_points_latest (source_id, provider_stop_place_ref);
 
+DO $$
+BEGIN
+  RAISE NOTICE 'global_build_info:latest_stop_point_rows=%', (SELECT COUNT(*) FROM _candidate_stop_points_latest);
+  RAISE NOTICE 'global_build_info:stop_point_latest_index_count=1';
+END $$;
+
+DO $$
+BEGIN
+  RAISE NOTICE 'global_build_phase:building_stop_point_evidence';
+END $$;
+
 CREATE TEMP TABLE _candidate_stop_point_evidence AS
 SELECT
   grouped.source_id,
@@ -189,6 +618,16 @@ LEFT JOIN LATERAL (
     AND sp.geom IS NOT NULL
 ) spread ON true;
 
+DO $$
+BEGIN
+  RAISE NOTICE 'global_build_info:stop_point_evidence_rows=%', (SELECT COUNT(*) FROM _candidate_stop_point_evidence);
+END $$;
+
+DO $$
+BEGIN
+  RAISE NOTICE 'global_build_phase:building_parent_evidence';
+END $$;
+
 CREATE TEMP TABLE _candidate_parent_evidence AS
 SELECT
   c.source_id,
@@ -202,6 +641,16 @@ FROM _candidate c
 LEFT JOIN _candidate parent
   ON parent.source_id = c.source_id
  AND parent.provider_stop_place_ref = c.parent_stop_place_ref;
+
+DO $$
+BEGIN
+  RAISE NOTICE 'global_build_info:parent_evidence_rows=%', (SELECT COUNT(*) FROM _candidate_parent_evidence);
+END $$;
+
+DO $$
+BEGIN
+  RAISE NOTICE 'global_build_phase:building_sibling_evidence';
+END $$;
 
 CREATE TEMP TABLE _candidate_sibling_evidence AS
 SELECT
@@ -247,6 +696,11 @@ LEFT JOIN LATERAL (
     AND stats.geom IS NOT NULL
 ) spread ON true;
 
+DO $$
+BEGIN
+  RAISE NOTICE 'global_build_info:sibling_evidence_rows=%', (SELECT COUNT(*) FROM _candidate_sibling_evidence);
+END $$;
+
 CREATE TEMP TABLE _candidate_topographic_evidence AS
 SELECT
   stats.source_id,
@@ -290,6 +744,16 @@ LEFT JOIN LATERAL (
     AND base.provider_stop_place_ref = stats.provider_stop_place_ref
     AND stats.geom IS NOT NULL
 ) spread ON true;
+
+DO $$
+BEGIN
+  RAISE NOTICE 'global_build_info:topographic_evidence_rows=%', (SELECT COUNT(*) FROM _candidate_topographic_evidence);
+END $$;
+
+DO $$
+BEGIN
+  RAISE NOTICE 'global_build_phase:building_coord_resolution';
+END $$;
 
 CREATE TEMP TABLE _candidate_coord_choice AS
 SELECT
@@ -646,6 +1110,16 @@ CROSS JOIN LATERAL (
     END AS topographic_distance_meters
 ) dist;
 
+DO $$
+BEGIN
+  RAISE NOTICE 'global_build_info:coord_resolution_rows=%', (SELECT COUNT(*) FROM _candidate_coord_resolution);
+  RAISE NOTICE 'global_build_info:coord_conflict_count=%', (
+    SELECT COUNT(*)
+    FROM _candidate_coord_resolution
+    WHERE conflict_signal_count > 0
+  );
+END $$;
+
 CREATE TEMP TABLE _hard_groups AS
 SELECT
   'gstn_' || substr(md5('hard|' || hard_key), 1, 24) AS global_station_id,
@@ -884,6 +1358,12 @@ SELECT
   metadata
 FROM _soft_name_only_groups;
 
+DO $$
+BEGIN
+  RAISE NOTICE 'global_build_phase:writing_global_stations';
+  RAISE NOTICE 'global_build_info:new_global_station_rows=%', (SELECT COUNT(*) FROM _new_global);
+END $$;
+
 INSERT INTO global_stations (
   global_station_id,
   display_name,
@@ -963,6 +1443,12 @@ SELECT * FROM _assign_geo
 UNION ALL
 SELECT * FROM _assign_name;
 
+DO $$
+BEGIN
+  RAISE NOTICE 'global_build_phase:writing_station_mappings';
+  RAISE NOTICE 'global_build_info:station_mapping_rows=%', (SELECT COUNT(*) FROM _assignments);
+END $$;
+
 UPDATE provider_global_station_mappings m
 SET
   is_active = false,
@@ -1033,6 +1519,13 @@ CREATE INDEX _candidate_stop_points_source_point_idx
 
 CREATE INDEX _candidate_stop_points_station_idx
   ON _candidate_stop_points (global_station_id);
+
+DO $$
+BEGIN
+  RAISE NOTICE 'global_build_phase:writing_global_stop_points';
+  RAISE NOTICE 'global_build_info:candidate_stop_point_rows=%', (SELECT COUNT(*) FROM _candidate_stop_points);
+  RAISE NOTICE 'global_build_info:candidate_stop_point_index_count=2';
+END $$;
 
 UPDATE global_stop_points sp
 SET
@@ -1111,6 +1604,28 @@ DO UPDATE SET
   is_active = true,
   updated_at = now();
 
+DO $$
+BEGIN
+  RAISE NOTICE 'global_build_info:active_global_stop_point_rows=%', (
+    SELECT COUNT(*)
+    FROM global_stop_points sp
+    WHERE sp.is_active = true
+      AND (
+        NULLIF(:'country_filter', '') IS NULL
+        OR sp.country = NULLIF(:'country_filter', '')::char(2)
+      )
+      AND (
+        NULLIF(:'source_id_scope', '') IS NULL
+        OR sp.metadata ->> 'source_id' = NULLIF(:'source_id_scope', '')
+      )
+  );
+END $$;
+
+DO $$
+BEGIN
+  RAISE NOTICE 'global_build_phase:writing_stop_point_mappings';
+END $$;
+
 UPDATE provider_global_stop_point_mappings m
 SET
   is_active = false,
@@ -1151,6 +1666,26 @@ FROM _candidate_stop_points c
 JOIN global_stop_points sp
   ON sp.global_stop_point_id =
     'gsp_' || substr(md5(c.source_id || '|' || c.provider_stop_point_ref), 1, 24);
+
+DO $$
+BEGIN
+  RAISE NOTICE 'global_build_info:stop_point_mapping_rows=%', (
+    SELECT COUNT(*)
+    FROM provider_global_stop_point_mappings m
+    JOIN global_stop_points sp
+      ON sp.global_stop_point_id = m.global_stop_point_id
+    WHERE m.is_active = true
+      AND sp.is_active = true
+      AND (
+        NULLIF(:'country_filter', '') IS NULL
+        OR sp.country = NULLIF(:'country_filter', '')::char(2)
+      )
+      AND (
+        NULLIF(:'source_id_scope', '') IS NULL
+        OR m.source_id = NULLIF(:'source_id_scope', '')
+      )
+  );
+END $$;
 
 CREATE TEMP TABLE _cleanup_station_candidates AS
 SELECT DISTINCT gs.global_station_id
@@ -1206,20 +1741,49 @@ WHERE gs.global_station_id IN (
       AND sp.is_active = true
   );
 
+DO $$
+BEGIN
+  RAISE NOTICE 'global_build_phase:writing_transfer_edges';
+END $$;
+
+CREATE TEMP TABLE _transfer_scope_station_ids AS
+SELECT DISTINCT c.global_station_id
+FROM _candidate_stop_points c;
+
+CREATE INDEX _transfer_scope_station_ids_station_idx
+  ON _transfer_scope_station_ids (global_station_id);
+
+CREATE TEMP TABLE _transfer_scope_stop_points AS
+SELECT
+  sp.global_stop_point_id,
+  sp.global_station_id,
+  sp.geom
+FROM global_stop_points sp
+JOIN _transfer_scope_station_ids scope_station
+  ON scope_station.global_station_id = sp.global_station_id
+WHERE sp.is_active = true;
+
+CREATE INDEX _transfer_scope_stop_points_station_idx
+  ON _transfer_scope_stop_points (global_station_id, global_stop_point_id);
+
+ANALYZE _transfer_scope_station_ids;
+ANALYZE _transfer_scope_stop_points;
+
+DO $$
+BEGIN
+  RAISE NOTICE 'global_build_info:transfer_scope_station_count=%', (
+    SELECT COUNT(*) FROM _transfer_scope_station_ids
+  );
+  RAISE NOTICE 'global_build_info:transfer_scope_stop_point_rows=%', (
+    SELECT COUNT(*) FROM _transfer_scope_stop_points
+  );
+END $$;
+
 DELETE FROM transfer_edges te
-USING global_stop_points fsp, global_stop_points tsp
-WHERE te.from_global_stop_point_id = fsp.global_stop_point_id
-  AND te.to_global_stop_point_id = tsp.global_stop_point_id
-  AND te.metadata ->> 'generated_by' = 'global_station_build'
-  AND (
-    NULLIF(:'country_filter', '') IS NULL
-    OR fsp.country = NULLIF(:'country_filter', '')::char(2)
-    OR tsp.country = NULLIF(:'country_filter', '')::char(2)
-  )
-  AND (
-    NULLIF(:'source_id_scope', '') IS NULL
-    OR fsp.metadata ->> 'source_id' = NULLIF(:'source_id_scope', '')
-    OR tsp.metadata ->> 'source_id' = NULLIF(:'source_id_scope', '')
+WHERE te.metadata ->> 'generated_by' = 'global_station_build'
+  AND te.metadata ->> 'global_station_id' IN (
+    SELECT global_station_id
+    FROM _transfer_scope_station_ids
   );
 
 INSERT INTO transfer_edges (
@@ -1252,29 +1816,24 @@ SELECT
     'global_station_id', a.global_station_id
   ),
   now()
-FROM global_stop_points a
-JOIN global_stop_points b
+FROM _transfer_scope_stop_points a
+JOIN _transfer_scope_stop_points b
   ON b.global_station_id = a.global_station_id
  AND b.global_stop_point_id <> a.global_stop_point_id
-WHERE a.is_active = true
-  AND b.is_active = true
-  AND (
-    NULLIF(:'country_filter', '') IS NULL
-    OR a.country = NULLIF(:'country_filter', '')::char(2)
-    OR b.country = NULLIF(:'country_filter', '')::char(2)
-  )
-  AND (
-    NULLIF(:'source_id_scope', '') IS NULL
-    OR a.metadata ->> 'source_id' = NULLIF(:'source_id_scope', '')
-    OR b.metadata ->> 'source_id' = NULLIF(:'source_id_scope', '')
-  )
-ON CONFLICT (from_global_stop_point_id, to_global_stop_point_id)
-DO UPDATE SET
-  min_transfer_seconds = EXCLUDED.min_transfer_seconds,
-  transfer_type = EXCLUDED.transfer_type,
-  is_bidirectional = EXCLUDED.is_bidirectional,
-  metadata = EXCLUDED.metadata,
-  updated_at = now();
+;
+
+DO $$
+BEGIN
+  RAISE NOTICE 'global_build_info:transfer_edge_rows=%', (
+    SELECT COUNT(*)
+    FROM transfer_edges te
+  );
+END $$;
+
+DO $$
+BEGIN
+  RAISE NOTICE 'global_build_phase:finalizing';
+END $$;
 
 COMMIT;
 
@@ -1342,38 +1901,146 @@ SELECT json_build_object(
 
 function createGlobalStationsRepo(client) {
   return {
-    async buildGlobalStations(scope) {
-      const result = await client.runScript(BUILD_GLOBAL_SQL, {
-        country_filter: scope.country || "",
-        as_of: scope.asOf || "",
-        source_id_scope: scope.sourceId || "",
-      });
+    async buildGlobalStations(scope, options = {}) {
+      const onPhase =
+        typeof options.onPhase === "function" ? options.onPhase : null;
+      const onInfo =
+        typeof options.onInfo === "function" ? options.onInfo : null;
+      const result = await client.runScript(
+        BUILD_GLOBAL_SQL,
+        scopeParams(scope),
+        {
+          onNotice(notice) {
+            const phase = extractPhaseFromNotice(notice);
+            if (phase && onPhase) {
+              onPhase(phase);
+            }
+            const info = extractInfoFromNotice(notice);
+            if (info && onInfo) {
+              onInfo(info);
+            }
+          },
+        },
+      );
 
-      const line = extractJsonLine(result.stdout);
-      if (!line) {
-        throw new AppError({
-          code: "GLOBAL_BUILD_FAILED",
-          message: "Global station build did not return summary JSON",
+      return parseSummaryLine(
+        extractJsonLine(result.stdout),
+        "GLOBAL_BUILD_FAILED",
+        "Global station build",
+      );
+    },
+
+    async getBuildFingerprint(scope = {}) {
+      const row = await client.queryOne(
+        GLOBAL_BUILD_FINGERPRINT_SQL,
+        scopeParams(scope),
+      );
+      return row?.fingerprint || null;
+    },
+
+    async getCurrentSummary(scope = {}) {
+      const row = await client.queryOne(
+        GLOBAL_BUILD_CURRENT_SUMMARY_SQL,
+        scopeParams(scope),
+      );
+      return parseSummaryLine(
+        String(row?.summary_json || ""),
+        "GLOBAL_BUILD_FAILED",
+        "Global station build current summary",
+      );
+    },
+
+    getTuningConfig() {
+      return {
+        maxParallelWorkersPerGather: GLOBAL_BUILD_MAX_PARALLEL_WORKERS,
+        workMem: GLOBAL_BUILD_WORK_MEM,
+        maintenanceWorkMem: GLOBAL_BUILD_MAINTENANCE_WORK_MEM,
+        synchronousCommit: GLOBAL_BUILD_SYNCHRONOUS_COMMIT,
+      };
+    },
+
+    async sampleBuildQueryPlans(scope = {}) {
+      const params = scopeParams(scope);
+      const queries = [
+        {
+          name: "latest_stop_places",
+          sql: `
+            EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
+            SELECT
+              rp.source_id,
+              rp.provider_stop_place_ref
+            FROM raw_provider_stop_places rp
+            JOIN provider_datasets pd
+              ON pd.dataset_id = rp.dataset_id
+            WHERE (NULLIF(:'country_filter', '') IS NULL OR rp.country = NULLIF(:'country_filter', '')::char(2))
+              AND (NULLIF(:'source_id_scope', '') IS NULL OR rp.source_id = NULLIF(:'source_id_scope', ''))
+              AND (NULLIF(:'as_of', '') IS NULL OR pd.snapshot_date <= NULLIF(:'as_of', '')::date)
+            ORDER BY pd.snapshot_date DESC, rp.dataset_id DESC, rp.updated_at DESC, rp.stop_place_id DESC
+            LIMIT 5000;
+          `,
+        },
+        {
+          name: "latest_stop_points",
+          sql: `
+            EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
+            SELECT
+              rpp.source_id,
+              rpp.provider_stop_point_ref
+            FROM raw_provider_stop_points rpp
+            JOIN provider_datasets pd
+              ON pd.dataset_id = rpp.dataset_id
+            WHERE (NULLIF(:'country_filter', '') IS NULL OR rpp.country = NULLIF(:'country_filter', '')::char(2))
+              AND (NULLIF(:'source_id_scope', '') IS NULL OR rpp.source_id = NULLIF(:'source_id_scope', ''))
+              AND (NULLIF(:'as_of', '') IS NULL OR pd.snapshot_date <= NULLIF(:'as_of', '')::date)
+            ORDER BY pd.snapshot_date DESC, rpp.dataset_id DESC, rpp.updated_at DESC, rpp.stop_point_id DESC
+            LIMIT 5000;
+          `,
+        },
+        {
+          name: "transfer_edge_pairs",
+          sql: `
+            EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
+            WITH transfer_scope_station_ids AS (
+              SELECT DISTINCT sp.global_station_id
+              FROM global_stop_points sp
+              WHERE sp.is_active = true
+                AND (
+                  NULLIF(:'country_filter', '') IS NULL
+                  OR sp.country = NULLIF(:'country_filter', '')::char(2)
+                )
+                AND (
+                  NULLIF(:'source_id_scope', '') IS NULL
+                  OR sp.metadata ->> 'source_id' = NULLIF(:'source_id_scope', '')
+                )
+            ),
+            transfer_scope_stop_points AS (
+              SELECT
+                sp.global_stop_point_id,
+                sp.global_station_id,
+                sp.geom
+              FROM global_stop_points sp
+              JOIN transfer_scope_station_ids scope_station
+                ON scope_station.global_station_id = sp.global_station_id
+              WHERE sp.is_active = true
+            )
+            SELECT COUNT(*)
+            FROM transfer_scope_stop_points a
+            JOIN transfer_scope_stop_points b
+              ON b.global_station_id = a.global_station_id
+             AND b.global_stop_point_id <> a.global_stop_point_id;
+          `,
+        },
+      ];
+
+      const plans = [];
+      for (const query of queries) {
+        const rows = await client.queryRows(query.sql, params);
+        plans.push({
+          name: query.name,
+          plan: rows[0]?.["QUERY PLAN"] || rows[0] || null,
         });
       }
-
-      let parsed;
-      try {
-        parsed = JSON.parse(line);
-      } catch (err) {
-        throw new AppError({
-          code: "GLOBAL_BUILD_FAILED",
-          message: "Global station build returned invalid summary JSON",
-          cause: err,
-        });
-      }
-
-      validateOrThrow(parsed, GLOBAL_BUILD_SUMMARY_SCHEMA, {
-        code: "GLOBAL_BUILD_FAILED",
-        message: "Global station build summary failed schema validation",
-      });
-
-      return parsed;
+      return plans;
     },
 
     async listCoordinateAlerts(scope = {}, options = {}) {
@@ -1431,4 +2098,6 @@ function createGlobalStationsRepo(client) {
 module.exports = {
   BUILD_GLOBAL_SQL,
   createGlobalStationsRepo,
+  extractInfoFromNotice,
+  extractPhaseFromNotice,
 };
