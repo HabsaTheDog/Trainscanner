@@ -159,6 +159,50 @@ CREATE TABLE IF NOT EXISTS system_state (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS pipeline_stage_materializations (
+  stage_id text NOT NULL,
+  scope_key text NOT NULL,
+  scope_country iso_country_code,
+  scope_as_of date,
+  scope_source_id text,
+  status text NOT NULL CHECK (status IN ('ready', 'failed', 'running', 'stale')),
+  input_fingerprint jsonb NOT NULL,
+  code_fingerprint text NOT NULL,
+  output_summary jsonb NOT NULL DEFAULT '{}'::jsonb,
+  timing_summary jsonb NOT NULL DEFAULT '{}'::jsonb,
+  last_started_at timestamptz,
+  last_finished_at timestamptz,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (stage_id, scope_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pipeline_stage_materializations_scope
+  ON pipeline_stage_materializations (
+    stage_id,
+    scope_country,
+    scope_as_of,
+    scope_source_id,
+    updated_at DESC
+  );
+
+CREATE TABLE IF NOT EXISTS pipeline_stage_runs (
+  run_id uuid PRIMARY KEY,
+  stage_id text NOT NULL,
+  scope_key text NOT NULL,
+  status text NOT NULL CHECK (status IN ('ready', 'failed', 'running', 'stale')),
+  input_fingerprint jsonb NOT NULL,
+  code_fingerprint text NOT NULL,
+  metrics jsonb NOT NULL DEFAULT '{}'::jsonb,
+  started_at timestamptz NOT NULL,
+  finished_at timestamptz,
+  peak_rss_kb bigint,
+  disk_read_bytes bigint,
+  disk_write_bytes bigint
+);
+
+CREATE INDEX IF NOT EXISTS idx_pipeline_stage_runs_stage_scope_started
+  ON pipeline_stage_runs (stage_id, scope_key, started_at DESC);
+
 INSERT INTO system_state (key, value)
 VALUES
   ('active_gtfs', '{"activeProfile": "pan_europe_runtime", "zipPath": "", "sourceType": "runtime", "runtime": null, "activatedAt": null}'::jsonb),
@@ -522,6 +566,138 @@ CREATE INDEX IF NOT EXISTS idx_provider_global_stop_point_mapping_active_cover
 CREATE INDEX IF NOT EXISTS idx_provider_global_stop_point_mapping_stop_point
   ON provider_global_stop_point_mappings (global_stop_point_id, is_active);
 
+CREATE TABLE IF NOT EXISTS qa_provider_stop_place_routes (
+  source_id text NOT NULL,
+  dataset_id bigint NOT NULL REFERENCES provider_datasets(dataset_id) ON DELETE CASCADE,
+  source_country iso_country_code,
+  provider_stop_place_ref text NOT NULL,
+  route_label text NOT NULL,
+  transport_mode text NOT NULL DEFAULT '',
+  pattern_hits integer NOT NULL DEFAULT 0 CHECK (pattern_hits >= 0),
+  metadata jsonb NOT NULL DEFAULT jsonb_build_object(),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (
+    source_id,
+    dataset_id,
+    provider_stop_place_ref,
+    route_label,
+    transport_mode
+  )
+);
+
+ALTER TABLE qa_provider_stop_place_routes
+  ADD COLUMN IF NOT EXISTS source_country iso_country_code;
+
+CREATE INDEX IF NOT EXISTS idx_qa_provider_stop_place_routes_dataset
+  ON qa_provider_stop_place_routes (dataset_id, source_id, provider_stop_place_ref);
+
+CREATE INDEX IF NOT EXISTS idx_qa_provider_stop_place_routes_stop_place
+  ON qa_provider_stop_place_routes (source_id, provider_stop_place_ref);
+
+CREATE INDEX IF NOT EXISTS idx_qa_provider_stop_place_routes_scope
+  ON qa_provider_stop_place_routes (source_country, source_id, dataset_id);
+
+CREATE TABLE IF NOT EXISTS qa_provider_stop_place_adjacencies (
+  source_id text NOT NULL,
+  dataset_id bigint NOT NULL REFERENCES provider_datasets(dataset_id) ON DELETE CASCADE,
+  source_country iso_country_code,
+  from_provider_stop_place_ref text NOT NULL,
+  to_provider_stop_place_ref text NOT NULL,
+  pattern_hits integer NOT NULL DEFAULT 0 CHECK (pattern_hits >= 0),
+  metadata jsonb NOT NULL DEFAULT jsonb_build_object(),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (
+    source_id,
+    dataset_id,
+    from_provider_stop_place_ref,
+    to_provider_stop_place_ref
+  ),
+  CHECK (from_provider_stop_place_ref <> to_provider_stop_place_ref)
+);
+
+ALTER TABLE qa_provider_stop_place_adjacencies
+  ADD COLUMN IF NOT EXISTS source_country iso_country_code;
+
+CREATE INDEX IF NOT EXISTS idx_qa_provider_stop_place_adjacencies_dataset
+  ON qa_provider_stop_place_adjacencies (dataset_id, source_id);
+
+CREATE INDEX IF NOT EXISTS idx_qa_provider_stop_place_adjacencies_from
+  ON qa_provider_stop_place_adjacencies (source_id, from_provider_stop_place_ref);
+
+CREATE INDEX IF NOT EXISTS idx_qa_provider_stop_place_adjacencies_to
+  ON qa_provider_stop_place_adjacencies (source_id, to_provider_stop_place_ref);
+
+CREATE INDEX IF NOT EXISTS idx_qa_provider_stop_place_adjacencies_scope
+  ON qa_provider_stop_place_adjacencies (source_country, source_id, dataset_id);
+
+CREATE TABLE IF NOT EXISTS qa_global_station_routes (
+  global_station_id text NOT NULL REFERENCES global_stations(global_station_id) ON DELETE CASCADE,
+  source_id text NOT NULL,
+  source_country iso_country_code,
+  route_label text NOT NULL,
+  transport_mode text NOT NULL DEFAULT '',
+  pattern_hits integer NOT NULL DEFAULT 0 CHECK (pattern_hits >= 0),
+  metadata jsonb NOT NULL DEFAULT jsonb_build_object(),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (
+    global_station_id,
+    source_id,
+    route_label,
+    transport_mode
+  )
+);
+
+ALTER TABLE qa_global_station_routes
+  ADD COLUMN IF NOT EXISTS source_country iso_country_code;
+
+CREATE INDEX IF NOT EXISTS idx_qa_global_station_routes_station
+  ON qa_global_station_routes (global_station_id, pattern_hits DESC, route_label);
+
+CREATE INDEX IF NOT EXISTS idx_qa_global_station_routes_source
+  ON qa_global_station_routes (source_id, global_station_id);
+
+CREATE INDEX IF NOT EXISTS idx_qa_global_station_routes_scope
+  ON qa_global_station_routes (source_country, source_id, global_station_id);
+
+CREATE TABLE IF NOT EXISTS qa_global_station_adjacencies (
+  global_station_id text NOT NULL REFERENCES global_stations(global_station_id) ON DELETE CASCADE,
+  neighbor_global_station_id text NOT NULL REFERENCES global_stations(global_station_id) ON DELETE CASCADE,
+  direction text NOT NULL CHECK (direction IN ('incoming', 'outgoing')),
+  source_id text NOT NULL,
+  source_country iso_country_code,
+  pattern_hits integer NOT NULL DEFAULT 0 CHECK (pattern_hits >= 0),
+  metadata jsonb NOT NULL DEFAULT jsonb_build_object(),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (
+    global_station_id,
+    neighbor_global_station_id,
+    direction,
+    source_id
+  ),
+  CHECK (global_station_id <> neighbor_global_station_id)
+);
+
+ALTER TABLE qa_global_station_adjacencies
+  ADD COLUMN IF NOT EXISTS source_country iso_country_code;
+
+CREATE INDEX IF NOT EXISTS idx_qa_global_station_adjacencies_station
+  ON qa_global_station_adjacencies (
+    global_station_id,
+    direction,
+    pattern_hits DESC,
+    neighbor_global_station_id
+  );
+
+CREATE INDEX IF NOT EXISTS idx_qa_global_station_adjacencies_neighbor
+  ON qa_global_station_adjacencies (neighbor_global_station_id, direction);
+
+CREATE INDEX IF NOT EXISTS idx_qa_global_station_adjacencies_scope
+  ON qa_global_station_adjacencies (source_country, source_id, global_station_id);
+
 CREATE TABLE IF NOT EXISTS timetable_trips (
   trip_fact_id text PRIMARY KEY,
   dataset_id bigint REFERENCES provider_datasets(dataset_id) ON DELETE SET NULL,
@@ -608,6 +784,7 @@ CREATE TABLE IF NOT EXISTS qa_merge_clusters (
   status text NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'in_review', 'resolved', 'dismissed')),
   severity text NOT NULL DEFAULT 'medium' CHECK (severity IN ('low', 'medium', 'high')),
   scope_tag text NOT NULL DEFAULT 'latest',
+  scope_country iso_country_code,
   scope_as_of date,
   display_name text,
   summary jsonb NOT NULL DEFAULT jsonb_build_object(),
@@ -620,8 +797,14 @@ CREATE TABLE IF NOT EXISTS qa_merge_clusters (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+ALTER TABLE qa_merge_clusters
+  ADD COLUMN IF NOT EXISTS scope_country iso_country_code;
+
 CREATE INDEX IF NOT EXISTS idx_qa_merge_clusters_scope
   ON qa_merge_clusters (scope_tag, status, severity, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_qa_merge_clusters_scope_country
+  ON qa_merge_clusters (scope_country, scope_tag, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS qa_merge_cluster_candidates (
   merge_cluster_id text NOT NULL REFERENCES qa_merge_clusters(merge_cluster_id) ON DELETE CASCADE,
@@ -709,3 +892,28 @@ CREATE TABLE IF NOT EXISTS qa_merge_cluster_workspace_versions (
 
 CREATE INDEX IF NOT EXISTS idx_qa_merge_cluster_workspace_versions_history
   ON qa_merge_cluster_workspace_versions (merge_cluster_id, updated_at DESC, version DESC);
+
+CREATE TABLE IF NOT EXISTS qa_publish_batches (
+  publish_batch_id bigserial PRIMARY KEY,
+  scope_country iso_country_code,
+  scope_as_of date,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  created_by text NOT NULL DEFAULT current_user,
+  note text,
+  status text NOT NULL CHECK (status IN ('draft', 'published', 'superseded')),
+  summary jsonb NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_qa_publish_batches_scope
+  ON qa_publish_batches (status, scope_country, scope_as_of, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS qa_publish_batch_decisions (
+  publish_batch_id bigint NOT NULL REFERENCES qa_publish_batches(publish_batch_id) ON DELETE CASCADE,
+  decision_id bigint NOT NULL REFERENCES qa_merge_decisions(decision_id) ON DELETE RESTRICT,
+  merge_cluster_id text NOT NULL REFERENCES qa_merge_clusters(merge_cluster_id) ON DELETE RESTRICT,
+  decision_payload_snapshot jsonb NOT NULL,
+  PRIMARY KEY (publish_batch_id, decision_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_qa_publish_batch_decisions_cluster
+  ON qa_publish_batch_decisions (merge_cluster_id, publish_batch_id);
