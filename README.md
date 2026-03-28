@@ -18,6 +18,45 @@ npm run start:build -- --profile pan_europe_runtime
 npm run stop
 ```
 
+## QA Runs
+
+The local QA flow mirrors the checked-in CI gates as closely as possible:
+
+```bash
+# Install/update dependencies used by the quality gates
+npm ci --no-fund --no-audit
+python3 -m pip install -r services/ai-scoring/requirements.txt
+
+# Root static checks (Biome, Rust, Python, ShellCheck, TS, Markdown, orchestrator, control-plane)
+npm run check
+
+# Config contract validation
+./scripts/validate-config.sh
+
+# Orchestrator tests
+npm run test:orchestrator
+
+# Focused export determinism gate used by dedicated export QA workflow
+node --test services/orchestrator/test/e2e/export-determinism.e2e.test.js
+
+# Security audit gates used by CI PR fast
+npm audit --audit-level=high
+(cd services/rust-ingestion-worker && cargo audit)
+```
+
+`npm run check` is an ordered aggregate of:
+
+- `npm run check:js`
+- `npm run check:rs`
+- `npm run check:py`
+- `npm run check:sh`
+- `npm run check:types`
+- `npm run check:md`
+- `npm run check:orchestrator`
+- `npm run check:control-plane`
+
+The dedicated export QA workflow runs `node --test services/orchestrator/test/e2e/export-determinism.e2e.test.js`, and the nightly workflow keeps the same focused export determinism gate alongside the broader orchestrator suite.
+
 ## Architecture & State
 
 - **Node Tooling**: npm workspaces with root task runner (`frontend`, `services/orchestrator`, `services/control-plane`).

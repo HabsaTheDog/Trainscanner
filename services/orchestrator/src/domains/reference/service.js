@@ -18,6 +18,17 @@ const { createJobOrchestrator } = require("../../core/job-orchestrator");
 const {
   createExternalReferenceRepo,
 } = require("../../data/postgis/repositories/external-reference-repo");
+const { runTrackedStage } = require("../pipeline/stage-tracking");
+
+const REFERENCE_STAGE_CODE_PATHS = [
+  "services/orchestrator/src/domains/reference/service.js",
+  "services/orchestrator/src/data/postgis/repositories/external-reference-repo.js",
+  "services/orchestrator/src/cli/refresh-external-references.js",
+  "scripts/data/refresh-external-references.sh",
+  "scripts/data/import-geonames.js",
+  "scripts/data/import-wikidata.js",
+  "scripts/data/import-overture-places.py",
+];
 
 const execFileAsync = promisify(execFile);
 
@@ -938,43 +949,56 @@ function createReferenceService(deps = {}) {
           const client = createClient({ rootDir, env: runOptions.env });
           try {
             await client.ensureReady();
-            const repo = createRepo(client);
-            const descriptors = resolveSourceDescriptors(
+            const trackedResult = await runTrackedStage({
+              client,
               rootDir,
-              runOptions.env || process.env,
-            );
+              stageId: "reference-data",
+              scope: parsed.scope,
+              codePaths: REFERENCE_STAGE_CODE_PATHS,
+              execute: async () => {
+                const repo = createRepo(client);
+                const descriptors = resolveSourceDescriptors(
+                  rootDir,
+                  runOptions.env || process.env,
+                );
 
-            const imports = [...unavailableImports];
-            for (const sourceId of availableEntries.map(
-              (entry) => entry.sourceId,
-            )) {
-              imports.push(
-                await runImportForSource(
-                  repo,
-                  descriptors[sourceId],
+                const imports = [...unavailableImports];
+                for (const sourceId of availableEntries.map(
+                  (entry) => entry.sourceId,
+                )) {
+                  imports.push(
+                    await runImportForSource(
+                      repo,
+                      descriptors[sourceId],
+                      parsed.scope,
+                    ),
+                  );
+                }
+
+                const successfulImports = imports.filter(
+                  (row) => row.status === "succeeded",
+                );
+                if (successfulImports.length === 0) {
+                  throw new AppError({
+                    code: "EXTERNAL_REFERENCE_IMPORT_FAILED",
+                    message: "All external reference imports failed",
+                    details: { imports },
+                  });
+                }
+
+                const matches = await repo.buildStationReferenceMatches(
                   parsed.scope,
-                ),
-              );
-            }
-
-            const successfulImports = imports.filter(
-              (row) => row.status === "succeeded",
-            );
-            if (successfulImports.length === 0) {
-              throw new AppError({
-                code: "EXTERNAL_REFERENCE_IMPORT_FAILED",
-                message: "All external reference imports failed",
-                details: { imports },
-              });
-            }
-
-            const matches = await repo.buildStationReferenceMatches(
-              parsed.scope,
-            );
-            const summary = {
-              imports,
-              matches,
-            };
+                );
+                return {
+                  ok: true,
+                  summary: {
+                    imports,
+                    matches,
+                  },
+                };
+              },
+            });
+            const summary = trackedResult.summary;
             logImportSummary(summary);
             process.stdout.write(`${JSON.stringify(summary)}\n`);
             return {

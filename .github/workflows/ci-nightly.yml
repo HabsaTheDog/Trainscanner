@@ -40,27 +40,8 @@ jobs:
           npm run check:orchestrator
           npm run test:orchestrator
 
-      - name: Canonical export full determinism check
-        run: |
-          scripts/qa/seed-export-fixture.sh --as-of 2026-01-15
-
-          scripts/qa/build-profile.sh \
-            --profile canonical_de_runtime \
-            --as-of 2026-01-15 \
-            --country DE \
-            --output /tmp/active-gtfs-a.zip
-
-          scripts/qa/build-profile.sh \
-            --profile canonical_de_runtime \
-            --as-of 2026-01-15 \
-            --country DE \
-            --output /tmp/active-gtfs-b.zip
-
-          scripts/qa/validate-export.sh --zip /tmp/active-gtfs-a.zip
-
-          HASH_A="$(sha256sum /tmp/active-gtfs-a.zip | awk '{print $1}')"
-          HASH_B="$(sha256sum /tmp/active-gtfs-b.zip | awk '{print $1}')"
-          test "$HASH_A" = "$HASH_B"
+      - name: CSV fixture export determinism e2e
+        run: node --test services/orchestrator/test/e2e/export-determinism.e2e.test.js
 
       - name: Upload QA reports
         if: always()

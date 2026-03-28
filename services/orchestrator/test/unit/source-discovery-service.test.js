@@ -7,6 +7,23 @@ const {
 
 const SAFE_REPO_ROOT = `${process.cwd()}/.test-fixtures/repo`;
 
+function createStageAwareClient() {
+  return {
+    async ensureReady() {},
+    async queryOne(sql) {
+      if (String(sql).includes(" AS fingerprint")) {
+        return { fingerprint: { stage: "fetch" } };
+      }
+      if (String(sql).includes(" AS summary")) {
+        return { summary: {} };
+      }
+      return null;
+    },
+    async runSql() {},
+    async end() {},
+  };
+}
+
 test("fetchSources delegates to fetch script with explicit error code", async () => {
   const calls = [];
   const service = createSourceDiscoveryService({
@@ -14,6 +31,7 @@ test("fetchSources delegates to fetch script with explicit error code", async ()
       calls.push(options);
       return { ok: true, runId: options.runId || "run-1" };
     },
+    createPostgisClient: () => createStageAwareClient(),
   });
 
   await service.fetchSources({
@@ -36,6 +54,7 @@ test("verifySources delegates to verify script with explicit error code", async 
       calls.push(options);
       return { ok: true, runId: options.runId || "run-1" };
     },
+    createPostgisClient: () => createStageAwareClient(),
   });
 
   await service.verifySources({
@@ -60,6 +79,7 @@ test("fetchSources uses circuit breaker execution wrapper", async () => {
       calls.push(options);
       return { ok: true, runId: options.runId || "run-1" };
     },
+    createPostgisClient: () => createStageAwareClient(),
     fetchBreaker: {
       async execute(fn) {
         breakerExecutions += 1;
