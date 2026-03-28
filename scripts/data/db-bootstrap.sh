@@ -81,6 +81,8 @@ SELECT
   (SELECT COUNT(*) FROM pg_extension WHERE extname = 'postgis') AS has_postgis,
   (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'pipeline_jobs') AS has_pipeline_jobs,
   (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'system_state') AS has_system_state,
+  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'pipeline_stage_materializations') AS has_pipeline_stage_materializations,
+  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'pipeline_stage_runs') AS has_pipeline_stage_runs,
   (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'provider_datasets') AS has_provider_datasets,
   (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'raw_provider_stop_places') AS has_stop_places,
   (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'raw_provider_stop_points') AS has_stop_points,
@@ -88,6 +90,10 @@ SELECT
   (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'global_stop_points') AS has_global_stop_points,
   (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'provider_global_station_mappings') AS has_station_mappings,
   (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'provider_global_stop_point_mappings') AS has_stop_point_mappings,
+  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'qa_provider_stop_place_routes') AS has_qa_provider_routes,
+  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'qa_provider_stop_place_adjacencies') AS has_qa_provider_adjacencies,
+  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'qa_global_station_routes') AS has_qa_global_routes,
+  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'qa_global_station_adjacencies') AS has_qa_global_adjacencies,
   (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'timetable_trips') AS has_timetable_trips,
   (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'timetable_trip_stop_times') AS has_timetable_stop_times,
   (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'transfer_edges') AS has_transfer_edges,
@@ -98,12 +104,19 @@ SELECT
   (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'raw_provider_stop_points' AND column_name = 'topographic_place_ref') AS has_stop_points_topographic,
   (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'qa_merge_cluster_evidence' AND column_name = 'status') AS has_merge_evidence_status,
   (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'qa_merge_cluster_evidence' AND column_name = 'raw_value') AS has_merge_evidence_raw_value,
+  (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'qa_provider_stop_place_routes' AND column_name = 'source_country') AS has_qa_provider_routes_scope,
+  (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'qa_provider_stop_place_adjacencies' AND column_name = 'source_country') AS has_qa_provider_adjacencies_scope,
+  (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'qa_global_station_routes' AND column_name = 'source_country') AS has_qa_global_routes_scope,
+  (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'qa_global_station_adjacencies' AND column_name = 'source_country') AS has_qa_global_adjacencies_scope,
+  (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'qa_merge_clusters' AND column_name = 'scope_country') AS has_merge_clusters_scope_country,
   (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'qa_merge_decisions') AS has_merge_decisions,
   (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'qa_merge_decision_members') AS has_merge_decision_members,
   (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'qa_merge_cluster_workspaces') AS has_merge_workspaces,
-  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'qa_merge_cluster_workspace_versions') AS has_merge_workspace_versions;
+  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'qa_merge_cluster_workspace_versions') AS has_merge_workspace_versions,
+  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'qa_publish_batches') AS has_publish_batches,
+  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'qa_publish_batch_decisions') AS has_publish_batch_decisions;
 ")"
-      if [[ "$table_check" == "1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1" ]]; then
+      if [[ "$table_check" == "1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1" ]]; then
         log "Schema already ready (matching hash); skipping apply"
       else
         log "Schema hash matches but required objects missing; forcing apply"
@@ -112,7 +125,7 @@ SELECT
   fi
 fi
 
-if [[ "${table_check:-}" != "1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1" ]]; then
+if [[ "${table_check:-}" != "1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1|1" ]]; then
   log "Applying baseline schema"
   if [[ "$DB_MODE_EFFECTIVE" == "docker-compose" ]]; then
     db_psql < "$SCHEMA_FILE"
@@ -127,6 +140,8 @@ SELECT
   (SELECT COUNT(*) FROM pg_extension WHERE extname = 'postgis') AS has_postgis,
   (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'pipeline_jobs') AS has_pipeline_jobs,
   (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'system_state') AS has_system_state,
+  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'pipeline_stage_materializations') AS has_pipeline_stage_materializations,
+  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'pipeline_stage_runs') AS has_pipeline_stage_runs,
   (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'provider_datasets') AS has_provider_datasets,
   (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'raw_provider_stop_places') AS has_stop_places,
   (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'raw_provider_stop_points') AS has_stop_points,
@@ -134,6 +149,10 @@ SELECT
   (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'global_stop_points') AS has_global_stop_points,
   (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'provider_global_station_mappings') AS has_station_mappings,
   (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'provider_global_stop_point_mappings') AS has_stop_point_mappings,
+  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'qa_provider_stop_place_routes') AS has_qa_provider_routes,
+  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'qa_provider_stop_place_adjacencies') AS has_qa_provider_adjacencies,
+  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'qa_global_station_routes') AS has_qa_global_routes,
+  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'qa_global_station_adjacencies') AS has_qa_global_adjacencies,
   (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'timetable_trips') AS has_timetable_trips,
   (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'timetable_trip_stop_times') AS has_timetable_stop_times,
   (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'transfer_edges') AS has_transfer_edges,
@@ -144,17 +163,24 @@ SELECT
   (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'raw_provider_stop_points' AND column_name = 'topographic_place_ref') AS has_stop_points_topographic,
   (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'qa_merge_cluster_evidence' AND column_name = 'status') AS has_merge_evidence_status,
   (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'qa_merge_cluster_evidence' AND column_name = 'raw_value') AS has_merge_evidence_raw_value,
+  (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'qa_provider_stop_place_routes' AND column_name = 'source_country') AS has_qa_provider_routes_scope,
+  (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'qa_provider_stop_place_adjacencies' AND column_name = 'source_country') AS has_qa_provider_adjacencies_scope,
+  (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'qa_global_station_routes' AND column_name = 'source_country') AS has_qa_global_routes_scope,
+  (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'qa_global_station_adjacencies' AND column_name = 'source_country') AS has_qa_global_adjacencies_scope,
+  (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'qa_merge_clusters' AND column_name = 'scope_country') AS has_merge_clusters_scope_country,
   (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'qa_merge_decisions') AS has_merge_decisions,
   (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'qa_merge_decision_members') AS has_merge_decision_members,
   (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'qa_merge_cluster_workspaces') AS has_merge_workspaces,
-  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'qa_merge_cluster_workspace_versions') AS has_merge_workspace_versions;
+  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'qa_merge_cluster_workspace_versions') AS has_merge_workspace_versions,
+  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'qa_publish_batches') AS has_publish_batches,
+  (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'qa_publish_batch_decisions') AS has_publish_batch_decisions;
 ")"
 
-IFS='|' read -r has_postgis has_pipeline_jobs has_system_state has_provider_datasets has_stop_places has_stop_points has_global_stations has_global_stop_points has_station_mappings has_stop_point_mappings has_timetable_trips has_timetable_stop_times has_transfer_edges has_merge_clusters has_merge_candidates has_merge_evidence has_stop_places_topographic has_stop_points_topographic has_merge_evidence_status has_merge_evidence_raw_value has_merge_decisions has_merge_decision_members has_merge_workspaces has_merge_workspace_versions <<<"$validation"
+IFS='|' read -r has_postgis has_pipeline_jobs has_system_state has_pipeline_stage_materializations has_pipeline_stage_runs has_provider_datasets has_stop_places has_stop_points has_global_stations has_global_stop_points has_station_mappings has_stop_point_mappings has_qa_provider_routes has_qa_provider_adjacencies has_qa_global_routes has_qa_global_adjacencies has_timetable_trips has_timetable_stop_times has_transfer_edges has_merge_clusters has_merge_candidates has_merge_evidence has_stop_places_topographic has_stop_points_topographic has_merge_evidence_status has_merge_evidence_raw_value has_qa_provider_routes_scope has_qa_provider_adjacencies_scope has_qa_global_routes_scope has_qa_global_adjacencies_scope has_merge_clusters_scope_country has_merge_decisions has_merge_decision_members has_merge_workspaces has_merge_workspace_versions has_publish_batches has_publish_batch_decisions <<<"$validation"
 
-if [[ "$has_postgis" != "1" || "$has_pipeline_jobs" != "1" || "$has_system_state" != "1" || "$has_provider_datasets" != "1" || "$has_stop_places" != "1" || "$has_stop_points" != "1" || "$has_global_stations" != "1" || "$has_global_stop_points" != "1" || "$has_station_mappings" != "1" || "$has_stop_point_mappings" != "1" || "$has_timetable_trips" != "1" || "$has_timetable_stop_times" != "1" || "$has_transfer_edges" != "1" || "$has_merge_clusters" != "1" || "$has_merge_candidates" != "1" || "$has_merge_evidence" != "1" || "$has_stop_places_topographic" != "1" || "$has_stop_points_topographic" != "1" || "$has_merge_evidence_status" != "1" || "$has_merge_evidence_raw_value" != "1" || "$has_merge_decisions" != "1" || "$has_merge_decision_members" != "1" || "$has_merge_workspaces" != "1" || "$has_merge_workspace_versions" != "1" ]]; then
-  printf '[db-bootstrap] ERROR: validation failed (postgis=%s pipeline_jobs=%s system_state=%s provider_datasets=%s stop_places=%s stop_points=%s global_stations=%s global_stop_points=%s station_mappings=%s stop_point_mappings=%s timetable_trips=%s timetable_stop_times=%s transfer_edges=%s merge_clusters=%s merge_candidates=%s merge_evidence=%s stop_places_topographic=%s stop_points_topographic=%s merge_evidence_status=%s merge_evidence_raw_value=%s merge_decisions=%s merge_decision_members=%s merge_workspaces=%s merge_workspace_versions=%s)\n' \
-    "$has_postgis" "$has_pipeline_jobs" "$has_system_state" "$has_provider_datasets" "$has_stop_places" "$has_stop_points" "$has_global_stations" "$has_global_stop_points" "$has_station_mappings" "$has_stop_point_mappings" "$has_timetable_trips" "$has_timetable_stop_times" "$has_transfer_edges" "$has_merge_clusters" "$has_merge_candidates" "$has_merge_evidence" "$has_stop_places_topographic" "$has_stop_points_topographic" "$has_merge_evidence_status" "$has_merge_evidence_raw_value" "$has_merge_decisions" "$has_merge_decision_members" "$has_merge_workspaces" "$has_merge_workspace_versions" >&2
+if [[ "$has_postgis" != "1" || "$has_pipeline_jobs" != "1" || "$has_system_state" != "1" || "$has_pipeline_stage_materializations" != "1" || "$has_pipeline_stage_runs" != "1" || "$has_provider_datasets" != "1" || "$has_stop_places" != "1" || "$has_stop_points" != "1" || "$has_global_stations" != "1" || "$has_global_stop_points" != "1" || "$has_station_mappings" != "1" || "$has_stop_point_mappings" != "1" || "$has_qa_provider_routes" != "1" || "$has_qa_provider_adjacencies" != "1" || "$has_qa_global_routes" != "1" || "$has_qa_global_adjacencies" != "1" || "$has_timetable_trips" != "1" || "$has_timetable_stop_times" != "1" || "$has_transfer_edges" != "1" || "$has_merge_clusters" != "1" || "$has_merge_candidates" != "1" || "$has_merge_evidence" != "1" || "$has_stop_places_topographic" != "1" || "$has_stop_points_topographic" != "1" || "$has_merge_evidence_status" != "1" || "$has_merge_evidence_raw_value" != "1" || "$has_qa_provider_routes_scope" != "1" || "$has_qa_provider_adjacencies_scope" != "1" || "$has_qa_global_routes_scope" != "1" || "$has_qa_global_adjacencies_scope" != "1" || "$has_merge_clusters_scope_country" != "1" || "$has_merge_decisions" != "1" || "$has_merge_decision_members" != "1" || "$has_merge_workspaces" != "1" || "$has_merge_workspace_versions" != "1" || "$has_publish_batches" != "1" || "$has_publish_batch_decisions" != "1" ]]; then
+  printf '[db-bootstrap] ERROR: validation failed (postgis=%s pipeline_jobs=%s system_state=%s pipeline_stage_materializations=%s pipeline_stage_runs=%s provider_datasets=%s stop_places=%s stop_points=%s global_stations=%s global_stop_points=%s station_mappings=%s stop_point_mappings=%s qa_provider_routes=%s qa_provider_adjacencies=%s qa_global_routes=%s qa_global_adjacencies=%s timetable_trips=%s timetable_stop_times=%s transfer_edges=%s merge_clusters=%s merge_candidates=%s merge_evidence=%s stop_places_topographic=%s stop_points_topographic=%s merge_evidence_status=%s merge_evidence_raw_value=%s qa_provider_routes_scope=%s qa_provider_adjacencies_scope=%s qa_global_routes_scope=%s qa_global_adjacencies_scope=%s merge_clusters_scope_country=%s merge_decisions=%s merge_decision_members=%s merge_workspaces=%s merge_workspace_versions=%s publish_batches=%s publish_batch_decisions=%s)\n' \
+    "$has_postgis" "$has_pipeline_jobs" "$has_system_state" "$has_pipeline_stage_materializations" "$has_pipeline_stage_runs" "$has_provider_datasets" "$has_stop_places" "$has_stop_points" "$has_global_stations" "$has_global_stop_points" "$has_station_mappings" "$has_stop_point_mappings" "$has_qa_provider_routes" "$has_qa_provider_adjacencies" "$has_qa_global_routes" "$has_qa_global_adjacencies" "$has_timetable_trips" "$has_timetable_stop_times" "$has_transfer_edges" "$has_merge_clusters" "$has_merge_candidates" "$has_merge_evidence" "$has_stop_places_topographic" "$has_stop_points_topographic" "$has_merge_evidence_status" "$has_merge_evidence_raw_value" "$has_qa_provider_routes_scope" "$has_qa_provider_adjacencies_scope" "$has_qa_global_routes_scope" "$has_qa_global_adjacencies_scope" "$has_merge_clusters_scope_country" "$has_merge_decisions" "$has_merge_decision_members" "$has_merge_workspaces" "$has_merge_workspace_versions" "$has_publish_batches" "$has_publish_batch_decisions" >&2
   exit 1
 fi
 

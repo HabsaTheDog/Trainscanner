@@ -11,8 +11,10 @@ source "${SCRIPT_DIR}/lib-db.sh"
 COUNTRY_FILTER=""
 SOURCE_ID_FILTER=""
 AS_OF=""
+INGEST_MODE="full"
 SKIP_CONFIG_VALIDATE="false"
 SKIP_DB_BOOTSTRAP="false"
+BULK_RESET_STOP_TOPOLOGY="false"
 TMP_FILES=()
 
 usage() {
@@ -25,6 +27,7 @@ Options:
   --country <ISO2>      Limit ingest to one country
   --source-id <id>      Limit ingest to one source id
   --as-of YYYY-MM-DD    Pick latest snapshot <= date
+  --mode <mode>         One of: full, stop-topology, export-schedule
   --skip-config-validate Skip validate-config.sh --only sources preflight
   --skip-db-bootstrap   Skip db-bootstrap.sh preflight
   -h, --help            Show this help
@@ -74,6 +77,29 @@ now_ms() {
   return 0
 }
 
+make_tmp_file() {
+  local base_dir="${TMPDIR:-}"
+  if [[ -n "$base_dir" ]]; then
+    mkdir -p "$base_dir"
+    mktemp "${base_dir%/}/ingest-netex.XXXXXX"
+    return 0
+  fi
+  mktemp
+  return 0
+}
+
+can_bulk_reset_stop_topology() {
+  if [[ "$INGEST_MODE" != "full" && "$INGEST_MODE" != "stop-topology" ]]; then
+    return 1
+  fi
+
+  if [[ -n "$COUNTRY_FILTER" || -n "$SOURCE_ID_FILTER" || -n "$AS_OF" ]]; then
+    return 1
+  fi
+
+  return 0
+}
+
 parse_args() {
   local arg
   local value
@@ -94,6 +120,11 @@ parse_args() {
       --as-of)
         [[ $# -ge 2 ]] || fail "Missing value for --as-of"
         AS_OF="$2"
+        shift 2
+        ;;
+      --mode)
+        [[ $# -ge 2 ]] || fail "Missing value for --mode"
+        INGEST_MODE="$2"
         shift 2
         ;;
       --skip-config-validate)
@@ -121,6 +152,14 @@ parse_args() {
   if [[ -n "$AS_OF" ]] && ! is_iso_date "$AS_OF"; then
     fail "Invalid --as-of value '$AS_OF' (expected YYYY-MM-DD)"
   fi
+
+  case "$INGEST_MODE" in
+    full|stop-topology|export-schedule)
+      ;;
+    *)
+      fail "Invalid --mode '$INGEST_MODE' (expected full, stop-topology, or export-schedule)"
+      ;;
+  esac
   return 0
 }
 
@@ -445,7 +484,8 @@ ingest_source() {
   local run_id dataset_id
   local tmp_raw_csv tmp_places_csv tmp_points_csv tmp_summary tmp_transform_summary
   local tmp_timetable_trips_csv tmp_timetable_stop_times_csv tmp_timetable_summary
-  local parser_output parser_status timetable_output timetable_status
+  local tmp_parser_log tmp_timetable_log
+  local parser_status timetable_status
   local stop_rows place_rows point_rows trip_rows trip_stop_time_rows stats_json
   local source_started_at source_elapsed_ms
   local parse_stops_started transform_started parse_timetable_started db_write_started finalize_started
@@ -453,8 +493,17 @@ ingest_source() {
   local source_id_esc country_esc provider_slug_esc snapshot_date_esc manifest_path_esc manifest_sha_esc
   local manifest_json_esc resolved_url_esc file_name_esc file_size_esc retrieval_ts_esc detected_version_esc requested_as_of_esc
   local zip_path_esc dataset_id_esc run_id_esc stats_json_esc
+  local run_stop_topology run_export_schedule
 
   source_started_at="$(now_ms)"
+  run_stop_topology="false"
+  run_export_schedule="false"
+  if [[ "$INGEST_MODE" == "full" || "$INGEST_MODE" == "stop-topology" ]]; then
+    run_stop_topology="true"
+  fi
+  if [[ "$INGEST_MODE" == "full" || "$INGEST_MODE" == "export-schedule" ]]; then
+    run_export_schedule="true"
+  fi
 
   source_id="$(jq -r '.id' <<<"$source_json")"
   country="$(jq -r '.country' <<<"$source_json" | tr '[:lower:]' '[:upper:]')"
@@ -612,14 +661,16 @@ ingest_source() {
     fail "Failed to upsert provider_datasets for '$source_id'"
   }
 
-  tmp_raw_csv="$(mktemp)"
-  tmp_places_csv="$(mktemp)"
-  tmp_points_csv="$(mktemp)"
-  tmp_summary="$(mktemp)"
-  tmp_transform_summary="$(mktemp)"
-  tmp_timetable_trips_csv="$(mktemp)"
-  tmp_timetable_stop_times_csv="$(mktemp)"
-  tmp_timetable_summary="$(mktemp)"
+  tmp_raw_csv="$(make_tmp_file)"
+  tmp_places_csv="$(make_tmp_file)"
+  tmp_points_csv="$(make_tmp_file)"
+  tmp_summary="$(make_tmp_file)"
+  tmp_transform_summary="$(make_tmp_file)"
+  tmp_timetable_trips_csv="$(make_tmp_file)"
+  tmp_timetable_stop_times_csv="$(make_tmp_file)"
+  tmp_timetable_summary="$(make_tmp_file)"
+  tmp_parser_log="$(make_tmp_file)"
+  tmp_timetable_log="$(make_tmp_file)"
   TMP_FILES+=(
     "$tmp_raw_csv"
     "$tmp_places_csv"
@@ -629,126 +680,141 @@ ingest_source() {
     "$tmp_timetable_trips_csv"
     "$tmp_timetable_stop_times_csv"
     "$tmp_timetable_summary"
+    "$tmp_parser_log"
+    "$tmp_timetable_log"
   )
+  printf '{}\n' >"$tmp_summary"
+  printf '{}\n' >"$tmp_timetable_summary"
 
-  parse_stops_started="$(now_ms)"
-  set +e
-  parser_output="$(python3 "${SCRIPT_DIR}/netex_extract_stops.py" \
-    --zip-path "$zip_path" \
-    --output-csv "$tmp_raw_csv" \
-    --summary-json "$tmp_summary" \
-    --source-id "$source_id" \
-    --country "$country" \
-    --provider-slug "$provider_slug" \
-    --snapshot-date "$snapshot_date" \
-    --manifest-sha256 "$manifest_sha" \
-    --import-run-id "$run_id" 2>&1)"
-  parser_status=$?
-  set -e
-  parse_stops_ms="$(( $(now_ms) - parse_stops_started ))"
+  stop_rows=0
+  place_rows=0
+  point_rows=0
+  trip_rows=0
+  trip_stop_time_rows=0
+  parse_stops_ms=0
+  transform_ms=0
+  parse_timetable_ms=0
 
-  if [[ $parser_status -ne 0 ]]; then
-    mark_run_failed "$run_id" "$dataset_id" "NeTEx parser failed for ${source_id} (${snapshot_date})"
-    printf '%s\n' "$parser_output" >&2
-    fail "Parser failed for '$source_id' (${snapshot_date})"
+  if [[ "$run_stop_topology" == "true" ]]; then
+    parse_stops_started="$(now_ms)"
+    set +e
+    python3 "${SCRIPT_DIR}/netex_extract_stops.py" \
+      --zip-path "$zip_path" \
+      --output-csv "$tmp_raw_csv" \
+      --summary-json "$tmp_summary" \
+      --source-id "$source_id" \
+      --country "$country" \
+      --provider-slug "$provider_slug" \
+      --snapshot-date "$snapshot_date" \
+      --manifest-sha256 "$manifest_sha" \
+      --import-run-id "$run_id" 2>&1 | tee "$tmp_parser_log"
+    parser_status="${PIPESTATUS[0]}"
+    set -e
+    parse_stops_ms="$(( $(now_ms) - parse_stops_started ))"
+
+    if [[ $parser_status -ne 0 ]]; then
+      mark_run_failed "$run_id" "$dataset_id" "NeTEx parser failed for ${source_id} (${snapshot_date})"
+      cat "$tmp_parser_log" >&2
+      fail "Parser failed for '$source_id' (${snapshot_date})"
+    fi
+
+    stop_rows="$(jq -r '.stopPlacesWritten // 0' "$tmp_summary")"
+    if [[ "$stop_rows" == "0" ]]; then
+      mark_run_failed "$run_id" "$dataset_id" "No StopPlace rows extracted for ${source_id} (${snapshot_date})"
+      fail "No StopPlace rows extracted for '$source_id' (${snapshot_date})"
+    fi
+
+    transform_started="$(now_ms)"
+    transform_extracted_csv \
+      "$tmp_raw_csv" \
+      "$tmp_places_csv" \
+      "$tmp_points_csv" \
+      "$dataset_id" \
+      "$source_id" \
+      "$country" >"$tmp_transform_summary"
+    transform_ms="$(( $(now_ms) - transform_started ))"
+
+    place_rows="$(jq -r '.stopPlacesRows // 0' "$tmp_transform_summary")"
+    point_rows="$(jq -r '.stopPointsRows // 0' "$tmp_transform_summary")"
+    if [[ "$place_rows" == "0" ]]; then
+      mark_run_failed "$run_id" "$dataset_id" "No rows prepared for raw_provider_stop_places (${source_id}, ${snapshot_date})"
+      fail "No stop-place rows prepared for '$source_id' (${snapshot_date})"
+    fi
   fi
 
-  stop_rows="$(jq -r '.stopPlacesWritten // 0' "$tmp_summary")"
-  if [[ "$stop_rows" == "0" ]]; then
-    mark_run_failed "$run_id" "$dataset_id" "No StopPlace rows extracted for ${source_id} (${snapshot_date})"
-    fail "No StopPlace rows extracted for '$source_id' (${snapshot_date})"
+  if [[ "$run_export_schedule" == "true" ]]; then
+    parse_timetable_started="$(now_ms)"
+    set +e
+    python3 "${SCRIPT_DIR}/netex_extract_timetable.py" \
+      --zip-path "$zip_path" \
+      --output-trips-csv "$tmp_timetable_trips_csv" \
+      --output-stop-times-csv "$tmp_timetable_stop_times_csv" \
+      --summary-json "$tmp_timetable_summary" \
+      --dataset-id "$dataset_id" \
+      --source-id "$source_id" \
+      --country "$country" \
+      --provider-slug "$provider_slug" \
+      --snapshot-date "$snapshot_date" \
+      --manifest-sha256 "$manifest_sha" \
+      --import-run-id "$run_id" 2>&1 | tee "$tmp_timetable_log"
+    timetable_status="${PIPESTATUS[0]}"
+    set -e
+    parse_timetable_ms="$(( $(now_ms) - parse_timetable_started ))"
+
+    if [[ $timetable_status -ne 0 ]]; then
+      mark_run_failed "$run_id" "$dataset_id" "NeTEx timetable parser failed for ${source_id} (${snapshot_date})"
+      cat "$tmp_timetable_log" >&2
+      fail "Timetable parser failed for '$source_id' (${snapshot_date})"
+    fi
+
+    trip_rows="$(jq -r '.tripsWritten // 0' "$tmp_timetable_summary")"
+    trip_stop_time_rows="$(jq -r '.tripStopTimesWritten // 0' "$tmp_timetable_summary")"
   fi
-
-  transform_started="$(now_ms)"
-  transform_extracted_csv \
-    "$tmp_raw_csv" \
-    "$tmp_places_csv" \
-    "$tmp_points_csv" \
-    "$dataset_id" \
-    "$source_id" \
-    "$country" >"$tmp_transform_summary"
-  transform_ms="$(( $(now_ms) - transform_started ))"
-
-  place_rows="$(jq -r '.stopPlacesRows // 0' "$tmp_transform_summary")"
-  point_rows="$(jq -r '.stopPointsRows // 0' "$tmp_transform_summary")"
-  if [[ "$place_rows" == "0" ]]; then
-    mark_run_failed "$run_id" "$dataset_id" "No rows prepared for raw_provider_stop_places (${source_id}, ${snapshot_date})"
-    fail "No stop-place rows prepared for '$source_id' (${snapshot_date})"
-  fi
-
-  parse_timetable_started="$(now_ms)"
-  set +e
-  timetable_output="$(python3 "${SCRIPT_DIR}/netex_extract_timetable.py" \
-    --zip-path "$zip_path" \
-    --output-trips-csv "$tmp_timetable_trips_csv" \
-    --output-stop-times-csv "$tmp_timetable_stop_times_csv" \
-    --summary-json "$tmp_timetable_summary" \
-    --dataset-id "$dataset_id" \
-    --source-id "$source_id" \
-    --country "$country" \
-    --provider-slug "$provider_slug" \
-    --snapshot-date "$snapshot_date" \
-    --manifest-sha256 "$manifest_sha" \
-    --import-run-id "$run_id" 2>&1)"
-  timetable_status=$?
-  set -e
-  parse_timetable_ms="$(( $(now_ms) - parse_timetable_started ))"
-
-  if [[ $timetable_status -ne 0 ]]; then
-    mark_run_failed "$run_id" "$dataset_id" "NeTEx timetable parser failed for ${source_id} (${snapshot_date})"
-    printf '%s\n' "$timetable_output" >&2
-    fail "Timetable parser failed for '$source_id' (${snapshot_date})"
-  fi
-
-  trip_rows="$(jq -r '.tripsWritten // 0' "$tmp_timetable_summary")"
-  trip_stop_time_rows="$(jq -r '.tripStopTimesWritten // 0' "$tmp_timetable_summary")"
 
   dataset_id_esc="$(db_sql_escape "$dataset_id")"
   db_write_started="$(now_ms)"
   db_psql -c "
-    DELETE FROM timetable_trips
-    WHERE dataset_id = '${dataset_id_esc}'::bigint;
-    DELETE FROM raw_provider_stop_points
-    WHERE dataset_id = '${dataset_id_esc}'::bigint;
-    DELETE FROM raw_provider_stop_places
-    WHERE dataset_id = '${dataset_id_esc}'::bigint;
+    $(if [[ "$run_export_schedule" == "true" ]]; then printf "DELETE FROM timetable_trips WHERE dataset_id = '%s'::bigint;" "$dataset_id_esc"; fi)
+    $(if [[ "$run_stop_topology" == "true" && "$BULK_RESET_STOP_TOPOLOGY" != "true" ]]; then printf "DELETE FROM raw_provider_stop_points WHERE dataset_id = '%s'::bigint; DELETE FROM raw_provider_stop_places WHERE dataset_id = '%s'::bigint;" "$dataset_id_esc" "$dataset_id_esc"; fi)
   " >/dev/null
 
-  db_copy_csv_from_file "$tmp_places_csv" "raw_provider_stop_places (
-    stop_place_id,
-    dataset_id,
-    source_id,
-    provider_stop_place_ref,
-    country,
-    stop_name,
-    latitude,
-    longitude,
-    parent_stop_place_ref,
-    topographic_place_ref,
-    public_code,
-    private_code,
-    hard_id,
-    raw_payload
-  )"
+  if [[ "$run_stop_topology" == "true" ]]; then
+    db_copy_csv_from_file "$tmp_places_csv" "raw_provider_stop_places (
+      stop_place_id,
+      dataset_id,
+      source_id,
+      provider_stop_place_ref,
+      country,
+      stop_name,
+      latitude,
+      longitude,
+      parent_stop_place_ref,
+      topographic_place_ref,
+      public_code,
+      private_code,
+      hard_id,
+      raw_payload
+    )"
 
-  db_copy_csv_from_file "$tmp_points_csv" "raw_provider_stop_points (
-    stop_point_id,
-    dataset_id,
-    source_id,
-    provider_stop_point_ref,
-    provider_stop_place_ref,
-    stop_place_id,
-    country,
-    stop_name,
-    latitude,
-    longitude,
-    topographic_place_ref,
-    platform_code,
-    track_code,
-    raw_payload
-  )"
+    db_copy_csv_from_file "$tmp_points_csv" "raw_provider_stop_points (
+      stop_point_id,
+      dataset_id,
+      source_id,
+      provider_stop_point_ref,
+      provider_stop_place_ref,
+      stop_place_id,
+      country,
+      stop_name,
+      latitude,
+      longitude,
+      topographic_place_ref,
+      platform_code,
+      track_code,
+      raw_payload
+    )"
+  fi
 
-  if [[ "$trip_rows" != "0" ]]; then
+  if [[ "$run_export_schedule" == "true" && "$trip_rows" != "0" ]]; then
     db_copy_csv_from_file "$tmp_timetable_trips_csv" "timetable_trips (
       trip_fact_id,
       dataset_id,
@@ -766,7 +832,7 @@ ingest_source() {
     )"
   fi
 
-  if [[ "$trip_stop_time_rows" != "0" ]]; then
+  if [[ "$run_export_schedule" == "true" && "$trip_stop_time_rows" != "0" ]]; then
     db_copy_csv_from_file "$tmp_timetable_stop_times_csv" "timetable_trip_stop_times (
       trip_fact_id,
       stop_sequence,
@@ -792,12 +858,14 @@ ingest_source() {
 
   finalize_started="$(now_ms)"
   stats_json="$(jq -c \
+    --arg ingestMode "$INGEST_MODE" \
     --argjson loadedStopPlaces "$place_rows" \
     --argjson loadedStopPoints "$point_rows" \
     --argjson loadedTrips "$trip_rows" \
     --argjson loadedTripStopTimes "$trip_stop_time_rows" \
     --slurpfile timetable "$tmp_timetable_summary" \
     '. + {
+      ingestMode: $ingestMode,
       loadedStopPlaces: $loadedStopPlaces,
       loadedStopPoints: $loadedStopPoints,
       loadedTrips: $loadedTrips,
@@ -837,7 +905,7 @@ ingest_source() {
   finalize_ms="$(( $(now_ms) - finalize_started ))"
   source_elapsed_ms="$(( $(now_ms) - source_started_at ))"
 
-  log "Completed '$source_id' (${snapshot_date}): stop_places=${place_rows} stop_points=${point_rows} trips=${trip_rows} stop_times=${trip_stop_time_rows} total_ms=${source_elapsed_ms} parse_stops_ms=${parse_stops_ms} transform_ms=${transform_ms} parse_timetable_ms=${parse_timetable_ms} db_write_ms=${db_write_ms} finalize_ms=${finalize_ms}"
+  log "Completed '$source_id' (${snapshot_date}) mode=${INGEST_MODE}: stop_places=${place_rows} stop_points=${point_rows} trips=${trip_rows} stop_times=${trip_stop_time_rows} total_ms=${source_elapsed_ms} parse_stops_ms=${parse_stops_ms} transform_ms=${transform_ms} parse_timetable_ms=${parse_timetable_ms} db_write_ms=${db_write_ms} finalize_ms=${finalize_ms}"
   return 0
 }
 
@@ -895,6 +963,14 @@ main() {
      | select($source_id != "" or (.pipelineEnabled != false))' "$CONFIG_FILE")
 
   [[ ${#sources[@]} -gt 0 ]] || fail "No matching netex sources selected"
+
+  if can_bulk_reset_stop_topology; then
+    BULK_RESET_STOP_TOPOLOGY="true"
+    log "Using bulk raw topology reset fast path for full-scope ${INGEST_MODE} run"
+    db_psql -c "
+      TRUNCATE TABLE raw_provider_stop_points, raw_provider_stop_places;
+    " >/dev/null
+  fi
 
   local source_json source_id
   local successful_sources=()

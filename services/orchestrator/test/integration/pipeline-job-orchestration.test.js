@@ -9,6 +9,23 @@ function cloneJob(job) {
   return job ? structuredClone(job) : null;
 }
 
+function createStageAwareClient() {
+  return {
+    async ensureReady() {},
+    async queryOne(sql) {
+      if (String(sql).includes(" AS fingerprint")) {
+        return { fingerprint: { stage: "stop-topology" } };
+      }
+      if (String(sql).includes(" AS summary")) {
+        return { summary: {} };
+      }
+      return null;
+    },
+    async runSql() {},
+    async end() {},
+  };
+}
+
 function createInMemoryJobsRepo() {
   const byId = new Map();
   const byKey = new Map();
@@ -110,7 +127,7 @@ test("ingest service job orchestration reuses completed job for same args", asyn
       };
     },
     createPostgisClient: () => ({
-      async ensureReady() {},
+      ...createStageAwareClient(),
     }),
     createPipelineJobsRepo: () => jobsRepo,
   });
@@ -147,7 +164,7 @@ test("ingest service enforces backpressure on concurrent start attempts", async 
       };
     },
     createPostgisClient: () => ({
-      async ensureReady() {},
+      ...createStageAwareClient(),
     }),
     createPipelineJobsRepo: () => jobsRepo,
   });

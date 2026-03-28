@@ -19,7 +19,7 @@ test("parseArgs applies benchmark defaults and validates scopes", () => {
   assert.equal(parsed.asOf, "2026-03-13");
   assert.equal(parsed.runs, 3);
   assert.equal(parsed.warmupRuns, 1);
-  assert.equal(parsed.fromStep, "global-stations");
+  assert.equal(parsed.fromStep, "stop-topology");
   assert.equal(parsed.toStep, "merge-queue");
   assert.deepEqual(parsed.skipSteps, ["reference-data"]);
 });
@@ -31,7 +31,11 @@ test("selectSteps returns the requested range", () => {
     skipSteps: [],
   });
 
-  assert.deepEqual(steps, ["reference-data", "merge-queue"]);
+  assert.deepEqual(steps, [
+    "reference-data",
+    "qa-network-projection",
+    "merge-queue",
+  ]);
 });
 
 test("selectSteps excludes skipped steps inside the requested range", () => {
@@ -41,7 +45,11 @@ test("selectSteps excludes skipped steps inside the requested range", () => {
     skipSteps: ["reference-data"],
   });
 
-  assert.deepEqual(steps, ["global-stations", "merge-queue"]);
+  assert.deepEqual(steps, [
+    "global-stations",
+    "qa-network-projection",
+    "merge-queue",
+  ]);
 });
 
 test("buildStepArgs passes country through to merge-queue benchmarks", () => {
@@ -55,6 +63,26 @@ test("buildStepArgs passes country through to merge-queue benchmarks", () => {
   );
 
   assert.deepEqual(args, ["--as-of", "2026-03-13", "--country", "DE"]);
+});
+
+test("buildStepArgs passes source and country through to qa-network-projection benchmarks", () => {
+  const args = buildStepArgs(
+    {
+      country: "DE",
+      asOf: "2026-03-13",
+      sourceId: "db-source",
+    },
+    "qa-network-projection",
+  );
+
+  assert.deepEqual(args, [
+    "--as-of",
+    "2026-03-13",
+    "--country",
+    "DE",
+    "--source-id",
+    "db-source",
+  ]);
 });
 
 test("aggregateBenchmarks summarizes measured runs and slow phases", () => {

@@ -13,6 +13,10 @@ const {
   buildGlobalMergeQueue,
 } = require("../domains/global/service");
 const { refreshExternalReferences } = require("../domains/reference/service");
+const {
+  extractQaNetworkContext,
+  projectQaNetworkContext,
+} = require("../domains/qa/pipeline-stage-service");
 const { createPostgisClient } = require("../data/postgis/client");
 const {
   createGlobalStationsRepo,
@@ -27,10 +31,13 @@ const execFileAsync = promisify(execFile);
 
 const STEP_IDS = [
   "fetch",
-  "ingest",
+  "stop-topology",
+  "qa-network-context",
   "global-stations",
   "reference-data",
+  "qa-network-projection",
   "merge-queue",
+  "export-schedule",
 ];
 
 function parseStepToken(raw) {
@@ -48,6 +55,12 @@ function parseStepToken(raw) {
   ) {
     return "merge-queue";
   }
+  if (token === "ingest" || token === "stop_topology" || token === "topology") {
+    return "stop-topology";
+  }
+  if (token === "qa-context" || token === "qa_network_context") {
+    return "qa-network-context";
+  }
   if (token === "global" || token === "stations") {
     return "global-stations";
   }
@@ -57,6 +70,16 @@ function parseStepToken(raw) {
     token === "external-references"
   ) {
     return "reference-data";
+  }
+  if (
+    token === "projection" ||
+    token === "project" ||
+    token === "qa_network_projection"
+  ) {
+    return "qa-network-projection";
+  }
+  if (token === "export" || token === "schedule") {
+    return "export-schedule";
   }
   return token;
 }
@@ -102,10 +125,10 @@ function printUsage() {
     "  --benchmark-id <id>      Output directory id under reports/qa/pipeline-benchmarks\n",
   );
   process.stdout.write(
-    "  --from-step <step>       Start from fetch|ingest|global-stations|reference-data|merge-queue\n",
+    "  --from-step <step>       Start from fetch|stop-topology|qa-network-context|global-stations|reference-data|qa-network-projection|merge-queue|export-schedule\n",
   );
   process.stdout.write(
-    "  --to-step <step>         Stop after fetch|ingest|global-stations|reference-data|merge-queue\n",
+    "  --to-step <step>         Stop after fetch|stop-topology|qa-network-context|global-stations|reference-data|qa-network-projection|merge-queue|export-schedule\n",
   );
   process.stdout.write(
     "  --skip-step <step>       Exclude a step inside the selected range (repeatable)\n",
@@ -140,7 +163,7 @@ function parseArgs(argv = []) {
     runs: 3,
     warmupRuns: 1,
     benchmarkId: "",
-    fromStep: "global-stations",
+    fromStep: "stop-topology",
     toStep: "merge-queue",
     skipSteps: [],
     country: "",
@@ -301,16 +324,22 @@ function buildStepArgs(options, stepId) {
   appendArgIfSet(args, "--as-of", options.asOf);
   if (
     stepId === "fetch" ||
-    stepId === "ingest" ||
+    stepId === "stop-topology" ||
+    stepId === "qa-network-context" ||
     stepId === "reference-data" ||
-    stepId === "merge-queue"
+    stepId === "qa-network-projection" ||
+    stepId === "merge-queue" ||
+    stepId === "export-schedule"
   ) {
     appendArgIfSet(args, "--country", options.country);
   }
   if (
     stepId === "fetch" ||
-    stepId === "ingest" ||
-    stepId === "global-stations"
+    stepId === "stop-topology" ||
+    stepId === "qa-network-context" ||
+    stepId === "global-stations" ||
+    stepId === "qa-network-projection" ||
+    stepId === "export-schedule"
   ) {
     appendArgIfSet(args, "--source-id", options.sourceId);
   }
@@ -333,15 +362,30 @@ function createStepDefinitions(options) {
         });
       },
     },
-    ingest: {
-      label: "Ingest NeTEx snapshots",
-      args: buildStepArgs(options, "ingest"),
+    "stop-topology": {
+      label: "Ingest stop topology only",
+      args: [
+        "--mode",
+        "stop-topology",
+        ...buildStepArgs(options, "stop-topology"),
+      ],
       run(runOptions) {
         return ingestNetex({
           rootDir: runOptions.rootDir,
           runId: runOptions.runId,
           args: runOptions.args,
           jobOrchestrationEnabled: false,
+        });
+      },
+    },
+    "qa-network-context": {
+      label: "Extract provider QA network context",
+      args: buildStepArgs(options, "qa-network-context"),
+      run(runOptions) {
+        return extractQaNetworkContext({
+          rootDir: runOptions.rootDir,
+          runId: runOptions.runId,
+          args: runOptions.args,
         });
       },
     },
@@ -372,6 +416,17 @@ function createStepDefinitions(options) {
         });
       },
     },
+    "qa-network-projection": {
+      label: "Project QA network context",
+      args: buildStepArgs(options, "qa-network-projection"),
+      run(runOptions) {
+        return projectQaNetworkContext({
+          rootDir: runOptions.rootDir,
+          runId: runOptions.runId,
+          args: runOptions.args,
+        });
+      },
+    },
     "merge-queue": {
       label: "Build global merge queue",
       args: buildStepArgs(options, "merge-queue"),
@@ -384,6 +439,22 @@ function createStepDefinitions(options) {
           skipUnchangedEnabled: false,
           onPhase: runOptions.onPhase,
           onInfo: runOptions.onInfo,
+        });
+      },
+    },
+    "export-schedule": {
+      label: "Ingest export schedule only",
+      args: [
+        "--mode",
+        "export-schedule",
+        ...buildStepArgs(options, "export-schedule"),
+      ],
+      run(runOptions) {
+        return ingestNetex({
+          rootDir: runOptions.rootDir,
+          runId: runOptions.runId,
+          args: runOptions.args,
+          jobOrchestrationEnabled: false,
         });
       },
     },
