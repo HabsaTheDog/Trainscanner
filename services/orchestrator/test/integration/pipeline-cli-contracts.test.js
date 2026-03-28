@@ -36,6 +36,14 @@ const cliCases = [
     expectedUsage: /Usage: scripts\/data\/report-review-queue\.sh/,
   },
   {
+    file: "qa-audit.js",
+    expectedUsage: /Usage: scripts\/data\/qa-audit\.sh/,
+  },
+  {
+    file: "qa-status.js",
+    expectedUsage: /Usage: scripts\/data\/qa-status\.sh/,
+  },
+  {
     file: "refresh-station-review.js",
     expectedUsage: /Usage: scripts\/data\/refresh-station-review\.sh/,
   },

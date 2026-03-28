@@ -61,6 +61,7 @@ test("build sql preserves phase markers and ported evidence primitives", () => {
     "building_station_context",
     "building_pair_seeds",
     "building_components",
+    "writing_pair_ledger",
     "writing_clusters",
     "writing_candidates",
     "writing_evidence",
@@ -109,6 +110,8 @@ test("build sql preserves phase markers and ported evidence primitives", () => {
   assert.match(BUILD_MERGE_QUEUE_SQL, /pair_seeds_shared_route/);
   assert.match(BUILD_MERGE_QUEUE_SQL, /pair_seeds_shared_adjacent/);
   assert.match(BUILD_MERGE_QUEUE_SQL, /_cluster_station_context/);
+  assert.match(BUILD_MERGE_QUEUE_SQL, /INSERT INTO qa_merge_eligible_pairs/);
+  assert.match(BUILD_MERGE_QUEUE_SQL, /eligiblePairs/);
   assert.match(BUILD_MERGE_QUEUE_SQL, /name_exact/);
   assert.match(BUILD_MERGE_QUEUE_SQL, /generic_name_penalty/);
 });
@@ -127,7 +130,7 @@ test("rebuildMergeQueue ensures evidence columns before running the script", asy
       }
       return {
         stdout:
-          '{"scopeCountry":"","scopeAsOf":"","scopeTag":"latest","clusters":0,"candidates":0,"evidence":0}',
+          '{"scopeCountry":"","scopeAsOf":"","scopeTag":"latest","clusters":0,"candidates":0,"evidence":0,"eligiblePairs":0}',
         stderr: "",
       };
     },
@@ -144,8 +147,9 @@ test("rebuildMergeQueue ensures evidence columns before running the script", asy
   );
 
   assert.equal(result.scopeTag, "latest");
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
   assert.match(calls[0], /ADD COLUMN IF NOT EXISTS status text/);
   assert.match(calls[1], /ADD COLUMN IF NOT EXISTS raw_value numeric/);
+  assert.match(calls[2], /CREATE TABLE IF NOT EXISTS qa_merge_eligible_pairs/);
   assert.deepEqual(infos, [{ key: "pair_seeds_total", value: "7" }]);
 });

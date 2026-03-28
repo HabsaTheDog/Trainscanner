@@ -15,8 +15,17 @@ const {
 const {
   createMergeQueueRepo,
 } = require("../../data/postgis/repositories/merge-queue-repo");
+const {
+  createPipelineStageRepo,
+} = require("../../data/postgis/repositories/pipeline-stage-repo");
 const { isStrictIsoDate } = require("../../core/date");
 const { readJobExecutionConfig } = require("../../core/runtime");
+const {
+  computeCodeFingerprint,
+  fingerprintsMatch,
+  normalizeStageScope,
+} = require("../pipeline/stage-runtime");
+const { runTrackedStage } = require("../pipeline/stage-tracking");
 
 function parseCountryScope(value) {
   const normalized = String(value || "")
@@ -206,6 +215,18 @@ function resolveSkipUnchangedEnabled(options = {}) {
   return !isTruthy(options.env?.QA_PIPELINE_DISABLE_SKIP_UNCHANGED);
 }
 
+const GLOBAL_STATIONS_CODE_PATHS = [
+  "services/orchestrator/src/domains/global/service.js",
+  "services/orchestrator/src/data/postgis/repositories/global-stations-repo.js",
+  "scripts/data/build-global-stations.sh",
+];
+
+const MERGE_QUEUE_CODE_PATHS = [
+  "services/orchestrator/src/domains/global/service.js",
+  "services/orchestrator/src/data/postgis/repositories/merge-queue-repo.js",
+  "scripts/data/build-global-merge-queue.sh",
+];
+
 function toMetricValue(rawValue) {
   const value = String(rawValue ?? "").trim();
   if (value === "") {
@@ -224,52 +245,6 @@ function toMetricValue(rawValue) {
     return Number.parseFloat(value);
   }
   return value;
-}
-
-function buildStateKey(stageId, scope = {}) {
-  return [
-    "pipeline_stage_fingerprint",
-    stageId,
-    scope.country || "ALL",
-    scope.asOf || "latest",
-    scope.sourceId || "ALL",
-  ].join(":");
-}
-
-async function readStageState(client, key) {
-  if (!client || typeof client.queryOne !== "function") {
-    return null;
-  }
-  try {
-    const row = await client.queryOne(
-      `SELECT value FROM system_state WHERE key = :'key'`,
-      { key },
-    );
-    return row?.value || null;
-  } catch {
-    return null;
-  }
-}
-
-async function writeStageState(client, key, value) {
-  if (!client || typeof client.runSql !== "function") {
-    return;
-  }
-  try {
-    await client.runSql(
-      `
-        INSERT INTO system_state (key, value)
-        VALUES (:'key', :'value'::jsonb)
-        ON CONFLICT (key) DO UPDATE
-        SET value = :'value'::jsonb,
-            updated_at = CURRENT_TIMESTAMP
-      `,
-      {
-        key,
-        value: JSON.stringify(value),
-      },
-    );
-  } catch {}
 }
 
 function createPhaseTracker({ stageId, envTuning = {}, now = Date.now } = {}) {
@@ -389,6 +364,8 @@ function createGlobalService(deps = {}) {
   const createStationsRepo =
     deps.createGlobalStationsRepo || createGlobalStationsRepo;
   const createQueueRepo = deps.createMergeQueueRepo || createMergeQueueRepo;
+  const createStageRepo =
+    deps.createPipelineStageRepo || createPipelineStageRepo;
 
   async function runWithJobOrchestration(options, config) {
     const rootDir = options.rootDir || process.cwd();
@@ -497,99 +474,101 @@ function createGlobalService(deps = {}) {
                 `[global-stations] ${label} country=${parsed.scope.country || "ALL"} scope=${parsed.scope.asOf || "latest"} source=${parsed.scope.sourceId || "ALL"}\n`,
               );
             };
-            const stateKey = buildStateKey("global-stations", parsed.scope);
-            let cacheHit = false;
-            let skippedUnchanged = false;
-            let summary;
             const skipUnchangedEnabled = resolveSkipUnchangedEnabled(options);
-
-            if (
-              skipUnchangedEnabled &&
-              typeof stationsRepo.getBuildFingerprint === "function" &&
-              typeof stationsRepo.getCurrentSummary === "function"
-            ) {
-              const fingerprint = await stationsRepo.getBuildFingerprint(
-                parsed.scope,
-              );
-              const previousState = await readStageState(client, stateKey);
-              if (
-                fingerprint &&
-                previousState?.fingerprint &&
-                JSON.stringify(previousState.fingerprint) ===
-                  JSON.stringify(fingerprint)
-              ) {
-                cacheHit = true;
-                skippedUnchanged = true;
-                metricsTracker.onInfo({ key: "cache_hit", value: "true" });
-                metricsTracker.onInfo({
-                  key: "skipped_unchanged",
-                  value: "true",
-                });
-                writeGlobalNotice("cache_hit=true");
-                writeGlobalNotice("skipped_unchanged=true");
-                summary = await stationsRepo.getCurrentSummary(parsed.scope);
-              } else {
-                summary = await stationsRepo.buildGlobalStations(parsed.scope, {
-                  onPhase(phase) {
-                    metricsTracker.onPhase(phase);
-                    if (typeof options.onPhase === "function") {
-                      options.onPhase({
-                        stageId: "global-stations",
-                        phase,
-                      });
-                    }
-                    writeGlobalNotice(`phase=${phase}`);
-                  },
-                  onInfo(info) {
-                    metricsTracker.onInfo(info);
-                    if (typeof options.onInfo === "function") {
-                      options.onInfo({
-                        stageId: "global-stations",
-                        ...info,
-                      });
-                    }
-                    writeGlobalNotice(`${info.key}=${info.value}`);
-                  },
-                });
-                await writeStageState(client, stateKey, {
-                  fingerprint,
-                  summary,
-                  updatedAt: new Date().toISOString(),
-                });
-              }
-            } else {
-              summary = await stationsRepo.buildGlobalStations(parsed.scope, {
-                onPhase(phase) {
-                  metricsTracker.onPhase(phase);
-                  if (typeof options.onPhase === "function") {
-                    options.onPhase({
-                      stageId: "global-stations",
-                      phase,
-                    });
-                  }
-                  writeGlobalNotice(`phase=${phase}`);
-                },
-                onInfo(info) {
-                  metricsTracker.onInfo(info);
-                  if (typeof options.onInfo === "function") {
-                    options.onInfo({
-                      stageId: "global-stations",
-                      ...info,
-                    });
-                  }
-                  writeGlobalNotice(`${info.key}=${info.value}`);
-                },
-              });
-            }
-
-            const metrics = metricsTracker.finalize({
-              cacheHit,
-              skippedUnchanged,
-            });
-            process.stdout.write(
-              `[global-stations] metrics=${JSON.stringify(metrics)}\n`,
+            const stageRepo = createStageRepo(client);
+            const normalizedScope = normalizeStageScope(parsed.scope);
+            const inputFingerprint =
+              typeof stationsRepo.getBuildFingerprint === "function"
+                ? await stationsRepo.getBuildFingerprint(parsed.scope)
+                : null;
+            const codeFingerprint = await computeCodeFingerprint(
+              rootDir,
+              GLOBAL_STATIONS_CODE_PATHS,
             );
-            process.stdout.write(`${JSON.stringify(summary)}\n`);
+            const previousMaterialization = await stageRepo.getMaterialization(
+              "global-stations",
+              normalizedScope.scopeKey,
+            );
+            const canSkip =
+              skipUnchangedEnabled &&
+              typeof stationsRepo.getCurrentSummary === "function" &&
+              inputFingerprint &&
+              previousMaterialization &&
+              previousMaterialization.status === "ready" &&
+              previousMaterialization.code_fingerprint === codeFingerprint &&
+              fingerprintsMatch(
+                previousMaterialization.input_fingerprint,
+                inputFingerprint,
+              );
+
+            const trackedResult = await runTrackedStage({
+              client,
+              stageRepo,
+              rootDir,
+              stageId: "global-stations",
+              scope: parsed.scope,
+              codePaths: GLOBAL_STATIONS_CODE_PATHS,
+              codeFingerprint,
+              inputFingerprint,
+              cacheHit: canSkip,
+              skippedUnchanged: canSkip,
+              execute: async () => {
+                let summary;
+                if (canSkip) {
+                  metricsTracker.onInfo({ key: "cache_hit", value: "true" });
+                  metricsTracker.onInfo({
+                    key: "skipped_unchanged",
+                    value: "true",
+                  });
+                  writeGlobalNotice("cache_hit=true");
+                  writeGlobalNotice("skipped_unchanged=true");
+                  summary = await stationsRepo.getCurrentSummary(parsed.scope);
+                } else {
+                  summary = await stationsRepo.buildGlobalStations(
+                    parsed.scope,
+                    {
+                      onPhase(phase) {
+                        metricsTracker.onPhase(phase);
+                        if (typeof options.onPhase === "function") {
+                          options.onPhase({
+                            stageId: "global-stations",
+                            phase,
+                          });
+                        }
+                        writeGlobalNotice(`phase=${phase}`);
+                      },
+                      onInfo(info) {
+                        metricsTracker.onInfo(info);
+                        if (typeof options.onInfo === "function") {
+                          options.onInfo({
+                            stageId: "global-stations",
+                            ...info,
+                          });
+                        }
+                        writeGlobalNotice(`${info.key}=${info.value}`);
+                      },
+                    },
+                  );
+                }
+
+                const metrics = metricsTracker.finalize({
+                  cacheHit: canSkip,
+                  skippedUnchanged: canSkip,
+                });
+                return {
+                  ok: true,
+                  summary,
+                  metrics,
+                  cacheHit: canSkip,
+                  skippedUnchanged: canSkip,
+                };
+              },
+            });
+
+            process.stdout.write(
+              `[global-stations] metrics=${JSON.stringify(trackedResult.metrics)}\n`,
+            );
+            process.stdout.write(`${JSON.stringify(trackedResult.summary)}\n`);
             if (parsed.reportLowConfidence) {
               const rows = await stationsRepo.listCoordinateAlerts(
                 parsed.scope,
@@ -601,10 +580,10 @@ function createGlobalService(deps = {}) {
             }
             return {
               ok: true,
-              summary,
-              metrics,
-              cacheHit,
-              skippedUnchanged,
+              summary: trackedResult.summary,
+              metrics: trackedResult.metrics,
+              cacheHit: trackedResult.cacheHit,
+              skippedUnchanged: trackedResult.skippedUnchanged,
             };
           } finally {
             await closeClient(client);
@@ -651,110 +630,111 @@ function createGlobalService(deps = {}) {
                   ? queueRepo.getTuningConfig()
                   : {},
             });
-            const stateKey = buildStateKey("merge-queue", scope);
-            let cacheHit = false;
-            let skippedUnchanged = false;
-            let summary;
             const skipUnchangedEnabled = resolveSkipUnchangedEnabled(options);
-
-            if (
-              skipUnchangedEnabled &&
-              typeof queueRepo.getRebuildFingerprint === "function" &&
-              typeof queueRepo.getCurrentSummary === "function"
-            ) {
-              const fingerprint = await queueRepo.getRebuildFingerprint(scope);
-              const previousState = await readStageState(client, stateKey);
-              if (
-                fingerprint &&
-                previousState?.fingerprint &&
-                JSON.stringify(previousState.fingerprint) ===
-                  JSON.stringify(fingerprint)
-              ) {
-                cacheHit = true;
-                skippedUnchanged = true;
-                tracker.onInfo({ key: "cache_hit", value: "true" });
-                tracker.onInfo({
-                  key: "skipped_unchanged",
-                  value: "true",
-                });
-                writeMergeQueueNotice("cache_hit=true", scope.country);
-                writeMergeQueueNotice("skipped_unchanged=true", scope.country);
-                summary = await queueRepo.getCurrentSummary(scope);
-              } else {
-                summary = await queueRepo.rebuildMergeQueue(
-                  scope,
-                  createMergeQueueCallbacks(
-                    writeMergeQueueNotice,
-                    scope.country,
-                    tracker,
-                    {
-                      onPhase(phase) {
-                        if (typeof options.onPhase === "function") {
-                          options.onPhase({
-                            stageId: "merge-queue",
-                            phase,
-                          });
-                        }
-                      },
-                      onInfo(info) {
-                        if (typeof options.onInfo === "function") {
-                          options.onInfo({
-                            stageId: "merge-queue",
-                            ...info,
-                          });
-                        }
-                      },
-                    },
-                  ),
-                );
-                await writeStageState(client, stateKey, {
-                  fingerprint,
-                  summary,
-                  updatedAt: new Date().toISOString(),
-                });
-              }
-            } else {
-              summary = await queueRepo.rebuildMergeQueue(
-                scope,
-                createMergeQueueCallbacks(
-                  writeMergeQueueNotice,
-                  scope.country,
-                  tracker,
-                  {
-                    onPhase(phase) {
-                      if (typeof options.onPhase === "function") {
-                        options.onPhase({
-                          stageId: "merge-queue",
-                          phase,
-                        });
-                      }
-                    },
-                    onInfo(info) {
-                      if (typeof options.onInfo === "function") {
-                        options.onInfo({
-                          stageId: "merge-queue",
-                          ...info,
-                        });
-                      }
-                    },
-                  },
-                ),
-              );
-            }
-            const metrics = tracker.finalize({
-              cacheHit,
-              skippedUnchanged,
-            });
-            process.stdout.write(
-              `[merge-queue] metrics=${JSON.stringify(metrics)}\n`,
+            const stageRepo = createStageRepo(client);
+            const normalizedScope = normalizeStageScope(scope);
+            const inputFingerprint =
+              typeof queueRepo.getRebuildFingerprint === "function"
+                ? await queueRepo.getRebuildFingerprint(scope)
+                : null;
+            const codeFingerprint = await computeCodeFingerprint(
+              rootDir,
+              MERGE_QUEUE_CODE_PATHS,
             );
-            process.stdout.write(`${JSON.stringify(summary)}\n`);
+            const previousMaterialization = await stageRepo.getMaterialization(
+              "merge-queue",
+              normalizedScope.scopeKey,
+            );
+            const canSkip =
+              skipUnchangedEnabled &&
+              typeof queueRepo.getCurrentSummary === "function" &&
+              inputFingerprint &&
+              previousMaterialization &&
+              previousMaterialization.status === "ready" &&
+              previousMaterialization.code_fingerprint === codeFingerprint &&
+              fingerprintsMatch(
+                previousMaterialization.input_fingerprint,
+                inputFingerprint,
+              );
+
+            const trackedResult = await runTrackedStage({
+              client,
+              stageRepo,
+              rootDir,
+              stageId: "merge-queue",
+              scope,
+              codePaths: MERGE_QUEUE_CODE_PATHS,
+              codeFingerprint,
+              inputFingerprint,
+              cacheHit: canSkip,
+              skippedUnchanged: canSkip,
+              execute: async () => {
+                let summary;
+                if (canSkip) {
+                  tracker.onInfo({ key: "cache_hit", value: "true" });
+                  tracker.onInfo({
+                    key: "skipped_unchanged",
+                    value: "true",
+                  });
+                  writeMergeQueueNotice("cache_hit=true", scope.country);
+                  writeMergeQueueNotice(
+                    "skipped_unchanged=true",
+                    scope.country,
+                  );
+                  summary = await queueRepo.getCurrentSummary(scope);
+                } else {
+                  summary = await queueRepo.rebuildMergeQueue(
+                    scope,
+                    createMergeQueueCallbacks(
+                      writeMergeQueueNotice,
+                      scope.country,
+                      tracker,
+                      {
+                        onPhase(phase) {
+                          if (typeof options.onPhase === "function") {
+                            options.onPhase({
+                              stageId: "merge-queue",
+                              phase,
+                            });
+                          }
+                        },
+                        onInfo(info) {
+                          if (typeof options.onInfo === "function") {
+                            options.onInfo({
+                              stageId: "merge-queue",
+                              ...info,
+                            });
+                          }
+                        },
+                      },
+                    ),
+                  );
+                }
+
+                const metrics = tracker.finalize({
+                  cacheHit: canSkip,
+                  skippedUnchanged: canSkip,
+                });
+                return {
+                  ok: true,
+                  summary,
+                  metrics,
+                  cacheHit: canSkip,
+                  skippedUnchanged: canSkip,
+                };
+              },
+            });
+
+            process.stdout.write(
+              `[merge-queue] metrics=${JSON.stringify(trackedResult.metrics)}\n`,
+            );
+            process.stdout.write(`${JSON.stringify(trackedResult.summary)}\n`);
             return {
               ok: true,
-              summary,
-              metrics,
-              cacheHit,
-              skippedUnchanged,
+              summary: trackedResult.summary,
+              metrics: trackedResult.metrics,
+              cacheHit: trackedResult.cacheHit,
+              skippedUnchanged: trackedResult.skippedUnchanged,
             };
           } finally {
             await closeClient(client);

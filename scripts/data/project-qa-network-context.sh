@@ -138,7 +138,8 @@ main() {
       FROM _qa_selected_datasets scope
       WHERE scope.source_id = gr.source_id
         AND (
-          scope.country IS NULL
+          gr.source_country IS NULL
+          OR scope.country IS NULL
           OR gr.source_country = scope.country
         )
     );
@@ -149,7 +150,8 @@ main() {
       FROM _qa_selected_datasets scope
       WHERE scope.source_id = ga.source_id
         AND (
-          scope.country IS NULL
+          ga.source_country IS NULL
+          OR scope.country IS NULL
           OR ga.source_country = scope.country
         )
     );
@@ -194,7 +196,13 @@ main() {
       routes.route_label,
       routes.transport_mode,
       scope.dataset_id,
-      scope.snapshot_date;
+      scope.snapshot_date
+    ON CONFLICT (global_station_id, source_id, route_label, transport_mode)
+    DO UPDATE SET
+      source_country = EXCLUDED.source_country,
+      pattern_hits = EXCLUDED.pattern_hits,
+      metadata = EXCLUDED.metadata,
+      updated_at = EXCLUDED.updated_at;
 
     INSERT INTO qa_global_station_adjacencies (
       global_station_id,
@@ -293,7 +301,18 @@ main() {
         scope.country,
         scope.dataset_id,
         scope.snapshot_date
-    ) rows;
+    ) rows
+    ON CONFLICT (
+      global_station_id,
+      neighbor_global_station_id,
+      direction,
+      source_id
+    )
+    DO UPDATE SET
+      source_country = EXCLUDED.source_country,
+      pattern_hits = EXCLUDED.pattern_hits,
+      metadata = EXCLUDED.metadata,
+      updated_at = EXCLUDED.updated_at;
   " >/dev/null
 
   summary="$(db_psql -At -c "

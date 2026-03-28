@@ -2,8 +2,22 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const { createGlobalService } = require("../../src/domains/global/service");
+const {
+  computeCodeFingerprint,
+} = require("../../src/domains/pipeline/stage-runtime");
 
 const SAFE_REPO_ROOT = `${process.cwd()}/.test-fixtures/repo`;
+
+function createStageRepoStub(overrides = {}) {
+  return {
+    async getMaterialization() {
+      return null;
+    },
+    async startRun() {},
+    async finishRun() {},
+    ...overrides,
+  };
+}
 
 function captureStdout() {
   const writes = [];
@@ -57,6 +71,7 @@ test("buildGlobalStations closes the db client and prints summary JSON", async (
           };
         },
       }),
+      createPipelineStageRepo: () => createStageRepoStub(),
     });
 
     await service.buildGlobalStations({
@@ -115,6 +130,7 @@ test("buildGlobalMergeQueue prints phase and info notices and closes the client"
           };
         },
       }),
+      createPipelineStageRepo: () => createStageRepoStub(),
     });
 
     await service.buildGlobalMergeQueue({
@@ -140,27 +156,18 @@ test("buildGlobalMergeQueue prints phase and info notices and closes the client"
   assert.match(output, /\[merge-queue\] metrics=/);
 });
 
-test("buildGlobalStations skips unchanged scopes when fingerprint matches", async () => {
+test("buildGlobalStations skips unchanged scopes when input and code fingerprint match", async () => {
   const stdout = captureStdout();
-  const stateWrites = [];
+  const codeFingerprint = await computeCodeFingerprint(SAFE_REPO_ROOT, [
+    "services/orchestrator/src/domains/global/service.js",
+    "services/orchestrator/src/data/postgis/repositories/global-stations-repo.js",
+    "scripts/data/build-global-stations.sh",
+  ]);
 
   try {
     const service = createGlobalService({
       createPostgisClient: () => ({
         async ensureReady() {},
-        async queryOne(sql) {
-          if (String(sql).includes("FROM system_state")) {
-            return {
-              value: {
-                fingerprint: { datasetIds: [101] },
-              },
-            };
-          }
-          return null;
-        },
-        async runSql(sql, params) {
-          stateWrites.push({ sql: String(sql), params });
-        },
         async end() {},
       }),
       createGlobalStationsRepo: () => ({
@@ -177,6 +184,16 @@ test("buildGlobalStations skips unchanged scopes when fingerprint matches", asyn
           };
         },
       }),
+      createPipelineStageRepo: () =>
+        createStageRepoStub({
+          async getMaterialization() {
+            return {
+              status: "ready",
+              input_fingerprint: { datasetIds: [101] },
+              code_fingerprint: codeFingerprint,
+            };
+          },
+        }),
     });
 
     const result = await service.buildGlobalStations({
@@ -191,7 +208,6 @@ test("buildGlobalStations skips unchanged scopes when fingerprint matches", asyn
     stdout.restore();
   }
 
-  assert.equal(stateWrites.length, 0);
   assert.match(stdout.writes.join(""), /\[global-stations\] cache_hit=true/);
   assert.match(
     stdout.writes.join(""),
@@ -245,6 +261,7 @@ test("job-orchestrated global build closes both orchestration and execution clie
           };
         },
       }),
+      createPipelineStageRepo: () => createStageRepoStub(),
     });
 
     await service.buildGlobalMergeQueue({
@@ -285,6 +302,7 @@ test("all-scope merge queue rebuild runs once globally", async () => {
           };
         },
       }),
+      createPipelineStageRepo: () => createStageRepoStub(),
     });
 
     await service.buildGlobalMergeQueue({

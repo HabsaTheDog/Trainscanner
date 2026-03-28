@@ -5,6 +5,7 @@ const {
   createPipelineStageRepo,
 } = require("../data/postgis/repositories/pipeline-stage-repo");
 const { parsePipelineCliArgs, printCliError } = require("./pipeline-common");
+const { loadQaAudit } = require("./qa-audit");
 
 const QA_STAGE_IDS = [
   "fetch",
@@ -19,7 +20,7 @@ const QA_STAGE_IDS = [
 
 function printUsage() {
   process.stdout.write(
-    "Usage: scripts/data/qa-status.sh [--country ISO2] [--as-of YYYY-MM-DD] [--source-id ID] [--json]\n",
+    "Usage: scripts/data/qa-status.sh [--country ISO2] [--as-of YYYY-MM-DD] [--source-id ID] [--with-audit] [--json]\n",
   );
 }
 
@@ -33,6 +34,7 @@ function parseArgs(argv = []) {
     country: "",
     asOf: "",
     sourceId: "",
+    withAudit: false,
     json: false,
     help: false,
   };
@@ -53,6 +55,9 @@ function parseArgs(argv = []) {
       case "--source-id":
         options.sourceId = String(args[index + 1] || "").trim();
         index += 1;
+        break;
+      case "--with-audit":
+        options.withAudit = true;
         break;
       case "--json":
         options.json = true;
@@ -147,9 +152,10 @@ async function run() {
     const filtered = applyScopeFilter(rows, options).map((row) =>
       summarizeRow(row, referenceStaleAfterHours),
     );
+    const audit = options.withAudit ? await loadQaAudit(client, options) : null;
 
     if (options.json) {
-      process.stdout.write(`${JSON.stringify({ stages: filtered })}\n`);
+      process.stdout.write(`${JSON.stringify({ stages: filtered, audit })}\n`);
       return;
     }
 
@@ -169,12 +175,42 @@ async function run() {
       );
       process.stdout.write("\n");
     }
+
+    if (audit) {
+      process.stdout.write(
+        [
+          "audit".padEnd(22, " "),
+          `scope=${audit.scope.scopeTag}`,
+          `structurally_healthy=${audit.status.structurallyHealthy}`,
+          `publish_ready=${audit.status.publishReady}`,
+          `candidate_mismatches=${audit.metrics.clustersWithCandidateCountMismatch}`,
+          `issue_mismatches=${audit.metrics.clustersWithIssueCountMismatch}`,
+          `too_few_candidates=${audit.metrics.clustersWithTooFewCandidates}`,
+          `clusters_without_pairs=${audit.metrics.clustersWithoutEligiblePairs}`,
+          `eligible_pairs_missing_cluster=${audit.metrics.eligiblePairsMissingClusterRow}`,
+          `eligible_pairs_missing_candidate_coverage=${audit.metrics.eligiblePairsMissingCandidateCoverage}`,
+          `final_without_decision=${audit.metrics.finalClustersWithoutDecision}`,
+        ].join(" "),
+      );
+      process.stdout.write("\n");
+    }
   } finally {
     await client.end();
   }
 }
 
-void run().catch((error) => {
-  printCliError("qa-status", error, "QA status failed");
-  process.exit(1);
-});
+module.exports = {
+  run,
+  _internal: {
+    parseArgs,
+    applyScopeFilter,
+    summarizeRow,
+  },
+};
+
+if (require.main === module) {
+  void run().catch((error) => {
+    printCliError("qa-status", error, "QA status failed");
+    process.exit(1);
+  });
+}
