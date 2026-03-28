@@ -11,12 +11,12 @@ test("mapClusterCandidate preserves provider feed context alongside provenance",
     display_name: "Station A",
     provider_labels: ["db_regio_feed", "delfi_feed"],
     aliases: ["Station A Hbf"],
-    context_summary: {
+    network_summary: {
       provider_source_count: "2",
-      route_count: "4",
+      route_pattern_count: "4",
     },
-    service_context: {
-      lines: ["ICE 42"],
+    network_context: {
+      routes: [{ label: "ICE 42", transport_mode: "rail", pattern_hits: 4 }],
       stop_points: ["Platform 1", "Platform 2"],
     },
     provenance: {
@@ -46,8 +46,8 @@ test("mapClusterCandidate preserves provider feed context alongside provenance",
   });
 
   assert.deepEqual(mapped.provider_labels, ["db_regio_feed", "delfi_feed"]);
-  assert.equal(mapped.context_summary.provider_source_count, 2);
-  assert.deepEqual(mapped.service_context.stop_points, [
+  assert.equal(mapped.network_summary.provider_source_count, 2);
+  assert.deepEqual(mapped.network_context.stop_points, [
     "Platform 1",
     "Platform 2",
   ]);

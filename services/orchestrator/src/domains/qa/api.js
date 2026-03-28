@@ -126,17 +126,17 @@ function normalizeCandidateMetadata(candidate) {
     candidate && typeof candidate.metadata === "object" && candidate.metadata
       ? candidate.metadata
       : {};
-  const serviceContext =
-    metadata.service_context &&
-    typeof metadata.service_context === "object" &&
-    !Array.isArray(metadata.service_context)
-      ? metadata.service_context
+  const networkContext =
+    metadata.network_context &&
+    typeof metadata.network_context === "object" &&
+    !Array.isArray(metadata.network_context)
+      ? metadata.network_context
       : {};
-  const contextSummary =
-    metadata.context_summary &&
-    typeof metadata.context_summary === "object" &&
-    !Array.isArray(metadata.context_summary)
-      ? metadata.context_summary
+  const networkSummary =
+    metadata.network_summary &&
+    typeof metadata.network_summary === "object" &&
+    !Array.isArray(metadata.network_summary)
+      ? metadata.network_summary
       : {};
 
   return {
@@ -148,29 +148,58 @@ function normalizeCandidateMetadata(candidate) {
           ? "coordinates_present"
           : "missing_coordinates"),
     ).trim(),
-    service_context: {
-      lines: uniqueStrings(normalizeTextArray(serviceContext.lines)),
-      incoming: uniqueStrings(normalizeTextArray(serviceContext.incoming)),
-      outgoing: uniqueStrings(normalizeTextArray(serviceContext.outgoing)),
+    network_context: {
+      routes: Array.isArray(networkContext.routes)
+        ? networkContext.routes
+            .map((row) => ({
+              label: String(row?.label || "").trim(),
+              transport_mode: String(row?.transport_mode || "").trim(),
+              pattern_hits:
+                Number.parseInt(String(row?.pattern_hits ?? 0), 10) || 0,
+            }))
+            .filter((row) => row.label.length > 0)
+        : [],
+      incoming: Array.isArray(networkContext.incoming)
+        ? networkContext.incoming
+            .map((row) => ({
+              station_name: String(row?.station_name || "").trim(),
+              pattern_hits:
+                Number.parseInt(String(row?.pattern_hits ?? 0), 10) || 0,
+            }))
+            .filter((row) => row.station_name.length > 0)
+        : [],
+      outgoing: Array.isArray(networkContext.outgoing)
+        ? networkContext.outgoing
+            .map((row) => ({
+              station_name: String(row?.station_name || "").trim(),
+              pattern_hits:
+                Number.parseInt(String(row?.pattern_hits ?? 0), 10) || 0,
+            }))
+            .filter((row) => row.station_name.length > 0)
+        : [],
       stop_points: uniqueStrings(
-        normalizeTextArray(serviceContext.stop_points),
-      ),
-      transport_modes: uniqueStrings(
-        normalizeTextArray(serviceContext.transport_modes),
+        normalizeTextArray(networkContext.stop_points),
       ),
     },
-    context_summary: {
-      route_count:
-        Number.parseInt(String(contextSummary.route_count ?? 0), 10) || 0,
-      incoming_count:
-        Number.parseInt(String(contextSummary.incoming_count ?? 0), 10) || 0,
-      outgoing_count:
-        Number.parseInt(String(contextSummary.outgoing_count ?? 0), 10) || 0,
+    network_summary: {
+      route_pattern_count:
+        Number.parseInt(String(networkSummary.route_pattern_count ?? 0), 10) ||
+        0,
+      incoming_neighbor_count:
+        Number.parseInt(
+          String(networkSummary.incoming_neighbor_count ?? 0),
+          10,
+        ) || 0,
+      outgoing_neighbor_count:
+        Number.parseInt(
+          String(networkSummary.outgoing_neighbor_count ?? 0),
+          10,
+        ) || 0,
       stop_point_count:
-        Number.parseInt(String(contextSummary.stop_point_count ?? 0), 10) || 0,
+        Number.parseInt(String(networkSummary.stop_point_count ?? 0), 10) || 0,
       provider_source_count:
         Number.parseInt(
-          String(contextSummary.provider_source_count ?? 0),
+          String(networkSummary.provider_source_count ?? 0),
           10,
         ) || 0,
     },

@@ -54,8 +54,8 @@ test("global merge cluster types expose global station identifiers", () => {
   assert.ok(fields.display_name, "candidate should expose display_name");
   assert.ok(fields.aliases, "candidate should expose aliases");
   assert.ok(fields.coord_status, "candidate should expose coord_status");
-  assert.ok(fields.service_context, "candidate should expose service_context");
-  assert.ok(fields.context_summary, "candidate should expose context_summary");
+  assert.ok(fields.network_context, "candidate should expose network_context");
+  assert.ok(fields.network_summary, "candidate should expose network_summary");
   assert.ok(fields.provenance, "candidate should expose provenance");
   assert.ok(
     fields.external_reference_summary,
@@ -65,11 +65,11 @@ test("global merge cluster types expose global station identifiers", () => {
     fields.external_reference_matches,
     "candidate should expose external_reference_matches",
   );
-  const serviceContextType = schema.getType("GlobalCandidateServiceContext");
-  assert.ok(serviceContextType, "GlobalCandidateServiceContext should exist");
+  const serviceContextType = schema.getType("GlobalCandidateNetworkContext");
+  assert.ok(serviceContextType, "GlobalCandidateNetworkContext should exist");
   assert.ok(
     serviceContextType.getFields().stop_points,
-    "service context should expose stop_points",
+    "network context should expose stop_points",
   );
 });
 

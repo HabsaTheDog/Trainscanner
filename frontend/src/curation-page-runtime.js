@@ -54,17 +54,26 @@ const CLUSTER_DETAIL_QUERY = `
           historical_stop_place_refs
           coord_input_stop_place_refs
         }
-        service_context {
-          lines
-          incoming
-          outgoing
+        network_context {
+          routes {
+            label
+            transport_mode
+            pattern_hits
+          }
+          incoming {
+            station_name
+            pattern_hits
+          }
+          outgoing {
+            station_name
+            pattern_hits
+          }
           stop_points
-          transport_modes
         }
-        context_summary {
-          route_count
-          incoming_count
-          outgoing_count
+        network_summary {
+          route_pattern_count
+          incoming_neighbor_count
+          outgoing_neighbor_count
           stop_point_count
           provider_source_count
         }
@@ -175,131 +184,6 @@ const REFERENCE_VIEWPORT_QUERY = `
       source_url
       matched_candidate_ids
       match_count
-    }
-  }
-`;
-
-const LEGACY_CLUSTER_DETAIL_QUERY = `
-  query GetGlobalClusterDetail($id: ID!) {
-    globalCluster(id: $id) {
-      cluster_id
-      country_tags
-      status
-      effective_status
-      has_workspace
-      workspace_version
-      workspace
-      scope_tag
-      severity
-      display_name
-      summary
-      candidates {
-        global_station_id
-        display_name
-        candidate_rank
-        country
-        provider_labels
-        aliases
-        coord_status
-        provenance {
-          has_active_source_mappings
-          active_source_ids
-          active_source_labels
-          active_stop_place_refs
-          historical_source_ids
-          historical_source_labels
-          historical_stop_place_refs
-          coord_input_stop_place_refs
-        }
-        service_context {
-          lines
-          incoming
-          outgoing
-          transport_modes
-        }
-        context_summary {
-          route_count
-          incoming_count
-          outgoing_count
-          stop_point_count
-          provider_source_count
-        }
-        external_reference_summary {
-          source_counts
-          primary_match_count
-          strong_match_count
-          probable_match_count
-        }
-        external_reference_matches {
-          source_id
-          external_id
-          display_name
-          category
-          lat
-          lon
-          distance_meters
-          match_status
-          match_confidence
-          source_url
-          is_primary
-        }
-        lat
-        lon
-      }
-      reference_overlay {
-        source_id
-        external_id
-        display_name
-        category
-        lat
-        lon
-        source_url
-        matched_candidate_ids
-      }
-      evidence {
-        evidence_type
-        source_global_station_id
-        target_global_station_id
-        category
-        is_seed_rule
-        seed_reasons
-        status
-        score
-        raw_value
-        details
-      }
-      evidence_summary
-      pair_summaries {
-        source_global_station_id
-        target_global_station_id
-        supporting_count
-        warning_count
-        missing_count
-        informational_count
-        score
-        summary
-        categories
-        seed_reasons
-        highlights
-      }
-      decisions {
-        decision_id
-        operation
-        note
-        requested_by
-        created_at
-        members {
-          global_station_id
-          action
-          group_label
-          metadata
-        }
-      }
-      edit_history {
-        event_type
-        requested_by
-        created_at
-      }
     }
   }
 `;
@@ -426,23 +310,8 @@ export function formatResultsLabel(totalCount, locale) {
   return `${safeCount.toLocaleString(locale)} results`;
 }
 
-function shouldRetryClusterDetailWithoutStopPoints(error) {
-  const message = String(error?.message || "");
-  return /Cannot query field "stop_points" on type "GlobalCandidateServiceContext"\.?/.test(
-    message,
-  );
-}
-
 export async function fetchClusterDetail(clusterId) {
-  let data;
-  try {
-    data = await graphqlQuery(CLUSTER_DETAIL_QUERY, { id: clusterId });
-  } catch (error) {
-    if (!shouldRetryClusterDetailWithoutStopPoints(error)) {
-      throw error;
-    }
-    data = await graphqlQuery(LEGACY_CLUSTER_DETAIL_QUERY, { id: clusterId });
-  }
+  const data = await graphqlQuery(CLUSTER_DETAIL_QUERY, { id: clusterId });
   if (!data.globalCluster) return null;
   return normalizeClusterDetail(data.globalCluster);
 }
@@ -513,20 +382,38 @@ export function normalizeClusterDetail(cluster) {
       },
       lat: candidate.lat,
       lon: candidate.lon,
-      service_context: {
-        lines: candidate.service_context?.lines || [],
-        incoming: candidate.service_context?.incoming || [],
-        outgoing: candidate.service_context?.outgoing || [],
-        stop_points: candidate.service_context?.stop_points || [],
-        transport_modes: candidate.service_context?.transport_modes || [],
+      network_context: {
+        routes: Array.isArray(candidate.network_context?.routes)
+          ? candidate.network_context.routes.map((row) => ({
+              label: row.label || "",
+              transport_mode: row.transport_mode || "",
+              pattern_hits: row.pattern_hits ?? 0,
+            }))
+          : [],
+        incoming: Array.isArray(candidate.network_context?.incoming)
+          ? candidate.network_context.incoming.map((row) => ({
+              station_name: row.station_name || "",
+              pattern_hits: row.pattern_hits ?? 0,
+            }))
+          : [],
+        outgoing: Array.isArray(candidate.network_context?.outgoing)
+          ? candidate.network_context.outgoing.map((row) => ({
+              station_name: row.station_name || "",
+              pattern_hits: row.pattern_hits ?? 0,
+            }))
+          : [],
+        stop_points: candidate.network_context?.stop_points || [],
       },
-      context_summary: {
-        route_count: candidate.context_summary?.route_count ?? 0,
-        incoming_count: candidate.context_summary?.incoming_count ?? 0,
-        outgoing_count: candidate.context_summary?.outgoing_count ?? 0,
-        stop_point_count: candidate.context_summary?.stop_point_count ?? 0,
+      network_summary: {
+        route_pattern_count:
+          candidate.network_summary?.route_pattern_count ?? 0,
+        incoming_neighbor_count:
+          candidate.network_summary?.incoming_neighbor_count ?? 0,
+        outgoing_neighbor_count:
+          candidate.network_summary?.outgoing_neighbor_count ?? 0,
+        stop_point_count: candidate.network_summary?.stop_point_count ?? 0,
         provider_source_count:
-          candidate.context_summary?.provider_source_count ?? 0,
+          candidate.network_summary?.provider_source_count ?? 0,
       },
       external_reference_summary: {
         source_counts:

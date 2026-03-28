@@ -138,8 +138,8 @@ const schema = buildSchema(`
     provider_labels: [String!]
     aliases: [String!]
     coord_status: String
-    service_context: GlobalCandidateServiceContext
-    context_summary: GlobalCandidateContextSummary
+    network_context: GlobalCandidateNetworkContext
+    network_summary: GlobalCandidateNetworkSummary
     provenance: GlobalCandidateProvenance
     external_reference_summary: GlobalCandidateExternalReferenceSummary
     external_reference_matches: [GlobalCandidateExternalReferenceMatch!]
@@ -189,18 +189,28 @@ const schema = buildSchema(`
     coord_input_stop_place_refs: [String!]
   }
 
-  type GlobalCandidateServiceContext {
-    lines: [String!]
-    incoming: [String!]
-    outgoing: [String!]
-    stop_points: [String!]
-    transport_modes: [String!]
+  type GlobalCandidateNetworkRoute {
+    label: String
+    transport_mode: String
+    pattern_hits: Int
   }
 
-  type GlobalCandidateContextSummary {
-    route_count: Int
-    incoming_count: Int
-    outgoing_count: Int
+  type GlobalCandidateNetworkNeighbor {
+    station_name: String
+    pattern_hits: Int
+  }
+
+  type GlobalCandidateNetworkContext {
+    routes: [GlobalCandidateNetworkRoute!]
+    incoming: [GlobalCandidateNetworkNeighbor!]
+    outgoing: [GlobalCandidateNetworkNeighbor!]
+    stop_points: [String!]
+  }
+
+  type GlobalCandidateNetworkSummary {
+    route_pattern_count: Int
+    incoming_neighbor_count: Int
+    outgoing_neighbor_count: Int
     stop_point_count: Int
     provider_source_count: Int
   }

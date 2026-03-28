@@ -65,17 +65,17 @@ function mapClusterCandidate(candidate) {
     : [];
   const labels = resolveSourceLabels(providerLabels);
   const aliases = Array.isArray(candidate.aliases) ? candidate.aliases : [];
-  const serviceContext =
-    candidate.service_context &&
-    typeof candidate.service_context === "object" &&
-    !Array.isArray(candidate.service_context)
-      ? candidate.service_context
+  const networkContext =
+    candidate.network_context &&
+    typeof candidate.network_context === "object" &&
+    !Array.isArray(candidate.network_context)
+      ? candidate.network_context
       : {};
-  const contextSummary =
-    candidate.context_summary &&
-    typeof candidate.context_summary === "object" &&
-    !Array.isArray(candidate.context_summary)
-      ? candidate.context_summary
+  const networkSummary =
+    candidate.network_summary &&
+    typeof candidate.network_summary === "object" &&
+    !Array.isArray(candidate.network_summary)
+      ? candidate.network_summary
       : {};
   return {
     ...candidate,
@@ -84,27 +84,36 @@ function mapClusterCandidate(candidate) {
     provider_labels: labels.map(String),
     aliases: aliases.map(String),
     coord_status: candidate.coord_status || "missing_coordinates",
-    service_context: {
-      lines: Array.isArray(serviceContext.lines) ? serviceContext.lines : [],
-      incoming: Array.isArray(serviceContext.incoming)
-        ? serviceContext.incoming
+    network_context: {
+      routes: Array.isArray(networkContext.routes)
+        ? networkContext.routes.map((row) => ({
+            label: row?.label || "",
+            transport_mode: row?.transport_mode || "",
+            pattern_hits: toInt(row?.pattern_hits),
+          }))
         : [],
-      outgoing: Array.isArray(serviceContext.outgoing)
-        ? serviceContext.outgoing
+      incoming: Array.isArray(networkContext.incoming)
+        ? networkContext.incoming.map((row) => ({
+            station_name: row?.station_name || "",
+            pattern_hits: toInt(row?.pattern_hits),
+          }))
         : [],
-      stop_points: Array.isArray(serviceContext.stop_points)
-        ? serviceContext.stop_points
+      outgoing: Array.isArray(networkContext.outgoing)
+        ? networkContext.outgoing.map((row) => ({
+            station_name: row?.station_name || "",
+            pattern_hits: toInt(row?.pattern_hits),
+          }))
         : [],
-      transport_modes: Array.isArray(serviceContext.transport_modes)
-        ? serviceContext.transport_modes
+      stop_points: Array.isArray(networkContext.stop_points)
+        ? networkContext.stop_points
         : [],
     },
-    context_summary: {
-      route_count: toInt(contextSummary.route_count),
-      incoming_count: toInt(contextSummary.incoming_count),
-      outgoing_count: toInt(contextSummary.outgoing_count),
-      stop_point_count: toInt(contextSummary.stop_point_count),
-      provider_source_count: toInt(contextSummary.provider_source_count),
+    network_summary: {
+      route_pattern_count: toInt(networkSummary.route_pattern_count),
+      incoming_neighbor_count: toInt(networkSummary.incoming_neighbor_count),
+      outgoing_neighbor_count: toInt(networkSummary.outgoing_neighbor_count),
+      stop_point_count: toInt(networkSummary.stop_point_count),
+      provider_source_count: toInt(networkSummary.provider_source_count),
     },
     provenance: {
       has_active_source_mappings:

@@ -63,10 +63,10 @@ test("normalizeCandidateMetadata exposes active and historical provenance", () =
     latitude: null,
     longitude: null,
     metadata: {
-      service_context: {
+      network_context: {
         stop_points: ["Platform 1", " Platform 1 ", "Platform 2"],
       },
-      context_summary: {
+      network_summary: {
         provider_source_count: "0",
       },
     },
@@ -78,7 +78,7 @@ test("normalizeCandidateMetadata exposes active and historical provenance", () =
   });
 
   assert.equal(normalized.coord_status, "missing_coordinates");
-  assert.deepEqual(normalized.service_context.stop_points, [
+  assert.deepEqual(normalized.network_context.stop_points, [
     "Platform 1",
     "Platform 2",
   ]);

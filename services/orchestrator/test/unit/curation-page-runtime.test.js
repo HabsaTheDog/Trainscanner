@@ -106,17 +106,22 @@ test("normalizeClusterDetail preserves canonical evidence taxonomy fields", asyn
         candidate_rank: 1,
         provider_labels: ["DB Regio"],
         coord_status: "missing_coordinates",
-        service_context: {
-          lines: ["ICE 42", "RB 12"],
-          incoming: ["Berlin Hbf"],
-          outgoing: ["Hamburg Hbf", "Munich Hbf"],
+        network_context: {
+          routes: [
+            { label: "ICE 42", transport_mode: "rail", pattern_hits: 2 },
+            { label: "RB 12", transport_mode: "rail", pattern_hits: 2 },
+          ],
+          incoming: [{ station_name: "Berlin Hbf", pattern_hits: 3 }],
+          outgoing: [
+            { station_name: "Hamburg Hbf", pattern_hits: 2 },
+            { station_name: "Munich Hbf", pattern_hits: 3 },
+          ],
           stop_points: ["Platform 1", "Platform 2"],
-          transport_modes: ["rail"],
         },
-        context_summary: {
-          route_count: 4,
-          incoming_count: 3,
-          outgoing_count: 5,
+        network_summary: {
+          route_pattern_count: 4,
+          incoming_neighbor_count: 1,
+          outgoing_neighbor_count: 2,
           stop_point_count: 6,
           provider_source_count: 2,
         },
@@ -208,14 +213,14 @@ test("normalizeClusterDetail preserves canonical evidence taxonomy fields", asyn
   assert.equal(detail.evidence[0].category, "core_match");
   assert.equal(detail.evidence[0].is_seed_rule, true);
   assert.deepEqual(detail.evidence[0].seed_reasons, ["exact_name"]);
-  assert.deepEqual(detail.candidates[0].service_context.stop_points, [
+  assert.deepEqual(detail.candidates[0].network_context.stop_points, [
     "Platform 1",
     "Platform 2",
   ]);
-  assert.deepEqual(detail.candidates[0].context_summary, {
-    route_count: 4,
-    incoming_count: 3,
-    outgoing_count: 5,
+  assert.deepEqual(detail.candidates[0].network_summary, {
+    route_pattern_count: 4,
+    incoming_neighbor_count: 1,
+    outgoing_neighbor_count: 2,
     stop_point_count: 6,
     provider_source_count: 2,
   });
@@ -254,7 +259,7 @@ test("normalizeClusterDetail preserves canonical evidence taxonomy fields", asyn
   assert.deepEqual(detail.pair_summaries[0].seed_reasons, ["exact_name"]);
 });
 
-test("fetchClusterDetail retries without stop_points for older GraphQL schemas", async () => {
+test("fetchClusterDetail requests network context from GraphQL", async () => {
   const { fetchClusterDetail } = await loadRuntimeModule();
   const previousFetch = globalThis.fetch;
   const previousWindow = globalThis.window;
@@ -269,22 +274,6 @@ test("fetchClusterDetail retries without stop_points for older GraphQL schemas",
     const payload = JSON.parse(String(options.body || "{}"));
     queries.push(payload.query || "");
 
-    if (queries.length === 1) {
-      return {
-        ok: true,
-        async json() {
-          return {
-            errors: [
-              {
-                message:
-                  'Cannot query field "stop_points" on type "GlobalCandidateServiceContext".',
-              },
-            ],
-          };
-        },
-      };
-    }
-
     return {
       ok: true,
       async json() {
@@ -298,16 +287,24 @@ test("fetchClusterDetail retries without stop_points for older GraphQL schemas",
                 {
                   global_station_id: "station_legacy",
                   display_name: "Legacy Station",
-                  service_context: {
-                    lines: ["ICE 42"],
-                    incoming: ["Berlin Hbf"],
-                    outgoing: ["Hamburg Hbf"],
-                    transport_modes: ["rail"],
+                  network_context: {
+                    routes: [
+                      {
+                        label: "ICE 42",
+                        transport_mode: "rail",
+                        pattern_hits: 1,
+                      },
+                    ],
+                    incoming: [{ station_name: "Berlin Hbf", pattern_hits: 1 }],
+                    outgoing: [
+                      { station_name: "Hamburg Hbf", pattern_hits: 1 },
+                    ],
+                    stop_points: [],
                   },
-                  context_summary: {
-                    route_count: 1,
-                    incoming_count: 1,
-                    outgoing_count: 1,
+                  network_summary: {
+                    route_pattern_count: 1,
+                    incoming_neighbor_count: 1,
+                    outgoing_neighbor_count: 1,
                     stop_point_count: 2,
                     provider_source_count: 1,
                   },
@@ -328,11 +325,11 @@ test("fetchClusterDetail retries without stop_points for older GraphQL schemas",
   try {
     const detail = await fetchClusterDetail("cluster_legacy");
 
-    assert.equal(queries.length, 2);
+    assert.equal(queries.length, 1);
+    assert.match(queries[0], /network_context/);
     assert.match(queries[0], /stop_points/);
-    assert.doesNotMatch(queries[1], /stop_points/);
-    assert.deepEqual(detail.candidates[0].service_context.stop_points, []);
-    assert.equal(detail.candidates[0].context_summary.stop_point_count, 2);
+    assert.deepEqual(detail.candidates[0].network_context.stop_points, []);
+    assert.equal(detail.candidates[0].network_summary.stop_point_count, 2);
   } finally {
     globalThis.fetch = previousFetch;
     globalThis.window = previousWindow;

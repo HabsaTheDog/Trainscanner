@@ -24,16 +24,34 @@ export const candidateShape = PropTypes.shape({
     historical_stop_place_refs: PropTypes.arrayOf(PropTypes.string),
     coord_input_stop_place_refs: PropTypes.arrayOf(PropTypes.string),
   }),
-  service_context: PropTypes.shape({
-    lines: PropTypes.arrayOf(PropTypes.string),
-    incoming: PropTypes.arrayOf(PropTypes.string),
-    outgoing: PropTypes.arrayOf(PropTypes.string),
+  network_context: PropTypes.shape({
+    routes: PropTypes.arrayOf(
+      PropTypes.shape({
+        label: PropTypes.string,
+        transport_mode: PropTypes.string,
+        pattern_hits: PropTypes.number,
+      }),
+    ),
+    incoming: PropTypes.arrayOf(
+      PropTypes.shape({
+        station_name: PropTypes.string,
+        pattern_hits: PropTypes.number,
+      }),
+    ),
+    outgoing: PropTypes.arrayOf(
+      PropTypes.shape({
+        station_name: PropTypes.string,
+        pattern_hits: PropTypes.number,
+      }),
+    ),
     stop_points: PropTypes.arrayOf(PropTypes.string),
-    transport_modes: PropTypes.arrayOf(PropTypes.string),
   }),
-  context_summary: PropTypes.shape({
+  network_summary: PropTypes.shape({
     stop_point_count: PropTypes.number,
-    route_count: PropTypes.number,
+    route_pattern_count: PropTypes.number,
+    incoming_neighbor_count: PropTypes.number,
+    outgoing_neighbor_count: PropTypes.number,
+    provider_source_count: PropTypes.number,
   }),
   external_reference_summary: PropTypes.shape({
     source_counts: PropTypes.object,

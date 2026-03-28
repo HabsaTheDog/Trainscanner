@@ -855,18 +855,47 @@ const quickCountryFilterCodes = [
 const inp =
   "w-full bg-surface-2 border border-border-strong rounded-lg px-3 py-2 text-text-primary text-sm focus:outline-none focus:border-amber/40 transition-colors";
 
-function normalizeLabelList(values) {
+function normalizeContextItems(items, kind = "string") {
   const seen = new Set();
-  const labels = [];
-  for (const value of Array.isArray(values) ? values : []) {
-    const label = String(value || "").trim();
-    if (!label || seen.has(label)) {
+  const rows = [];
+  for (const rawItem of Array.isArray(items) ? items : []) {
+    if (kind === "route") {
+      const label = String(rawItem?.label || "").trim();
+      if (!label) continue;
+      const transportMode = String(rawItem?.transport_mode || "").trim();
+      const patternHits = Number(rawItem?.pattern_hits || 0);
+      const key = `${label}|${transportMode}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push({
+        key,
+        label: transportMode
+          ? `${label} (${formatLabel(transportMode)})`
+          : label,
+        badge: Number.isFinite(patternHits) ? patternHits : 0,
+      });
       continue;
     }
+    if (kind === "neighbor") {
+      const label = String(rawItem?.station_name || "").trim();
+      if (!label) continue;
+      const patternHits = Number(rawItem?.pattern_hits || 0);
+      if (seen.has(label)) continue;
+      seen.add(label);
+      rows.push({
+        key: label,
+        label,
+        badge: Number.isFinite(patternHits) ? patternHits : 0,
+      });
+      continue;
+    }
+
+    const label = String(rawItem || "").trim();
+    if (!label || seen.has(label)) continue;
     seen.add(label);
-    labels.push(label);
+    rows.push({ key: label, label, badge: null });
   }
-  return labels;
+  return rows;
 }
 
 function CandidateContextSection({
@@ -874,12 +903,15 @@ function CandidateContextSection({
   items,
   totalCount,
   emptyLabel = "None available.",
+  itemKind = "string",
+  showExtraItems = true,
+  helperText = "",
 }) {
-  const labels = normalizeLabelList(items);
-  const safeTotalCount = Number.isFinite(totalCount)
-    ? totalCount
-    : labels.length;
-  const extraCount = Math.max(safeTotalCount - labels.length, 0);
+  const rows = normalizeContextItems(items, itemKind);
+  const safeTotalCount = Number.isFinite(totalCount) ? totalCount : rows.length;
+  const extraCount = showExtraItems
+    ? Math.max(safeTotalCount - rows.length, 0)
+    : 0;
 
   return (
     <section className="rounded-xl border border-border bg-surface-2 px-3 py-2.5 space-y-2">
@@ -889,11 +921,15 @@ function CandidateContextSection({
         </div>
         <Tag>{safeTotalCount}</Tag>
       </div>
-      {labels.length > 0 ? (
+      {helperText ? (
+        <p className="m-0 text-xs text-text-muted">{helperText}</p>
+      ) : null}
+      {rows.length > 0 ? (
         <div className="flex flex-wrap gap-1.5">
-          {labels.map((label) => (
-            <Tag key={`${title}-${label}`} title={label}>
-              {label}
+          {rows.map((row) => (
+            <Tag key={`${title}-${row.key}`} title={row.label}>
+              {row.label}
+              {row.badge !== null ? ` · ${row.badge}` : ""}
             </Tag>
           ))}
           {extraCount > 0 && <Tag>+{extraCount} more</Tag>}
@@ -1039,7 +1075,7 @@ function CandidateCard({
 }) {
   const c = item.candidate || {};
   const memberNames = getCompositeMembers(item, workspace, candidateMap) || [];
-  const ctx = c.context_summary || {};
+  const ctx = c.network_summary || {};
   const kB = resolveKindAccent(item.kind);
   const ref = item.ref;
   const providerLabels = item.provider_labels || [];
@@ -1064,11 +1100,11 @@ function CandidateCard({
     historicalSourceLabels.length > 0 ||
     coordInputStopPlaceRefs.length > 0 ||
     showOrphanedBadge;
-  const serviceContext = c.service_context || {};
-  const routeLines = serviceContext.lines || [];
-  const incomingStops = serviceContext.incoming || [];
-  const outgoingStops = serviceContext.outgoing || [];
-  const stopPoints = serviceContext.stop_points || [];
+  const networkContext = c.network_context || {};
+  const routeLines = networkContext.routes || [];
+  const incomingStops = networkContext.incoming || [];
+  const outgoingStops = networkContext.outgoing || [];
+  const stopPoints = networkContext.stop_points || [];
   const fg =
     item.kind === "group" ? findWorkspaceEntity("group", workspace, ref) : null;
   const fm =
@@ -1112,7 +1148,7 @@ function CandidateCard({
             <>
               <div className="flex flex-wrap gap-1.5 mt-2">
                 <Tag>{ctx.stop_point_count ?? 0} stops</Tag>
-                <Tag>{ctx.route_count ?? 0} routes</Tag>
+                <Tag>{ctx.route_pattern_count ?? 0} patterns</Tag>
                 <TooltipTag tooltip={providerFeedsTooltip}>
                   {providerLabels.length} feeds
                 </TooltipTag>
@@ -1289,8 +1325,11 @@ function CandidateCard({
             <CandidateContextSection
               title="Routes"
               items={routeLines}
-              totalCount={ctx.route_count}
-              emptyLabel="No route context."
+              totalCount={ctx.route_pattern_count}
+              emptyLabel="No route-pattern context."
+              itemKind="route"
+              showExtraItems={false}
+              helperText="Pattern hits count unique service patterns, not trips."
             />
             <CandidateContextSection
               title="Stop Points"
@@ -1301,14 +1340,18 @@ function CandidateCard({
             <CandidateContextSection
               title="Incoming"
               items={incomingStops}
-              totalCount={ctx.incoming_count}
-              emptyLabel="No incoming context."
+              totalCount={ctx.incoming_neighbor_count}
+              emptyLabel="No incoming neighbor context."
+              itemKind="neighbor"
+              helperText="Badges show unique pattern hits from each upstream neighbor."
             />
             <CandidateContextSection
               title="Outgoing"
               items={outgoingStops}
-              totalCount={ctx.outgoing_count}
-              emptyLabel="No outgoing context."
+              totalCount={ctx.outgoing_neighbor_count}
+              emptyLabel="No outgoing neighbor context."
+              itemKind="neighbor"
+              helperText="Badges show unique pattern hits to each downstream neighbor."
             />
           </div>
         </div>

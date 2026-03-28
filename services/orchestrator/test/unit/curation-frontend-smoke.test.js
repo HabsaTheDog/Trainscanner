@@ -90,9 +90,9 @@ test("curation frontend includes required component structure and runtime utilit
   assert.match(runtimeJs, /resolveGlobalCluster/);
   assert.match(runtimeJs, /workspace_version/);
   assert.match(runtimeJs, /effective_status/);
-  assert.match(runtimeJs, /service_context/);
+  assert.match(runtimeJs, /network_context/);
   assert.match(runtimeJs, /stop_points/);
-  assert.match(runtimeJs, /context_summary/);
+  assert.match(runtimeJs, /network_summary/);
   assert.match(runtimeJs, /coord_status/);
   assert.match(runtimeJs, /provenance/);
   assert.match(runtimeJs, /active_source_labels/);
