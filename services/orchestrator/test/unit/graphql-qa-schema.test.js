@@ -43,6 +43,20 @@ test("workspace mutations are present", () => {
   }
 });
 
+test("AI evaluation queries and mutations are present", () => {
+  const queryFields = schema.getQueryType().getFields();
+  assert.ok(queryFields.aiEvaluationConfigs);
+  assert.ok(queryFields.aiEvaluationRuns);
+  assert.ok(queryFields.aiEvaluationGoldSets);
+
+  const mutationFields = schema.getMutationType().getFields();
+  assert.ok(mutationFields.createAiEvaluationConfigVersion);
+  assert.ok(mutationFields.runAiEvaluationPreview);
+  assert.ok(mutationFields.startAiEvaluationBenchmark);
+  assert.ok(mutationFields.createAiEvaluationGoldSet);
+  assert.ok(mutationFields.replaceAiEvaluationGoldSetItems);
+});
+
 test("global merge cluster types expose global station identifiers", () => {
   const candidateType = schema.getType("GlobalClusterCandidate");
   assert.ok(candidateType, "GlobalClusterCandidate should exist");

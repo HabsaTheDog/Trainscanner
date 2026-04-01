@@ -5,6 +5,12 @@ const schema = buildSchema(`
     health: String
     globalClusters(country: String, status: String): GlobalMergeClusterConnection!
     globalCluster(id: ID!): GlobalMergeClusterDetail
+    aiEvaluationConfigs: [AiEvaluationConfig!]!
+    aiEvaluationConfig(configKey: ID!, version: Int): AiEvaluationConfig
+    aiEvaluationRuns(status: String, mode: String, limit: Int): AiEvaluationRunConnection!
+    aiEvaluationRun(runId: ID!): AiEvaluationRun
+    aiEvaluationGoldSets: [AiEvaluationGoldSet!]!
+    aiEvaluationGoldSet(goldSetId: ID!): AiEvaluationGoldSet
     globalReferenceViewport(
       minLat: Float!
       minLon: Float!
@@ -17,6 +23,11 @@ const schema = buildSchema(`
 
   type Mutation {
     requestAiScore(clusterId: ID!): AiScoreResult
+    createAiEvaluationConfigVersion(input: AiEvaluationConfigInput!): AiEvaluationConfig!
+    runAiEvaluationPreview(clusterId: ID!, input: AiEvaluationPreviewInput!): AiEvaluationPreviewResult!
+    startAiEvaluationBenchmark(input: AiEvaluationBenchmarkInput!): AiEvaluationRun!
+    createAiEvaluationGoldSet(input: AiEvaluationGoldSetInput!): AiEvaluationGoldSet!
+    replaceAiEvaluationGoldSetItems(goldSetId: ID!, clusterIds: [ID!]!): AiEvaluationGoldSet!
     submitGlobalMergeDecision(clusterId: ID!, input: GlobalMergeDecisionInput!): GlobalMergeDecisionResult!
     saveGlobalClusterWorkspace(clusterId: ID!, input: GlobalClusterWorkspaceInput!): GlobalClusterWorkspaceResult!
     undoGlobalClusterWorkspace(clusterId: ID!, input: GlobalClusterWorkspaceActorInput): GlobalClusterWorkspaceResult!
@@ -61,6 +72,48 @@ const schema = buildSchema(`
     clear_workspace_on_dismiss: Boolean
   }
 
+  input AiEvaluationConfigInput {
+    config_key: String
+    name: String!
+    description: String
+    provider: String
+    model: String!
+    model_params: JSON
+    system_prompt: String!
+    context_sections: [String!]
+    context_preamble: String
+    created_by: String
+  }
+
+  input AiEvaluationPreviewInput {
+    config_key: String
+    version: Int
+    draft_config: JSON
+    requested_by: String
+  }
+
+  input AiEvaluationBenchmarkFilterInput {
+    country: String
+    severity: String
+    limit: Int
+  }
+
+  input AiEvaluationBenchmarkInput {
+    config_key: String!
+    version: Int!
+    dataset_source: String!
+    gold_set_id: ID
+    filters: AiEvaluationBenchmarkFilterInput
+    requested_by: String
+  }
+
+  input AiEvaluationGoldSetInput {
+    slug: String
+    name: String!
+    description: String
+    created_by: String
+  }
+
   type GlobalMergeDecisionResult {
     ok: Boolean!
     cluster_id: ID!
@@ -82,6 +135,110 @@ const schema = buildSchema(`
     decision_id: ID
     status: String!
     next_cluster_id: ID
+  }
+
+  type AiEvaluationConfig {
+    config_id: ID!
+    config_key: String!
+    version: Int!
+    name: String!
+    description: String!
+    provider: String!
+    model: String!
+    model_params: JSON
+    system_prompt: String!
+    context_sections: [String!]!
+    context_preamble: String!
+    created_by: String!
+    created_at: String
+  }
+
+  type AiEvaluationTruth {
+    cluster_id: ID!
+    verdict: String!
+    merges: JSON
+    groups: JSON
+    keep_separate_sets: JSON
+    renames: JSON
+  }
+
+  type AiEvaluationPrediction {
+    verdict: String
+    merges: JSON
+    groups: JSON
+    keep_separate_sets: JSON
+    renames: JSON
+    rationale: String
+    confidence_score: Float
+  }
+
+  type AiEvaluationRunItem {
+    run_item_id: ID!
+    merge_cluster_id: ID!
+    item_status: String!
+    truth_snapshot: JSON
+    input_context_snapshot: JSON
+    prompt_snapshot: JSON
+    raw_model_response: JSON
+    normalized_prediction: JSON
+    comparison: JSON
+    token_usage: JSON
+    estimated_cost_usd: Float
+    latency_ms: Int
+    error_message: String
+    created_at: String
+    updated_at: String
+  }
+
+  type AiEvaluationRun {
+    run_id: ID!
+    mode: String!
+    status: String!
+    dataset_source: String
+    gold_set_id: ID
+    config_id: ID
+    config_snapshot: JSON
+    filters: JSON
+    summary_metrics: JSON
+    progress: JSON
+    requested_by: String
+    error_message: String
+    temporal_workflow_id: String
+    created_at: String
+    started_at: String
+    ended_at: String
+    items: [AiEvaluationRunItem!]
+  }
+
+  type AiEvaluationRunConnection {
+    items: [AiEvaluationRun!]!
+    total_count: Int!
+    limit: Int!
+  }
+
+  type AiEvaluationGoldSetItem {
+    gold_set_id: ID!
+    merge_cluster_id: ID!
+    note: String!
+    truth_snapshot: JSON
+    created_at: String
+  }
+
+  type AiEvaluationGoldSet {
+    gold_set_id: ID!
+    slug: String!
+    name: String!
+    description: String!
+    is_frozen: Boolean!
+    created_by: String!
+    created_at: String
+    updated_at: String
+    items: [AiEvaluationGoldSetItem!]
+  }
+
+  type AiEvaluationPreviewResult {
+    run: AiEvaluationRun!
+    result: AiEvaluationRunItem!
   }
 
   type GlobalMergeCluster {
@@ -208,6 +365,7 @@ const schema = buildSchema(`
   }
 
   type GlobalCandidateNetworkSummary {
+    route_count: Int
     route_pattern_count: Int
     incoming_neighbor_count: Int
     outgoing_neighbor_count: Int

@@ -872,7 +872,7 @@ function normalizeContextItems(items, kind = "string") {
         label: transportMode
           ? `${label} (${formatLabel(transportMode)})`
           : label,
-        badge: Number.isFinite(patternHits) ? patternHits : 0,
+        badge: Number.isFinite(patternHits) && patternHits > 0 ? patternHits : null,
       });
       continue;
     }
@@ -1148,7 +1148,9 @@ function CandidateCard({
             <>
               <div className="flex flex-wrap gap-1.5 mt-2">
                 <Tag>{ctx.stop_point_count ?? 0} stops</Tag>
-                <Tag>{ctx.route_pattern_count ?? 0} patterns</Tag>
+                <Tag>
+                  {ctx.route_count ?? ctx.route_pattern_count ?? routeLines.length} lines
+                </Tag>
                 <TooltipTag tooltip={providerFeedsTooltip}>
                   {providerLabels.length} feeds
                 </TooltipTag>
@@ -1323,13 +1325,13 @@ function CandidateCard({
           </section>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             <CandidateContextSection
-              title="Routes"
+              title="Lines"
               items={routeLines}
-              totalCount={ctx.route_pattern_count}
-              emptyLabel="No route-pattern context."
+              totalCount={
+                ctx.route_count ?? ctx.route_pattern_count ?? routeLines.length
+              }
+              emptyLabel="No line context."
               itemKind="route"
-              showExtraItems={false}
-              helperText="Pattern hits count unique service patterns, not trips."
             />
             <CandidateContextSection
               title="Stop Points"
@@ -2212,6 +2214,14 @@ export function CurationPage() {
               )}
 
               <div className="flex items-center gap-1.5 ml-auto">
+                {activeClusterId ? (
+                  <a
+                    href={`/ai-evaluation.html?clusterId=${encodeURIComponent(activeClusterId)}`}
+                    className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-blue-dim border border-blue/20 text-blue no-underline hover:bg-blue/20 transition-colors"
+                  >
+                    Evaluate
+                  </a>
+                ) : null}
                 <button
                   type="button"
                   onClick={hAi}

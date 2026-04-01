@@ -22,6 +22,7 @@ export default defineConfig({
     chunkSizeWarningLimit: 1100,
     rollupOptions: {
       input: {
+        aiEvaluation: path.resolve(__dirname, "ai-evaluation.html"),
         home: path.resolve(__dirname, "index.html"),
         curation: path.resolve(__dirname, "curation.html"),
       },

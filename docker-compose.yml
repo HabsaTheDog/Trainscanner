@@ -73,8 +73,14 @@ services:
       context: ./services/ai-scoring
     container_name: trainscanner-ai-scoring
     restart: unless-stopped
+    env_file:
+      - .env
+      - .env.local
     ports:
       - "8000:8000"
+    environment:
+      AI_EVALUATION_DEFAULT_MODEL: ${AI_EVALUATION_DEFAULT_MODEL:-openrouter/auto}
+      LITELLM_BASE_URL: ${LITELLM_BASE_URL:-}
 
   orchestrator:
     build:
@@ -97,6 +103,7 @@ services:
       STATE_DIR: /app/state
       DATA_DIR: /app/data
       FRONTEND_DIR: /app/frontend/dist
+      AI_SCORING_URL: http://ai-scoring:8000
       MOTIS_BASE_URL: http://motis:8080
       MOTIS_HEALTH_PATH: /health
       MOTIS_HEALTH_ACCEPT_404: "true"

@@ -9,10 +9,23 @@ const {
   saveGlobalClusterWorkspace,
   undoGlobalClusterWorkspace,
 } = require("../domains/qa/api");
+const {
+  defaultService: aiEvaluationService,
+} = require("../domains/ai-evaluation/service");
 const { resolveSourceLabels } = require("../domains/source-discovery/catalog");
 
+function resolveAiServiceUrl() {
+  if (process.env.AI_SCORING_URL) {
+    return process.env.AI_SCORING_URL;
+  }
+  if (fs.existsSync("/.dockerenv")) {
+    return "http://ai-scoring:8000";
+  }
+  return "http://localhost:8000";
+}
+
 async function requestAiScoreBridge(clusterId, candidates) {
-  const aiServiceUrl = process.env.AI_SCORING_URL || "http://localhost:8000";
+  const aiServiceUrl = resolveAiServiceUrl();
   try {
     const payload = {
       cluster_id: clusterId,
@@ -89,7 +102,10 @@ function mapClusterCandidate(candidate) {
         ? networkContext.routes.map((row) => ({
             label: row?.label || "",
             transport_mode: row?.transport_mode || "",
-            pattern_hits: toInt(row?.pattern_hits),
+            pattern_hits:
+              row?.pattern_hits === null || row?.pattern_hits === undefined
+                ? undefined
+                : toInt(row?.pattern_hits),
           }))
         : [],
       incoming: Array.isArray(networkContext.incoming)
@@ -109,7 +125,12 @@ function mapClusterCandidate(candidate) {
         : [],
     },
     network_summary: {
-      route_pattern_count: toInt(networkSummary.route_pattern_count),
+      route_count: toInt(
+        networkSummary.route_count ?? networkSummary.route_pattern_count,
+      ),
+      route_pattern_count: toInt(
+        networkSummary.route_pattern_count ?? networkSummary.route_count,
+      ),
       incoming_neighbor_count: toInt(networkSummary.incoming_neighbor_count),
       outgoing_neighbor_count: toInt(networkSummary.outgoing_neighbor_count),
       stop_point_count: toInt(networkSummary.stop_point_count),
@@ -270,6 +291,31 @@ const rootValue = {
     };
   },
 
+  aiEvaluationConfigs: async () => aiEvaluationService.listConfigs(),
+
+  aiEvaluationConfig: async ({ configKey, version }) =>
+    aiEvaluationService.getConfig(configKey, version ?? null),
+
+  aiEvaluationRuns: async ({ status, mode, limit }) => {
+    const items = await aiEvaluationService.listRuns({
+      status: status || "",
+      mode: mode || "",
+      limit: Number.isFinite(limit) ? limit : 20,
+    });
+    return {
+      items,
+      total_count: items.length,
+      limit: Number.isFinite(limit) ? limit : 20,
+    };
+  },
+
+  aiEvaluationRun: async ({ runId }) => aiEvaluationService.getRun(runId),
+
+  aiEvaluationGoldSets: async () => aiEvaluationService.listGoldSets(),
+
+  aiEvaluationGoldSet: async ({ goldSetId }) =>
+    aiEvaluationService.getGoldSet(goldSetId),
+
   globalReferenceViewport: async ({
     minLat,
     minLon,
@@ -317,6 +363,21 @@ const rootValue = {
     };
   },
 
+  createAiEvaluationConfigVersion: async ({ input }) =>
+    aiEvaluationService.createConfigVersion(input),
+
+  runAiEvaluationPreview: async ({ clusterId, input }) =>
+    aiEvaluationService.runPreview(clusterId, input),
+
+  startAiEvaluationBenchmark: async ({ input }) =>
+    aiEvaluationService.startBenchmark(input),
+
+  createAiEvaluationGoldSet: async ({ input }) =>
+    aiEvaluationService.createGoldSet(input),
+
+  replaceAiEvaluationGoldSetItems: async ({ goldSetId, clusterIds }) =>
+    aiEvaluationService.replaceGoldSetItems(goldSetId, clusterIds),
+
   submitGlobalMergeDecision: async ({ clusterId, input }) =>
     postGlobalClusterDecision(clusterId, input),
 
@@ -342,3 +403,4 @@ module.exports = {
     mapClusterCandidate,
   },
 };
+const fs = require("node:fs");

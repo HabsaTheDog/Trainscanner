@@ -20,6 +20,14 @@ export function HomePage() {
           >
             &rarr; Open QA Curation Dashboard
           </a>
+          <div className="mt-2">
+            <a
+              href="/ai-evaluation.html"
+              className="font-semibold text-teal no-underline hover:text-white transition-colors"
+            >
+              &rarr; Open AI Evaluation
+            </a>
+          </div>
         </div>
 
         <div className="grid grid-cols-[auto_1fr_auto] gap-2 items-center mb-3">

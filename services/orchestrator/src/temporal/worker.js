@@ -19,6 +19,7 @@ function buildWorkerOptions(connection, dbClient, config) {
     taskQueue: "review-pipeline",
     workflowsPath: require.resolve("./workflows"),
     activities: {
+      ...activities.createAiEvaluationActivities(dbClient, config),
       ...activities.createIngestionActivities(dbClient, config),
       ...activities.createCompileActivities(dbClient, config),
     },
